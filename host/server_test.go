@@ -527,8 +527,8 @@ func TestListDatabasesScopedToKey(t *testing.T) {
 		t.Fatalf("prefix key on beta: %d %v", st, l)
 	}
 	mk, _ := mkKey(t, n, map[string]interface{}{"scope": "read", "db": host.MasterAccountsDB})
-	if st, l := list(mk); st != 200 || len(l) != 0 {
-		t.Fatalf("a non-owner key must never list the master accounts db: %d %v", st, l)
+	if st, l := list(mk); st != 200 || len(l) != 1 || l[0] != host.MasterAccountsDB {
+		t.Fatalf("the accounts-service key (scoped to the master db) may list only that db: %d %v", st, l)
 	}
 	ak, _ := mkKey(t, n, map[string]interface{}{"scope": "read", "db": "*"})
 	if st, l := list(ak); st != 200 || !has(l, "alpha") || !has(l, "beta") || has(l, host.MasterAccountsDB) {

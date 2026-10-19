@@ -347,7 +347,6 @@ func TestErrorRedactsKeys(t *testing.T) {
 	}
 }
 
-
 func TestAnnualCheckoutAndWebhook(t *testing.T) {
 	s, f, h := testService(t)
 	for _, tier := range []string{"basic", "bronze", "silver", "gold", "platinum", "emerald"} {

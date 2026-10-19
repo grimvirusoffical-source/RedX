@@ -388,7 +388,7 @@ func (s *Service) checkoutRoute(w http.ResponseWriter, r *http.Request, id Ident
 		ID           string `json:"id"`
 		ClientSecret string `json:"client_secret"`
 	}
-	idem := "redx-checkout-"+id.Sub+"-"+iv+"-"+in.IdempotencyKey
+	idem := "redx-checkout-" + id.Sub + "-" + iv + "-" + in.IdempotencyKey
 	if err := s.stripe.Do(r.Context(), "POST", "/v1/checkout/sessions", f, idem, &sess); err != nil {
 		s.stripeErr(w, err)
 		return
