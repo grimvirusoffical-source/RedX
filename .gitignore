@@ -10,3 +10,12 @@ data/
 *.log
 __pycache__/
 *.pyc
+# build outputs at the repository root (go build ./cmd/... without -o)
+/redx
+/redxd
+/redx-launcher
+/redx.exe
+/redxd.exe
+/redx-launcher.exe
+*.test
+*.out
