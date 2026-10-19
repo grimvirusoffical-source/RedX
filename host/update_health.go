@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -15,6 +16,7 @@ type reqSample struct {
 	at     time.Time
 	status int
 	ms     float64
+	node   string
 }
 
 // statusCapture records the HTTP status and still supports websocket upgrade.
@@ -56,11 +58,49 @@ func (h *Host) noteRequest(status int, d time.Duration) {
 		return
 	}
 	h.metricMu.Lock()
-	h.metricSamples = append(h.metricSamples, reqSample{at: time.Now(), status: status, ms: float64(d) / float64(time.Millisecond)})
+	h.metricSamples = append(h.metricSamples, reqSample{
+		at: time.Now(), status: status, ms: float64(d) / float64(time.Millisecond), node: h.NodeID,
+	})
 	if len(h.metricSamples) > 512 {
 		h.metricSamples = append([]reqSample(nil), h.metricSamples[len(h.metricSamples)-512:]...)
 	}
 	h.metricMu.Unlock()
+}
+
+// observeRequest records one served request for rollout health.
+// Cluster replication, client waits, long-polls and client-induced 504s are left out:
+// a read key can hold a request open, and an idle follower's poll is not user traffic.
+func (h *Host) observeRequest(r *http.Request, status int, d time.Duration) {
+	if healthExcluded(r, status) {
+		return
+	}
+	h.noteRequest(status, d)
+}
+
+func healthExcluded(r *http.Request, status int) bool {
+	if r == nil || r.URL == nil {
+		return true
+	}
+	p := r.URL.Path
+	if p == "/v1/cluster" || strings.HasPrefix(p, "/v1/cluster/") {
+		return true
+	}
+	if r.Header.Get("X-Redx-Wait-Seq") != "" || r.Header.Get("X-Redx-Wait-Replicas") != "" {
+		return true
+	}
+	if _, ok := r.URL.Query()["wait_ms"]; ok {
+		return true
+	}
+	if status == http.StatusGatewayTimeout {
+		return true
+	}
+	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		return true
+	}
+	if p == "/v1/subscribe" || strings.HasSuffix(p, "/subscribe") || p == "/v1/bx/watch" || strings.HasSuffix(p, "/bx/watch") || p == "/v1/updates/events" {
+		return true
+	}
+	return false
 }
 
 func (h *Host) resetRequestMetrics() {
@@ -69,16 +109,29 @@ func (h *Host) resetRequestMetrics() {
 	h.metricMu.Unlock()
 }
 
-// liveHealth is the host's own error rate, latency and node liveness.
-// With no samples the status is unknown and the rates are nil: callers must not invent zeros.
-func (h *Host) liveHealth() healthView {
+// liveHealthFor is error rate and latency for nodes in only.
+// only empty means every sample on this process. Below updateMinHealthSamples the status
+// is unknown and the rates are nil: callers must not invent zeros, and nothing auto-rolls back.
+func (h *Host) liveHealthFor(only []string) healthView {
+	allow := map[string]struct{}{}
+	for _, id := range only {
+		if id != "" {
+			allow[id] = struct{}{}
+		}
+	}
 	now := time.Now()
 	h.metricMu.Lock()
 	samples := make([]reqSample, 0, len(h.metricSamples))
 	for _, s := range h.metricSamples {
-		if now.Sub(s.at) <= updateMetricWindow {
-			samples = append(samples, s)
+		if now.Sub(s.at) > updateMetricWindow {
+			continue
 		}
+		if len(allow) > 0 {
+			if _, ok := allow[s.node]; !ok {
+				continue
+			}
+		}
+		samples = append(samples, s)
 	}
 	h.metricMu.Unlock()
 	view := healthView{Status: "unknown"}
@@ -94,7 +147,7 @@ func (h *Host) liveHealth() healthView {
 		view.LiveNodes = live
 		view.Nodes = nodes
 	}
-	if len(samples) == 0 {
+	if len(samples) < updateMinHealthSamples {
 		return view
 	}
 	bad := 0

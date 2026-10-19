@@ -343,7 +343,7 @@ func (h *Host) updateSource(w http.ResponseWriter, r *http.Request, app string) 
 		return
 	}
 	pr, ok := h.updateAuth(w, r, true)
-	if !ok || !h.guardUpdateMutation(w, r, pr, app, false, false) {
+	if !ok || !h.guardUpdateMutation(w, r, pr, app, false, false) || !h.ownerOnlyOK(w, r, pr) {
 		return
 	}
 	var body struct {
@@ -435,11 +435,12 @@ func (h *Host) updateApply(w http.ResponseWriter, r *http.Request, app string) {
 			h.updateFail(w, err)
 			return
 		}
-		id, exp := h.upd.issuePermit(updatePermit{Action: "updateApply", App: app, Version: body.Version, Source: body.Source})
+		id, exp := h.upd.issuePermit(updatePermit{Action: "updateApply", App: app, Version: body.Version, Source: body.Source, KeyID: pr.Key.ID})
 		writeJSON(w, 200, map[string]interface{}{"confirm": id, "expires": exp.UTC().Format(time.RFC3339), "action": "updateApply", "app": app, "version": body.Version})
 		return
 	}
 	in.Permit = r.Header.Get(UpdateConfirmHeader)
+	in.KeyID = pr.Key.ID
 	if body.Canary != nil {
 		in.Percent = body.Canary.Percent
 		in.MinMinutes = body.Canary.MinMinutes
@@ -485,11 +486,11 @@ func (h *Host) updateRestore(w http.ResponseWriter, r *http.Request, app string)
 		return
 	}
 	if body.Plan {
-		id, exp := h.upd.issuePermit(updatePermit{Action: "updateAppRollback", App: app, Version: ver, SnapshotID: body.SnapshotID})
+		id, exp := h.upd.issuePermit(updatePermit{Action: "updateAppRollback", App: app, Version: ver, SnapshotID: body.SnapshotID, KeyID: pr.Key.ID})
 		writeJSON(w, 200, map[string]interface{}{"confirm": id, "expires": exp.UTC().Format(time.RFC3339), "action": "updateAppRollback", "app": app, "version": ver})
 		return
 	}
-	if err := h.upd.consumePermit(r.Header.Get(UpdateConfirmHeader), updatePermit{Action: "updateAppRollback", App: app, Version: ver, SnapshotID: body.SnapshotID}); err != nil {
+	if err := h.upd.consumePermit(r.Header.Get(UpdateConfirmHeader), updatePermit{Action: "updateAppRollback", App: app, Version: ver, SnapshotID: body.SnapshotID, KeyID: pr.Key.ID}); err != nil {
 		h.updateFail(w, err)
 		return
 	}
@@ -549,11 +550,11 @@ func (h *Host) updateRolloutRoute(w http.ResponseWriter, r *http.Request, id str
 				writeUpdateErr(w, http.StatusNotFound, "not_found", "not found")
 				return
 			}
-			pid, exp := h.upd.issuePermit(updatePermit{Action: "updatePromote", App: app, Version: ver, RolloutID: id})
+			pid, exp := h.upd.issuePermit(updatePermit{Action: "updatePromote", App: app, Version: ver, RolloutID: id, KeyID: pr.Key.ID})
 			writeJSON(w, 200, map[string]interface{}{"confirm": pid, "expires": exp.UTC().Format(time.RFC3339), "action": "updatePromote", "app": app, "version": ver})
 			return
 		}
-		if err := h.upd.consumePermit(r.Header.Get(UpdateConfirmHeader), updatePermit{Action: "updatePromote", App: app, Version: ver, RolloutID: id}); err != nil {
+		if err := h.upd.consumePermit(r.Header.Get(UpdateConfirmHeader), updatePermit{Action: "updatePromote", App: app, Version: ver, RolloutID: id, KeyID: pr.Key.ID}); err != nil {
 			// A missing rollout is not found, even when the token is also missing.
 			if app == "" {
 				writeUpdateErr(w, http.StatusNotFound, "not_found", "not found")
@@ -588,11 +589,11 @@ func (h *Host) updateRolloutRoute(w http.ResponseWriter, r *http.Request, id str
 				writeUpdateErr(w, http.StatusNotFound, "not_found", "not found")
 				return
 			}
-			pid, exp := h.upd.issuePermit(updatePermit{Action: "updateRolloutRollback", App: app, Version: ver, RolloutID: id})
+			pid, exp := h.upd.issuePermit(updatePermit{Action: "updateRolloutRollback", App: app, Version: ver, RolloutID: id, KeyID: pr.Key.ID})
 			writeJSON(w, 200, map[string]interface{}{"confirm": pid, "expires": exp.UTC().Format(time.RFC3339), "action": "updateRolloutRollback", "app": app, "version": ver})
 			return
 		}
-		if err := h.upd.consumePermit(r.Header.Get(UpdateConfirmHeader), updatePermit{Action: "updateRolloutRollback", App: app, Version: ver, RolloutID: id}); err != nil {
+		if err := h.upd.consumePermit(r.Header.Get(UpdateConfirmHeader), updatePermit{Action: "updateRolloutRollback", App: app, Version: ver, RolloutID: id, KeyID: pr.Key.ID}); err != nil {
 			if app == "" {
 				writeUpdateErr(w, http.StatusNotFound, "not_found", "not found")
 				return

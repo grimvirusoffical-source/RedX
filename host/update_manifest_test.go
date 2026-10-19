@@ -56,6 +56,44 @@ func TestManifestSignVerifyTamperAndWrongKey(t *testing.T) {
 	}
 }
 
+func TestSemverPrecedence(t *testing.T) {
+	order := []string{
+		"1.0.0-alpha",
+		"1.0.0-alpha.1",
+		"1.0.0-alpha.beta",
+		"1.0.0-beta",
+		"1.0.0-beta.2",
+		"1.0.0-beta.9",
+		"1.0.0-beta.10",
+		"1.0.0-beta.11",
+		"1.0.0-rc.1",
+		"1.0.0",
+	}
+	for i := range order {
+		for j := range order {
+			cmp, ok := semverCmp(order[i], order[j])
+			if !ok {
+				t.Fatalf("not semver: %s %s", order[i], order[j])
+			}
+			if cmp != cmpInt(i, j) {
+				t.Fatalf("%s vs %s = %d, want %d", order[i], order[j], cmp, cmpInt(i, j))
+			}
+		}
+	}
+	if cmp, ok := semverCmp("3.0.0-beta.10", "3.0.0-beta.9"); !ok || cmp <= 0 {
+		t.Fatalf("beta.10 vs beta.9 = %d ok=%v", cmp, ok)
+	}
+	if cmp, ok := semverCmp("v3.0.0-beta.10", "3.0.0-beta.9"); !ok || cmp <= 0 {
+		t.Fatalf("v-prefix beta.10 = %d ok=%v", cmp, ok)
+	}
+	if cmp, ok := semverCmp("1.0.0+aaa", "1.0.0+zzz"); !ok || cmp != 0 {
+		t.Fatalf("build metadata = %d ok=%v", cmp, ok)
+	}
+	if cmp, ok := semverCmp("1.0.0-alpha.1", "1.0.0"); !ok || cmp >= 0 {
+		t.Fatalf("prerelease vs release = %d", cmp)
+	}
+}
+
 func TestCheckSequence(t *testing.T) {
 	if err := checkSequence(0, 1); err != nil {
 		t.Fatal(err)

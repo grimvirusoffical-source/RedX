@@ -87,7 +87,7 @@ var Operations = map[string]Operation{
 	"updateSnapshots":       {ID: "updateSnapshots", Group: "updates", Method: "GET", Path: "/v1/updates/apps/{app}/snapshots", Shorthand: "", Auth: "host-admin", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Immutable snapshots taken before applies."},
 	"updateRollout":         {ID: "updateRollout", Group: "updates", Method: "GET", Path: "/v1/updates/rollouts/{rollout_id}", Shorthand: "", Auth: "host-admin", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Rollout state, progress and health."},
 	"updateEvents":          {ID: "updateEvents", Group: "updates", Method: "GET", Path: "/v1/updates/events", Shorthand: "", Auth: "host-admin", Danger: DangerSafe, Response: "websocket", Request: "", HostConfirm: "", Summary: "WebSocket of update.available, update.analysed, rollout.state, rollout.health and rollback.done."},
-	"updateSource":          {ID: "updateSource", Group: "updates", Method: "PUT", Path: "/v1/updates/apps/{app}/source", Shorthand: "", Auth: "host-admin", Danger: DangerAdmin, Response: "json", Request: "json", HostConfirm: "", Summary: "Prefer host, github or both. host or both on an app Red-XAI does not host returns 409 not_hosted."},
+	"updateSource":          {ID: "updateSource", Group: "updates", Method: "PUT", Path: "/v1/updates/apps/{app}/source", Shorthand: "", Auth: "host-admin", Danger: DangerAdmin, Response: "json", Request: "json", HostConfirm: "", Summary: "Prefer host, github or both. While Red-XAI Accounts is on, only an owner may change it. host or both on an app Red-XAI does not host returns 409 not_hosted."},
 	"updatePolicy":          {ID: "updatePolicy", Group: "updates", Method: "PUT", Path: "/v1/updates/apps/{app}/policy", Shorthand: "", Auth: "host-admin", Danger: DangerAdmin, Response: "json", Request: "json", HostConfirm: "", Summary: "Auto-apply policy: off, security or all, on channel stable or beta, inside an optional cron window."},
 	"updateApply":           {ID: "updateApply", Group: "updates", Method: "POST", Path: "/v1/updates/apps/{app}/apply", Shorthand: "", Auth: "host-admin", Danger: DangerDangerous, Response: "json", Request: "json", HostConfirm: "", Summary: "Snapshot, then apply. strategy is direct, canary or blue_green. Refuses a failed snapshot and a sequence regression."},
 	"updatePromote":         {ID: "updatePromote", Group: "updates", Method: "POST", Path: "/v1/updates/rollouts/{rollout_id}/promote", Shorthand: "", Auth: "host-admin", Danger: DangerDangerous, Response: "json", Request: "", HostConfirm: "", Summary: "Move a healthy canary to the rest of the cluster."},
@@ -667,7 +667,7 @@ func (c *Client) UpdateRollout(ctx context.Context, rollout_id string, a Args) (
 	return c.Call(ctx, "updateRollout", a)
 }
 
-// UpdateSource: Prefer host, github or both. host or both on an app Red-XAI does not host returns 409 not_hosted.
+// UpdateSource: Prefer host, github or both. While Red-XAI Accounts is on, only an owner may change it. host or both on an app Red-XAI does not host returns 409 not_hosted.
 //
 // PUT /v1/updates/apps/{app}/source, auth host-admin, danger admin.
 func (c *Client) UpdateSource(ctx context.Context, app string, a Args) (*Result, error) {

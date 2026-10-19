@@ -506,10 +506,13 @@ func TestUpdateOwnerGates(t *testing.T) {
 	if st != 404 || !strings.Contains(body, "database not found") {
 		t.Fatalf("hidden publish %d %s", st, body)
 	}
-	// source on a normal app is not a topology change and does not snapshot the master database
 	st, body, _ = do(t, "PUT", n.URL+"/v1/updates/apps/redx/source", n.Key, `{"source":"both"}`, "Content-Type", "application/json")
+	if st != 403 || !strings.Contains(body, "only an owner login can do this on this host") {
+		t.Fatalf("non-owner source %d %s", st, body)
+	}
+	st, body, _ = do(t, "PUT", n.URL+"/v1/updates/apps/redx/source", tok, `{"source":"both"}`, "Content-Type", "application/json")
 	if st != 200 {
-		t.Fatalf("source while accounts on %d %s", st, body)
+		t.Fatalf("owner source %d %s", st, body)
 	}
 	st, body = withPermit(t, n, tok, "POST", "/v1/updates/apps/redx/apply", `{"version":"4.0.0","source":"host","strategy":"direct"}`)
 	if st != 202 {

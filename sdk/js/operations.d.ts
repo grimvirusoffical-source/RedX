@@ -173,7 +173,7 @@ export interface RedXOperations {
   updateSnapshots(opts: { app: string; headers?: Record<string, string> }): Promise<any>;
   /** Rollout state, progress and health. (GET /v1/updates/rollouts/{rollout_id}; auth host-admin; danger safe) */
   updateRollout(opts: { rollout_id: string; headers?: Record<string, string> }): Promise<any>;
-  /** Prefer host, github or both. host or both on an app Red-XAI does not host returns 409 not_hosted. (PUT /v1/updates/apps/{app}/source; auth host-admin; danger admin) */
+  /** Prefer host, github or both. While Red-XAI Accounts is on, only an owner may change it. host or both on an app Red-XAI does not host returns 409 not_hosted. (PUT /v1/updates/apps/{app}/source; auth host-admin; danger admin) */
   updateSource(opts: { app: string; body?: { source?: string }; headers?: Record<string, string> }): Promise<any>;
   /** Auto-apply policy: off, security or all, on channel stable or beta, inside an optional cron window. (PUT /v1/updates/apps/{app}/policy; auth host-admin; danger admin) */
   updatePolicy(opts: { app: string; body?: { auto_apply?: string; channel?: string; window?: string }; headers?: Record<string, string> }): Promise<any>;

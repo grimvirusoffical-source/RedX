@@ -66,6 +66,10 @@ func (u *updater) takeSnapshot(app, version string) (*snapMeta, error) {
 	}
 	u.h.pause.Lock()
 	u.h.checkpointAll()
+	// App ids and database names share one namespace: this archive includes the
+	// database whose name equals the app id, and restore writes that database back.
+	// hosted_apps must not name a customer database. The master accounts database
+	// is refused above. Phase 1 keeps this shared namespace.
 	dbDir := filepath.Join(u.h.Reg.Root(), app)
 	if !u.h.IsMasterDB(app) {
 		if st, err := os.Stat(dbDir); err == nil && st.IsDir() {

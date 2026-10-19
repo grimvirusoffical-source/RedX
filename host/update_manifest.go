@@ -269,18 +269,74 @@ func semverCmp(a, b string) (int, bool) {
 	if av.patch != bv.patch {
 		return cmpInt(av.patch, bv.patch), true
 	}
-	switch {
-	case av.pre == bv.pre:
-		return 0, true
-	case av.pre == "":
-		return 1, true
-	case bv.pre == "":
-		return -1, true
-	case av.pre < bv.pre:
-		return -1, true
-	default:
-		return 1, true
+	return cmpPre(av.pre, bv.pre), true
+}
+
+// cmpPre is SemVer 2.0 precedence for the pre-release. A release (empty) is newer
+// than any pre-release. Dot-separated identifiers compare numerically when both are
+// digits, numeric identifiers sort before non-numeric ones, and a longer equal
+// prefix is newer. Build metadata is already stripped by parseSemver.
+func cmpPre(a, b string) int {
+	if a == b {
+		return 0
 	}
+	if a == "" {
+		return 1
+	}
+	if b == "" {
+		return -1
+	}
+	ap, bp := strings.Split(a, "."), strings.Split(b, ".")
+	n := len(ap)
+	if len(bp) < n {
+		n = len(bp)
+	}
+	for i := 0; i < n; i++ {
+		if c := cmpIdent(ap[i], bp[i]); c != 0 {
+			return c
+		}
+	}
+	return cmpInt(len(ap), len(bp))
+}
+
+func cmpIdent(a, b string) int {
+	aNum, bNum := allDigits(a), allDigits(b)
+	switch {
+	case aNum && bNum:
+		return cmpNumeric(a, b)
+	case aNum:
+		return -1
+	case bNum:
+		return 1
+	default:
+		return strings.Compare(a, b)
+	}
+}
+
+func allDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func cmpNumeric(a, b string) int {
+	aa, bb := strings.TrimLeft(a, "0"), strings.TrimLeft(b, "0")
+	if aa == "" {
+		aa = "0"
+	}
+	if bb == "" {
+		bb = "0"
+	}
+	if len(aa) != len(bb) {
+		return cmpInt(len(aa), len(bb))
+	}
+	return strings.Compare(aa, bb)
 }
 
 func cmpInt(a, b int) int {

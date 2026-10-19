@@ -48,6 +48,14 @@ func ClearUpdateHealth(h *Host) {
 // ResetUpdateMetrics drops recorded request samples so health is unknown.
 func ResetUpdateMetrics(h *Host) { h.resetRequestMetrics() }
 
+// NoteUpdateSample records one served request in the health window (tests).
+func NoteUpdateSample(h *Host, status int, ms float64) {
+	h.noteRequest(status, time.Duration(ms*float64(time.Millisecond)))
+}
+
+// UpdateMinHealthSamples is how many qualifying samples a verdict needs.
+func UpdateMinHealthSamples() int { return updateMinHealthSamples }
+
 // SetUpdatePermitTTL sets how long a plan confirmation stays valid.
 func SetUpdatePermitTTL(h *Host, d time.Duration) {
 	h.upd.mu.Lock()

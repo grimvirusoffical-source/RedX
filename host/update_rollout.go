@@ -20,6 +20,7 @@ type applyInput struct {
 	DryRun     bool
 	Internal   bool
 	Permit     string
+	KeyID      string
 }
 
 func newUpdateID(prefix string) string {
@@ -80,7 +81,7 @@ func (u *updater) apply(in applyInput) (roID, snapID string, err error) {
 		return "", "", err
 	}
 	if !in.Internal {
-		if err := u.consumePermit(in.Permit, updatePermit{Action: "updateApply", App: in.App, Version: in.Version, Source: in.Source}); err != nil {
+		if err := u.consumePermit(in.Permit, updatePermit{Action: "updateApply", App: in.App, Version: in.Version, Source: in.Source, KeyID: in.KeyID}); err != nil {
 			return "", "", err
 		}
 	}
@@ -249,8 +250,9 @@ func (u *updater) maybeAutoRollback(id string) {
 		u.mu.Unlock()
 		return
 	}
+	updated := append([]string(nil), ro.Updated...)
 	u.mu.Unlock()
-	if u.measureHealth().Status != "bad" {
+	if u.measureHealth(updated).Status != "bad" {
 		return
 	}
 	_ = u.rollbackRollout(id, "health threshold")
@@ -300,8 +302,9 @@ func (u *updater) promote(id string) error {
 		u.mu.Unlock()
 		return errRolloutConflict
 	}
+	updated := append([]string(nil), ro.Updated...)
 	u.mu.Unlock()
-	if u.measureHealth().Status == "bad" {
+	if u.measureHealth(updated).Status == "bad" {
 		_ = u.rollbackRollout(id, "health threshold")
 		return errHealth
 	}

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -19,8 +20,9 @@ import (
 )
 
 const (
-	updateMaxErrorRate = 0.05
-	updateMaxP95MS     = 2000
+	updateMaxErrorRate     = 0.05
+	updateMaxP95MS         = 2000
+	updateMinHealthSamples = 20
 )
 
 // Health is the live signal a rollout watches. error_rate is 0..1.
@@ -113,6 +115,7 @@ type diskState struct {
 }
 
 // updatePermit is a single-use confirmation issued by a plan or dry-run call.
+// KeyID is the API key that requested it. Only that key can spend it.
 type updatePermit struct {
 	Action     string
 	App        string
@@ -120,6 +123,7 @@ type updatePermit struct {
 	Source     string
 	SnapshotID string
 	RolloutID  string
+	KeyID      string
 	Expires    time.Time
 }
 
@@ -142,16 +146,17 @@ type updater struct {
 	kid      string
 	notAfter time.Time
 
-	members       []string
-	health        Health
-	healthSet     bool
-	snapFail      bool
-	githubAPI     string
-	allowLoopback bool
-	permits       map[string]updatePermit
-	permitTTL     time.Duration
-	subs          map[int]chan UpdateEvent
-	subN          int
+	members           []string
+	health            Health
+	healthSet         bool
+	snapFail          bool
+	githubAPI         string
+	allowLoopback     bool
+	artifactTransport http.RoundTripper
+	permits           map[string]updatePermit
+	permitTTL         time.Duration
+	subs              map[int]chan UpdateEvent
+	subN              int
 }
 
 func manifestKey(app, version, source string) string {
@@ -597,6 +602,9 @@ func (u *updater) consumePermit(id string, want updatePermit) error {
 	if p.Action != want.Action || p.App != want.App || p.Version != want.Version {
 		return errConfirm
 	}
+	if p.KeyID == "" || p.KeyID != want.KeyID {
+		return errConfirm
+	}
 	if p.Source != "" && want.Source != "" && p.Source != want.Source {
 		return errConfirm
 	}
@@ -642,7 +650,10 @@ func (u *updater) releaseDelivery(id string) {
 	_ = u.saveLocked()
 }
 
-func (u *updater) measureHealth() healthView {
+// measureHealth reads the canary. updated is the nodes serving the new version.
+// A forced test value still wins. Otherwise only samples from those nodes count,
+// and fewer than updateMinHealthSamples samples stays unknown.
+func (u *updater) measureHealth(updated []string) healthView {
 	u.mu.Lock()
 	forced := u.healthSet
 	h := u.health
@@ -657,7 +668,7 @@ func (u *updater) measureHealth() healthView {
 	if u.h == nil {
 		return healthView{Status: "unknown"}
 	}
-	return u.h.liveHealth()
+	return u.h.liveHealthFor(updated)
 }
 
 func (u *updater) nextSequence(app string) int64 {

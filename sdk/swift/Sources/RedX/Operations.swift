@@ -103,7 +103,7 @@ public let operations: [String: Operation] = [
     "updateSnapshots": Operation(id: "updateSnapshots", group: "updates", method: "GET", path: "/v1/updates/apps/{app}/snapshots", shorthand: "", auth: "host-admin", response: "json", request: "", hostConfirm: "", summary: "Immutable snapshots taken before applies.", danger: .safe),
     "updateRollout": Operation(id: "updateRollout", group: "updates", method: "GET", path: "/v1/updates/rollouts/{rollout_id}", shorthand: "", auth: "host-admin", response: "json", request: "", hostConfirm: "", summary: "Rollout state, progress and health.", danger: .safe),
     "updateEvents": Operation(id: "updateEvents", group: "updates", method: "GET", path: "/v1/updates/events", shorthand: "", auth: "host-admin", response: "websocket", request: "", hostConfirm: "", summary: "WebSocket of update.available, update.analysed, rollout.state, rollout.health and rollback.done.", danger: .safe),
-    "updateSource": Operation(id: "updateSource", group: "updates", method: "PUT", path: "/v1/updates/apps/{app}/source", shorthand: "", auth: "host-admin", response: "json", request: "json", hostConfirm: "", summary: "Prefer host, github or both. host or both on an app Red-XAI does not host returns 409 not_hosted.", danger: .admin),
+    "updateSource": Operation(id: "updateSource", group: "updates", method: "PUT", path: "/v1/updates/apps/{app}/source", shorthand: "", auth: "host-admin", response: "json", request: "json", hostConfirm: "", summary: "Prefer host, github or both. While Red-XAI Accounts is on, only an owner may change it. host or both on an app Red-XAI does not host returns 409 not_hosted.", danger: .admin),
     "updatePolicy": Operation(id: "updatePolicy", group: "updates", method: "PUT", path: "/v1/updates/apps/{app}/policy", shorthand: "", auth: "host-admin", response: "json", request: "json", hostConfirm: "", summary: "Auto-apply policy: off, security or all, on channel stable or beta, inside an optional cron window.", danger: .admin),
     "updateApply": Operation(id: "updateApply", group: "updates", method: "POST", path: "/v1/updates/apps/{app}/apply", shorthand: "", auth: "host-admin", response: "json", request: "json", hostConfirm: "", summary: "Snapshot, then apply. strategy is direct, canary or blue_green. Refuses a failed snapshot and a sequence regression.", danger: .dangerous),
     "updatePromote": Operation(id: "updatePromote", group: "updates", method: "POST", path: "/v1/updates/rollouts/{rollout_id}/promote", shorthand: "", auth: "host-admin", response: "json", request: "", hostConfirm: "", summary: "Move a healthy canary to the rest of the cluster.", danger: .dangerous),
@@ -576,7 +576,7 @@ extension RedXClient {
         try await call("updateRollout", params: ["rollout_id": rollout_id])
     }
 
-    /// Prefer host, github or both. host or both on an app Red-XAI does not host returns 409 not_hosted. (PUT /v1/updates/apps/{app}/source; auth host-admin; danger admin)
+    /// Prefer host, github or both. While Red-XAI Accounts is on, only an owner may change it. host or both on an app Red-XAI does not host returns 409 not_hosted. (PUT /v1/updates/apps/{app}/source; auth host-admin; danger admin)
     @discardableResult
     public func updateSource(app: String, body: [String: Any]? = nil) async throws -> RedXResult {
         try await call("updateSource", params: ["app": app], body: body)

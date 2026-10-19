@@ -200,35 +200,53 @@ or a key generated under `<data>/updates/signing.key`. It is never written into 
 
 Mutations need a host-admin key. Apply, rollback, restore and promote call the same `ownerOnlyOK` /
 `refuseHiddenDB` gates as backup and cluster changes. While Red-XAI Accounts is on (`AccountsEnabled`),
-those calls, plus publish and policy, are owner-only. An app id equal to the master accounts database
+those calls, plus publish, policy and source, are owner-only. An app id equal to the master accounts database
 is hidden (`404`). Snapshots contain only that app's version, update policy, artifact blobs and its own
 database. They never include the keystore, the master accounts database, other databases, or host config.
 Restore checks the snapshot sha256 before writing anything back.
 
 Apply refuses a semver lower than the installed version and a manifest whose `requires.min_from` the
 installed version does not meet (both `409 sequence_regression`). Sequence is bound to app + version and
-only increases for a strictly newer semver. Status omits manifests that fail signature verification and
-does not advertise a version older than the one installed.
+only increases for a strictly newer semver. Pre-release tags use SemVer 2.0 precedence: numeric
+identifiers compare as numbers, so `3.0.0-beta.10` is newer than `3.0.0-beta.9`. Status omits manifests
+that fail signature verification and does not advertise a version older than the one installed.
 
-`plan:true` or `dry_run:true` issues a single-use `X-RedX-Update-Confirm` token bound to the app, version
-and action. It does not take a snapshot. The real call still needs `X-RedX-Confirm` with the operation id.
-The CLI asks before sending the token, or takes `--yes`. Extra path segments on apply, publish and rollback
-are `404`.
+`plan:true` or `dry_run:true` issues a single-use `X-RedX-Update-Confirm` token bound to the app, version,
+action, and the API key that requested it. A different key gets `403`. It does not take a snapshot. The
+real call still needs `X-RedX-Confirm` with the operation id. The CLI asks before sending the token, or
+takes `--yes`. Extra path segments on apply, publish and rollback are `404`.
 
-Publish is limited to apps in `hosted_apps`. Artifact URLs must be
+Publish is limited to apps in `hosted_apps`. The initial artifact URL must be
 `https://github.com/{owner}/{repo}/releases/download/{tag}/{file}` for a repo listed in `github_repos`
-(`owner/repo=app`). A GitHub release is created only by that publish. The webhook accepts only those
-repos, requires `X-GitHub-Delivery`, refuses a replay, and skips an `edited` event whose version is
-already stored or not newer than the installed one.
+(`owner/repo=app`), with no query string. A download may then follow at most three `https` redirects onto
+`release-assets.githubusercontent.com` or `objects.githubusercontent.com` (query string allowed). Any other
+hop is refused. The SHA256 in `SHA256SUMS` still has to match the bytes. A GitHub release is created only
+by that publish. The webhook accepts only those repos, requires `X-GitHub-Delivery`, refuses a replay of
+the same delivery id, and skips an `edited` event whose version is already stored or not newer than the
+installed one.
 
-Rollout health is the host's own error rate, latency and node liveness. With no samples the status is
-`unknown` and a canary is not auto-promoted. Auto-rollback runs only when health is `bad`.
+`X-Hub-Signature-256` is GitHub's HMAC-SHA256 over the raw body. The delivery id is not part of that
+signature. Including it would reject GitHub's own deliveries, and a redelivery is defined to use a new
+`X-GitHub-Delivery`. Dedupe on the id stops an exact replay (`409`). A captured body presented with a
+fresh id still verifies, which is also how a legitimate redelivery looks. Ingest is idempotent per app
+and version: a version already stored is skipped (`202`) and is not published or auto-applied again.
+A redelivery of a version that was never stored is the first ingest.
+
+Rollout health is the error rate, latency and node liveness of traffic served by the nodes on the new
+version. `/v1/cluster/*`, requests that set `X-Redx-Wait-Seq`, `X-Redx-Wait-Replicas` or `wait_ms`,
+WebSocket and subscribe streams, and client-induced `504` timeouts are not samples. Fewer than 20
+qualifying samples in the two-minute window is `unknown` (`error_rate` and `p95_ms` are null) and
+nothing auto-rolls back. Auto-rollback runs only when health is `bad`. There is no auto-promote.
+
+App ids and database names share one namespace. A snapshot of an app includes the database of the same
+name, and restore writes that database back. Do not put a customer database's name in `hosted_apps`.
+The master accounts database is refused. This shared namespace is a known limitation of phase 1.
 
 | Route | Auth | Purpose |
 |---|---|---|
 | `GET /v1/updates/apps`, `GET /v1/updates/apps/{app}` | host admin | hosted, source_pref, installed, available |
 | `GET .../manifests/{version}`, `.../{version}.sig`, `.../artifacts/{artifact_id}` | host admin | signed manifest, signature, artifact |
-| `PUT .../source` | host admin | `host`/`github`/`both`. `host` or `both` when the app is not hosted → `409 not_hosted` |
+| `PUT .../source` | host admin; owner while Accounts is on | `host`/`github`/`both`. `host` or `both` when the app is not hosted → `409 not_hosted` |
 | `PUT .../policy` | host admin; owner while Accounts is on | auto-apply |
 | `POST .../apply` | host admin; owner while Accounts is on | app snapshot, then direct / canary / blue-green. Snapshot failure refuses the apply |
 | `GET /v1/updates/rollouts/{rollout_id}` | host admin | progress and health |
@@ -237,7 +255,7 @@ Rollout health is the host's own error rate, latency and node liveness. With no 
 | `POST .../rollback` | host admin; owner while Accounts is on | restore one snapshot for this app |
 | `GET .../history` | host admin | publish, apply, snapshot, rollback |
 | `POST .../publish` | host admin; owner while Accounts is on, and the app must be hosted | sign a host and/or GitHub manifest |
-| `POST /v1/updates/github/webhook` | HMAC `X-Hub-Signature-256` | allowlisted repo, `X-GitHub-Delivery`, SHA256SUMS, then a signed github-source manifest |
+| `POST /v1/updates/github/webhook` | HMAC `X-Hub-Signature-256` over the body | allowlisted repo, `X-GitHub-Delivery` dedupe, SHA256SUMS, then a signed github-source manifest |
 | `GET /v1/updates/events` | host admin | WebSocket: `update.available`, `update.analysed`, `rollout.state`, `rollout.health`, `rollback.done` |
 | `GET /v1/apps/events` | Accounts client auth | Existing Accounts JSON poll. `update.*` events on that feed are forwarded to the WebSocket and do not end sessions |
 

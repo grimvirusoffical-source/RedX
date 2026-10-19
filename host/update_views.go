@@ -262,8 +262,9 @@ func (u *updater) rolloutView(id string) (map[string]interface{}, error) {
 		"strategy": ro.Effective,
 		"progress": map[string]interface{}{"updated": len(ro.Updated), "total": ro.Total, "percent": pct},
 	}
+	updated := append([]string(nil), ro.Updated...)
 	u.mu.Unlock()
-	view["health"] = u.measureHealth()
+	view["health"] = u.measureHealth(updated)
 	return view, nil
 }
 

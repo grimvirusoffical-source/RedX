@@ -1031,7 +1031,7 @@
    "path": "/v1/updates/apps/{app}/source",
    "auth": "host-admin",
    "danger": "admin",
-   "summary": "Prefer host, github or both. host or both on an app Red-XAI does not host returns 409 not_hosted.",
+   "summary": "Prefer host, github or both. While Red-XAI Accounts is on, only an owner may change it. host or both on an app Red-XAI does not host returns 409 not_hosted.",
    "response": "json",
    "body": {
     "source": "string"

@@ -78,11 +78,11 @@ func (h *Host) updatePublish(w http.ResponseWriter, r *http.Request, app string)
 			writeUpdateErr(w, 400, "invalid", "invalid version")
 			return
 		}
-		id, exp := h.upd.issuePermit(updatePermit{Action: "updatePublish", App: app, Version: body.Version})
+		id, exp := h.upd.issuePermit(updatePermit{Action: "updatePublish", App: app, Version: body.Version, KeyID: pr.Key.ID})
 		writeJSON(w, 200, map[string]interface{}{"confirm": id, "expires": exp.UTC().Format(time.RFC3339), "action": "updatePublish", "app": app, "version": body.Version})
 		return
 	}
-	if err := h.upd.consumePermit(r.Header.Get(UpdateConfirmHeader), updatePermit{Action: "updatePublish", App: app, Version: body.Version}); err != nil {
+	if err := h.upd.consumePermit(r.Header.Get(UpdateConfirmHeader), updatePermit{Action: "updatePublish", App: app, Version: body.Version, KeyID: pr.Key.ID}); err != nil {
 		h.updateFail(w, err)
 		return
 	}
@@ -464,13 +464,24 @@ func (u *updater) githubUpload(ctx context.Context, token, uploadURL, name strin
 	return nil
 }
 
+// maxArtifactRedirects is how many redirects an artifact download may follow
+// after the initial URL. GitHub release assets use one hop onto the CDN.
+const maxArtifactRedirects = 3
+
 func (u *updater) httpClient() *http.Client {
-	return &http.Client{Timeout: 60 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error {
-		if len(via) >= 5 {
+	u.mu.Lock()
+	rt := u.artifactTransport
+	u.mu.Unlock()
+	c := &http.Client{Timeout: 60 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if len(via) > maxArtifactRedirects {
 			return errors.New("too many redirects")
 		}
-		return u.allowArtifact(req.URL.String())
+		return u.allowArtifactRedirect(req.URL.String())
 	}}
+	if rt != nil {
+		c.Transport = rt
+	}
+	return c
 }
 
 func (u *updater) apiClient() *http.Client {
@@ -484,6 +495,8 @@ func (u *updater) apiClient() *http.Client {
 
 // allowArtifact accepts only an allowlisted repo's release download URL.
 // Loopback is accepted only when the test hook is on, and the path must still name that repo.
+// Redirects are not accepted here: fetch checks this on the initial URL, then
+// allowArtifactRedirect on each hop.
 func (u *updater) allowArtifact(raw string) error {
 	u.mu.Lock()
 	lb := u.allowLoopback
@@ -521,6 +534,31 @@ func (u *updater) allowArtifact(raw string) error {
 		return errors.New("refused artifact url")
 	}
 	return nil
+}
+
+// allowArtifactRedirect allows the hop GitHub makes from a release download URL:
+// https to release-assets.githubusercontent.com or objects.githubusercontent.com,
+// query string included. The signed SHA256SUMS check still covers the bytes.
+func (u *updater) allowArtifactRedirect(raw string) error {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
+		return errors.New("refused artifact url")
+	}
+	if parsed.Scheme != "https" {
+		return errors.New("refused artifact url")
+	}
+	if p := parsed.Port(); p != "" && p != "443" {
+		return errors.New("refused artifact url")
+	}
+	if strings.Contains(parsed.Path, "..") || strings.Contains(strings.ToLower(parsed.EscapedPath()), "%2e") {
+		return errors.New("refused artifact url")
+	}
+	switch strings.ToLower(parsed.Hostname()) {
+	case "release-assets.githubusercontent.com", "objects.githubusercontent.com":
+		return nil
+	default:
+		return errors.New("refused artifact url")
+	}
 }
 
 func releaseOwnerRepo(path string) (string, string, bool) {
@@ -585,6 +623,11 @@ func (h *Host) updateGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		writeUpdateErr(w, http.StatusServiceUnavailable, "forbidden", "webhook secret is not configured")
 		return
 	}
+	// GitHub's HMAC covers the raw body only. The delivery id is not in that signature;
+	// putting it there would reject GitHub's own posts and redeliveries (a redelivery
+	// uses a new X-GitHub-Delivery). claimDelivery rejects a repeated id. A captured
+	// body with a fresh id still verifies, and ingestRelease then skips a version that
+	// is already stored, so the replay does not publish or auto-apply again.
 	if !hubSigOK(secret, body, r.Header.Get("X-Hub-Signature-256")) {
 		h.Audit.Log(AuditEvent{Event: "update.webhook", Remote: remoteIP(r), Method: r.Method, Route: routeOf(r), Reason: "bad signature"})
 		writeUpdateErr(w, http.StatusUnauthorized, "bad_signature", "bad signature")
