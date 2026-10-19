@@ -1,6 +1,7 @@
 package host_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -315,6 +316,27 @@ func TestSubscribeWebSocket(t *testing.T) {
 		t.Fatal(err)
 	}
 	c2.Close()
+}
+
+// A write made right after the handshake returns is always delivered: the subscription is armed before the 101.
+func TestSubscribeArmedBeforeHandshakeReturns(t *testing.T) {
+	n := startNode(t, t.TempDir(), nil)
+	hdr := map[string][]string{"Authorization": {"Bearer " + n.Key}}
+	for i := 0; i < 30; i++ {
+		ws := "ws" + strings.TrimPrefix(n.URL, "http") + fmt.Sprintf("/v1/subscribe?path=arm%d:", i)
+		c, _, err := websocket.DefaultDialer.Dial(ws, hdr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		do(t, "PUT", n.URL+P+fmt.Sprintf("arm%d:Box.K", i), n.Key, "1") // no pause between handshake and write
+		c.SetReadDeadline(time.Now().Add(3 * time.Second))
+		var ev host.Event
+		if err := c.ReadJSON(&ev); err != nil {
+			c.Close()
+			t.Fatalf("round %d: the write right after subscribe was not delivered: %v", i, err)
+		}
+		c.Close()
+	}
 }
 
 func TestFollowerNeverLocalExpiryAndConfig(t *testing.T) {

@@ -43,13 +43,15 @@ func (h *Host) subscribeHandler(w http.ResponseWriter, r *http.Request, db strin
 		h.mapErr(w, err)
 		return
 	}
+	// Subscribe before the upgrade: once the client sees 101 every later write is delivered (a write made
+	// right after subscribe() returns used to be missed now and then).
+	ch, cancel := b.Subscribe(path)
+	defer cancel()
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}
 	defer conn.Close()
-	ch, cancel := b.Subscribe(path)
-	defer cancel()
 	ex, _ := b.(Extras)
 	var sp SecPrincipal
 	filter := ex != nil && ex.SecActive()
