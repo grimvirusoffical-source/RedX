@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+* Connect: added the `quicklaunch` provider (QuickLaunch developer tool) and a strict loopback callback rule: `http://127.0.0.1`, `http://[::1]` or `http://localhost` on any port with exactly the registered path; everything else is refused.
+
 ## 0.4.3
 
 * Security: `redx` and `redxd` help output (`-h`) no longer prints secrets taken from the environment or `redx.toml` as flag defaults. `--key` shows "(currently set from $REDX_KEY)" and `--join` "(currently set from $REDX_JOIN or redx.toml)".
