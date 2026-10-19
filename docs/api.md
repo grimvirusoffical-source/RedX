@@ -183,6 +183,7 @@ and script runs are forwarded to / run on the leader.
 | `GET /v1/ui/bootstrap-status`, `POST /v1/ui/bootstrap` | none, loopback only, once | first-run admin key from the console |
 | `GET /v1/ui/whoami`, `POST /v1/ui/validate` | key | caller's scope; parse Box text / BoxQL / policy with `line:col` errors |
 | `GET /v1/admin/status`, `audit`, `config`, `presets` | host admin | dashboard data (includes `tls_warning`, `tls_cert`, `tls_fingerprint`), audit tail, redacted config, presets |
+| `POST /v1/admin/presets/{name}/apply` | host admin; owner while Accounts is on if the apply sets `join` or changes `role` or `advertise` | write the preset into the config file (restart to take effect). Audit detail includes the join leader URL, never the join secret |
 | `POST /v1/keys/pairing` → `POST /v1/pair/exchange` | admin → none | one-time sign-in code (`RP-XXXXX-XXXXX`, 5 min) traded for a new key |
 | `POST /v1/cluster/join-token` | host admin | join token (`rxj_...`) or pairing code (`{"kind":"code"}`) |
 | `GET /v1/cluster/status`, `POST /v1/cluster/promote`, `POST /v1/cluster/leader` | host admin | status (incl. `fenced`), promote, repoint (`{"url","join_token","pin_sha256"}`) |

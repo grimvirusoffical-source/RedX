@@ -27,6 +27,7 @@ import (
 //	GET    /v1/admin/presets                   all presets (settings, reasons, guidance)
 //	GET    /v1/admin/presets/{name}            one preset with a diff against this host's current settings
 //	POST   /v1/admin/presets/{name}/apply      write the preset into the config file (restart to take effect)
+//	                                            join, role and advertise changes are owner-only while Accounts is on
 //	GET    /v1/db/{db}/files                   files of a database with type and size    admin on the db
 //	GET    /v1/db/{db}/files/{name}            raw text of a definition file (sec, code, pulse, idx, link)
 //	DELETE /v1/db/{db}?confirm={db}            delete a database (leader; replicated)  host admin
@@ -290,6 +291,13 @@ func (h *Host) applyPresetHandler(w http.ResponseWriter, r *http.Request, p *Pre
 		delete(vals, "keystore_encrypt")
 		skip = append(skip, skipped{"keystore_encrypt", "needs the REDX_KEYSTORE_PASSPHRASE environment variable on this host, which the console cannot set. Set it in the service environment, then add keystore_encrypt = true to the config file."})
 	}
+	// A join link, a role change (follower takes the leader's snapshot) or an advertise change is
+	// redeemed on the next ordinary start. While Accounts protects the master DB, that is the same
+	// class of operation as POST /v1/cluster/leader: owner only. Accounts off: ownerOnlyOK allows
+	// any host admin, which is the previous behaviour.
+	if h.presetAffectsCluster(vals, req.Join) && !h.ownerOnlyOK(w, r, pr) {
+		return
+	}
 	if role, _ := vals["role"].(string); role == "follower" {
 		if strings.TrimSpace(req.Join) == "" {
 			writeErr(w, 400, "this preset makes the host a follower of another RedX host. Paste a join link from the leader's Add a device page (or use the Server preset to stay a leader)")
@@ -364,9 +372,70 @@ func (h *Host) applyPresetHandler(w http.ResponseWriter, r *http.Request, p *Pre
 		}
 		_ = os.Chmod(path, 0o600)
 		resp["backup"] = backup
-		h.Audit.Log(AuditEvent{Event: "preset.apply", KeyID: pr.Key.ID, Remote: remoteIP(r), Detail: p.Name})
+		h.Audit.Log(AuditEvent{Event: "preset.apply", KeyID: pr.Key.ID, Actor: auditActor(pr), Remote: remoteIP(r), Detail: presetApplyDetail(p.Name, joinSetting(vals))})
 	}
 	writeJSON(w, 200, resp)
+}
+
+// presetAffectsCluster reports whether this apply would set a join link or change role or advertise.
+// Those are the settings the next start uses to follow another host. A join is "set" when the body
+// carries one (the join field or an override), even if it repeats the current value: rewriting it
+// is what the next start redeems. Role and advertise count only when the value would change.
+func (h *Host) presetAffectsCluster(vals map[string]interface{}, reqJoin string) bool {
+	if strings.TrimSpace(reqJoin) != "" {
+		return true
+	}
+	if v, ok := vals["join"]; ok && asSettingString(v) != "" {
+		return true
+	}
+	if v, ok := vals["role"]; ok && normPresetRole(asSettingString(v)) != normPresetRole(h.Cfg.Role) {
+		return true
+	}
+	if v, ok := vals["advertise"]; ok && asSettingString(v) != strings.TrimSpace(h.Cfg.Advertise) {
+		return true
+	}
+	return false
+}
+
+func normPresetRole(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "standalone" {
+		return "leader"
+	}
+	return s
+}
+
+func asSettingString(v interface{}) string {
+	switch t := v.(type) {
+	case string:
+		return strings.TrimSpace(t)
+	case nil:
+		return ""
+	default:
+		return strings.TrimSpace(fmt.Sprint(t))
+	}
+}
+
+func joinSetting(vals map[string]interface{}) string {
+	v, ok := vals["join"]
+	if !ok {
+		return ""
+	}
+	return asSettingString(v)
+}
+
+// presetApplyDetail is the audit detail for a preset apply. When a join link was written, the
+// leader URL is included and the one-time secret (code, rxj_ token, userinfo, pin) is not.
+func presetApplyDetail(name, join string) string {
+	join = strings.TrimSpace(join)
+	if join == "" {
+		return name
+	}
+	sp, err := ParseJoin(join)
+	if err != nil || sp.Leader == "" || (sp.Secret != "" && strings.Contains(sp.Leader, sp.Secret)) {
+		return name
+	}
+	return name + " join=" + sp.Leader
 }
 
 // ---- database files ----

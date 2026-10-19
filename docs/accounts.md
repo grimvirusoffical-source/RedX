@@ -91,4 +91,6 @@ when `sms_resend` is on in `/v1/auth/config` (forwards to `POST /v1/signup/resen
 - Console session tokens (`rxs_…`) are hashed (SHA-256) in memory; Red-XAI tokens are kept only for owner
   sessions and never written to disk or logs.
 - The master accounts database is hidden from non-owners (404 "database not found"); creating it is reserved
-  for owners. Online backups and cluster join tokens are owner-only while Accounts is on.
+  for owners. Online backups and cluster join tokens are owner-only while Accounts is on. So is applying a
+  preset that would set a join link or change `role` or `advertise`: that write is what the next start
+  redeems, and the audit line records the join leader URL, never the join secret.

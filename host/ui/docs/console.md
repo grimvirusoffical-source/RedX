@@ -147,7 +147,7 @@ Apply a preset any of four ways; precedence is **defaults < preset < config file
 3. `redx preset ls | show NAME [--diff] | apply NAME [--dry-run] [--set key=value] [--join LINK]`.
 4. `preset = "NAME"` in `redx.toml`.
 
-Only the keys a preset lists are changed; everything stays editable.
+Only the keys a preset lists are changed; everything stays editable. While Red-XAI Accounts is on, an apply that sets a join link or changes `role` or `advertise` needs an owner login; a host-admin key is refused. The audit line records the join leader's URL and never the join secret.
 
 ## 5. Adding a device (nodes, phones, browsers)
 
@@ -225,7 +225,7 @@ Existing routes are reused as they are. The console needed a few more; all are c
 | `GET /v1/ui/whoami` | key | the caller's scope, database, version |
 | `POST /v1/ui/validate` | key | parse Box text, BoxQL, or a policy document and return `line:col` errors |
 | `GET /v1/admin/status` `audit` `config` | host admin | dashboard data, audit tail, redacted effective config |
-| `GET /v1/admin/presets[/NAME]`, `POST .../apply` | host admin | preset list, diff, write config file |
+| `GET /v1/admin/presets[/NAME]`, `POST .../apply` | host admin; owner while Accounts is on if the apply sets `join` or changes `role` or `advertise` | preset list, diff, write config file |
 | `GET /v1/db/{db}/files[/name]` | read | file list / file text for the raw editor |
 | `DELETE /v1/db/{db}?confirm=name` | host admin | drop a database |
 | `POST /v1/cluster/join` (code form) | join code | the join-code flow used by `redxd join` |
