@@ -6,7 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"sync"
+	"time"
 )
 
 // ErrNoDB is returned for unknown database names.
@@ -56,13 +58,15 @@ func (r *Registry) Get(name string) (Backend, error) {
 	if b != nil {
 		return b, nil
 	}
-	if !r.Exists(name) {
-		return nil, ErrNoDB
-	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if b = r.open[name]; b != nil {
 		return b, nil
+	}
+	// Checked under the write lock so a concurrent SwapRoot can neither make the
+	// directory look missing mid-swap nor let us cache a handle on the old tree.
+	if !r.Exists(name) {
+		return nil, ErrNoDB
 	}
 	b, err := r.openLocked(name)
 	if err != nil {
@@ -150,6 +154,34 @@ func (r *Registry) CloseAll() error {
 		delete(r.open, n)
 	}
 	return first
+}
+
+// SwapRoot atomically replaces the whole dbs directory with newRoot (a directory on
+// the same volume, e.g. an extracted snapshot). Every open database is closed and
+// the old tree is moved aside and deleted, all while holding the registry lock, so
+// no concurrent Get can reopen (and cache) a database from the old tree in between.
+// On failure the old tree is put back.
+func (r *Registry) SwapRoot(newRoot string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for n, b := range r.open {
+		// A close error is not fatal here: the handle is dropped either way, and a
+		// backend that failed to close cleanly must not keep serving pre-snapshot state.
+		_ = b.Close()
+		delete(r.open, n)
+	}
+	old := r.root + ".old-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	if err := os.Rename(r.root, old); err != nil {
+		return fmt.Errorf("swap dbs: move old tree aside: %w", err)
+	}
+	if err := os.Rename(newRoot, r.root); err != nil {
+		if rerr := os.Rename(old, r.root); rerr != nil {
+			return fmt.Errorf("swap dbs: %v (and restoring the old tree failed: %v)", err, rerr)
+		}
+		return fmt.Errorf("swap dbs: install new tree: %w", err)
+	}
+	_ = os.RemoveAll(old)
+	return nil
 }
 
 // Drop closes and permanently deletes a database directory.

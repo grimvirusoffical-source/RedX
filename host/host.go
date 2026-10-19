@@ -370,6 +370,10 @@ func (h *Host) WriteDropDB(name string) (uint64, error) {
 
 // ReadGet reads a value; on the leader a sliding TTL is extended.
 func (h *Host) ReadGet(db, path string) (string, error) {
+	// Hold the pause read lock so a snapshot install (pause write lock) cannot close or
+	// swap the database between looking it up and reading from it.
+	h.pause.RLock()
+	defer h.pause.RUnlock()
 	b, err := h.Reg.Get(db)
 	if err != nil {
 		return "", err

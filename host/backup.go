@@ -273,18 +273,12 @@ func (c *Cluster) installSnapshot(ctx context.Context, leader string) error {
 	if !still || ctx.Err() != nil { // promoted or repointed while downloading: this snapshot no longer applies
 		return errors.New("snapshot: node was promoted or repointed meanwhile; discarded")
 	}
-	if err := h.Reg.CloseAll(); err != nil {
-		h.Logf("snapshot: closing dbs: %v", err)
-	}
-	old := h.Reg.Root() + ".old-" + strconv.FormatInt(time.Now().UnixNano(), 36)
-	if err := os.Rename(h.Reg.Root(), old); err != nil {
+	// Close, move aside and replace atomically under the registry lock: a read racing
+	// the install must not reopen the pre-snapshot tree and keep serving it (0.4.4
+	// Windows CI: a discarded write stayed readable after the snapshot was installed).
+	if err := h.Reg.SwapRoot(filepath.Join(tmp, "dbs")); err != nil {
 		return err
 	}
-	if err := os.Rename(filepath.Join(tmp, "dbs"), h.Reg.Root()); err != nil {
-		_ = os.Rename(old, h.Reg.Root())
-		return err
-	}
-	_ = os.RemoveAll(old)
 	if err := h.KS.ReplaceAll(sc.Keys); err != nil {
 		return err
 	}
