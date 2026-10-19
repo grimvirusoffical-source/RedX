@@ -115,20 +115,21 @@ type Cluster struct {
 	log *OpLog
 	dir string
 
-	mu       sync.Mutex
-	st       nodeState
-	meta     replMeta
-	members  map[string]*Member
-	tokens   map[[32]byte]time.Time
-	ackCh    chan struct{}
-	lastErr  string
-	lastSync time.Time
-	client   *http.Client
-	cancel   context.CancelFunc
-	wg       sync.WaitGroup
-	loopStop chan struct{}
-	ctx      context.Context
-	snaps    int
+	mu            sync.Mutex
+	st            nodeState
+	lastFenceNote string // last fence-notice problem logged (see noteFenceNotify)
+	meta          replMeta
+	members       map[string]*Member
+	tokens        map[[32]byte]time.Time
+	ackCh         chan struct{}
+	lastErr       string
+	lastSync      time.Time
+	client        *http.Client
+	cancel        context.CancelFunc
+	wg            sync.WaitGroup
+	loopStop      chan struct{}
+	ctx           context.Context
+	snaps         int
 }
 
 func randHex(n int) string {
@@ -411,6 +412,17 @@ func (c *Cluster) startFenceNotifier() {
 	}()
 }
 
+// noteFenceNotify logs a fence-notice problem once per distinct message (it is retried every heartbeat).
+func (c *Cluster) noteFenceNotify(msg string) {
+	c.mu.Lock()
+	same := c.lastFenceNote == msg
+	c.lastFenceNote = msg
+	c.mu.Unlock()
+	if !same {
+		c.h.Logf("%s", msg)
+	}
+}
+
 // fenceNotifyOff simulates, in tests only, a promoted node that cannot reach the old leader.
 var fenceNotifyOff atomic.Bool
 
@@ -445,9 +457,13 @@ func (c *Cluster) notifyFormerLeader(f formerLeader) bool {
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := cl.Do(req)
 	if err != nil {
+		c.noteFenceNotify("could not reach the former leader " + f.URL + " to fence it: " + err.Error())
 		return false
 	}
 	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		c.noteFenceNotify(fmt.Sprintf("former leader %s answered %d to the fence notice", f.URL, resp.StatusCode))
+	}
 	// 200: fenced or already a follower. 401: the old leader no longer knows us (wiped/rejoined): nothing more to do.
 	// 409: the old leader's history moved on (it was already repointed and promoted again): stop too.
 	return resp.StatusCode == 200 || resp.StatusCode == 401 || resp.StatusCode == 404 || resp.StatusCode == 409

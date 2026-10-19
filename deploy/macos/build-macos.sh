@@ -29,14 +29,16 @@ for ARCH in "$@"; do
   esac
   NAME="redx-${VERSION}-macos-${ARCH}"
   APP="$W/RedX.app"
-  mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+  mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/bin"
+  # the launcher looks for redxd next to itself. The redx CLI goes to Resources/bin: macOS file systems are
+  # usually case-insensitive, so MacOS/redx would overwrite the launcher MacOS/RedX.
   cp "$W/bin/redx-launcher" "$APP/Contents/MacOS/RedX"
-  cp "$W/bin/redxd" "$W/bin/redx" "$APP/Contents/MacOS/"
-  # the launcher looks for redxd next to itself
+  cp "$W/bin/redxd" "$APP/Contents/MacOS/"
+  cp "$W/bin/redx" "$APP/Contents/Resources/bin/redx"
   cp "$ICNS" "$APP/Contents/Resources/redx.icns"
   sed "s/@VERSION@/${VERSION}/g" "$ROOT/deploy/macos/Info.plist.in" > "$APP/Contents/Info.plist"
   plutil -lint "$APP/Contents/Info.plist"
-  chmod 755 "$APP/Contents/MacOS/"*
+  chmod 755 "$APP/Contents/MacOS/"* "$APP/Contents/Resources/bin/redx"
   # ad-hoc signature only (free, no identity): makes the arm64 binaries launchable; still NOT notarized.
   codesign --force --deep --sign - "$APP" || echo "ad-hoc codesign failed (continuing)"
 

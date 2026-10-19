@@ -17,6 +17,8 @@ plutil -lint "$A/Contents/Info.plist" >/dev/null && ok "Info.plist valid"
 [ -f "$A/Contents/Resources/redx.icns" ] && ok "icon present" || bad "icon missing"
 lipo -info "$A/Contents/MacOS/redxd" | tee /dev/stderr | grep -q "x86_64" && lipo -info "$A/Contents/MacOS/redxd" | grep -q arm64 && ok "universal binary (arm64 + x86_64)" || bad "not universal"
 "$A/Contents/MacOS/redxd" --version && ok "redxd runs on $HOSTARCH"
+file "$A/Contents/MacOS/RedX" | grep -q Mach-O && ! cmp -s "$A/Contents/MacOS/RedX" "$A/Contents/Resources/bin/redx" && ok "app executable is the launcher (not the CLI)" || bad "app executable is not the launcher"
+"$A/Contents/Resources/bin/redx" --version && ok "redx CLI inside the app"
 # run the app exactly as double-clicking would (the binary named in Info.plist, no arguments)
 export REDX_DATA_DIR="$(mktemp -d)" REDX_LISTEN="127.0.0.1:7791" CI=1 REDX_LAUNCHER_NO_OPEN=1 REDX_NO_OPEN=1
 LLOG="$(mktemp)"
