@@ -185,11 +185,19 @@ namespace RedX
                 using var req = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Get, u);
                 if (Key != "") req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", Key);
                 using var res = await http.SendAsync(req, ct).ConfigureAwait(false);
+                // A plain GET that got past every host check (key, scope, path, database) is answered by the
+                // WebSocket upgrader itself ("not a websocket handshake", with Sec-WebSocket-Version). That says
+                // the stream WOULD be accepted, so the dial failure was transient (e.g. the host was still
+                // starting when the handshake ran, and up by the time of the probe): never report it as a refusal.
+                if (IsUpgradeOnlyRejection(res)) return (0, null, null);
                 var body = await res.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
                 var ex = ErrorFrom((int)res.StatusCode, null, body);
                 return ((int)res.StatusCode >= 400 ? (int)res.StatusCode : 0, (int)res.StatusCode >= 400 ? ex.Message : null, ex.Code);
             }
             catch (Exception) { return (0, null, null); }
         }
+
+        internal static bool IsUpgradeOnlyRejection(System.Net.Http.HttpResponseMessage res) =>
+            (int)res.StatusCode < 500 && res.Headers.Contains("Sec-WebSocket-Version");
     }
 }

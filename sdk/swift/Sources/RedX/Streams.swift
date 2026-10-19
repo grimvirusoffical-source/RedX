@@ -153,7 +153,10 @@ extension RedXClient {
             // the handshake status is not exposed by URLSession: ask the host with a plain GET
             var r = URLRequest(url: URL(string: probe)!)
             if !key.isEmpty { r.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
-            if let (d, resp) = try? await session.data(for: r), let h = resp as? HTTPURLResponse, h.statusCode >= 400 {
+            // A probe answered by the WebSocket upgrader itself (Sec-WebSocket-Version set) passed every host
+            // check: the stream would be accepted, so the dial failure was transient (host restarting). Retry it.
+            if let (d, resp) = try? await session.data(for: r), let h = resp as? HTTPURLResponse, h.statusCode >= 400,
+               h.value(forHTTPHeaderField: "Sec-WebSocket-Version") == nil {
                 throw RedXClient.errorFrom(h.statusCode, d)
             }
             throw RedXError(status: 0, code: nil, message: RedXClient.scrub("stream: \(error.localizedDescription)"))

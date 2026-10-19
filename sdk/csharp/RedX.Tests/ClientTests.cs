@@ -58,6 +58,65 @@ namespace RedX.Tests
         }
     }
 
+    public class StreamDialTests
+    {
+        // A fake host: every WebSocket handshake is dropped (as when redxd is still starting), every plain GET
+        // gets `probe`. Reproduces the 0.4.4 Linux flake at ClientTests.cs:129 deterministically: the dial failed
+        // while redxd restarted, the probe GET reached the restarted host, which answered the non-upgrade GET
+        // with the upgrader's 400, and the SDK took that as a refusal and ended the stream for good.
+        static async Task<RedXException> DialAgainst(string probe)
+        {
+            var l = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+            l.Start();
+            var port = ((System.Net.IPEndPoint)l.LocalEndpoint).Port;
+            using var stop = new CancellationTokenSource();
+            var srv = Task.Run(async () =>
+            {
+                try
+                {
+                    for (;;)
+                    {
+                        using var c = await l.AcceptTcpClientAsync(stop.Token);
+                        var st = c.GetStream();
+                        var buf = new byte[8192];
+                        var sb = new StringBuilder();
+                        while (!sb.ToString().Contains("\r\n\r\n"))
+                        {
+                            var n = await st.ReadAsync(buf, stop.Token);
+                            if (n == 0) break;
+                            sb.Append(Encoding.ASCII.GetString(buf, 0, n));
+                        }
+                        if (sb.ToString().IndexOf("upgrade: websocket", StringComparison.OrdinalIgnoreCase) >= 0) continue; // drop
+                        var b = Encoding.ASCII.GetBytes(probe);
+                        await st.WriteAsync(b, stop.Token);
+                    }
+                }
+                catch (Exception) { }
+            });
+            try
+            {
+                using var c = new RedXClient($"http://127.0.0.1:{port}", "rx_" + "live_" + new string('C', 43), "x");
+                return await Assert.ThrowsAsync<RedXException>(() => c.SubscribeAsync("x.red-xai.db:*"));
+            }
+            finally { stop.Cancel(); l.Stop(); try { await srv; } catch { } }
+        }
+
+        [Fact]
+        public async Task UpgradeOnlyProbeIsTransientNotARefusal()
+        {
+            var e = await DialAgainst("HTTP/1.1 400 Bad Request\r\nSec-Websocket-Version: 13\r\nContent-Type: text/plain\r\nContent-Length: 12\r\nConnection: close\r\n\r\nBad Request\n");
+            Assert.Equal(0, e.Status); // 0 = transient: a Reconnect stream keeps retrying
+        }
+
+        [Fact]
+        public async Task RealRefusalIsStillReported()
+        {
+            const string body = "{\"error\":\"invalid key\",\"code\":\"unauthorized\"}";
+            var e = await DialAgainst($"HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n{body}");
+            Assert.Equal(401, e.Status);
+        }
+    }
+
     public class LiveTests : IDisposable
     {
         readonly Host host = new Host();
