@@ -380,6 +380,9 @@ func (h *Host) accountStorage(account string) int64 {
 	for _, name := range h.tenants.list(account) {
 		n += dirBytes(filepath.Join(root, name))
 	}
+	if h.apps != nil {
+		n += h.apps.diskOf(account)
+	}
 	return n
 }
 

@@ -5,6 +5,7 @@ import { state, subscribe, setMode, setTheme, setDb, applyTheme, loadWho, loadDb
 const NAV = [
   { id: 'dashboard', title: 'Dashboard', icon: 'home' },
   { id: 'databases', title: 'Databases', icon: 'db' },
+  { id: 'hostapps', title: 'Apps', icon: 'rocket' },
   { id: 'data', title: 'Data Explorer', icon: 'table' },
   { id: 'studio', title: 'BoxQL Studio', icon: 'terminal' },
   { id: 'keys', title: 'API Keys', icon: 'key' },

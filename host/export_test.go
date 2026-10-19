@@ -2,6 +2,7 @@ package host
 
 import (
 	"errors"
+	"strings"
 	"time"
 
 	"redx/billing"
@@ -129,4 +130,47 @@ func AddTrafficForTest(h *Host, account string, n int64) error {
 	}
 	q, _ := billing.QuotaFor(p.Tier)
 	return h.billing.Usage().AddTraffic(account, q, n, time.Now(), p.PeriodEnd)
+}
+
+// SetHostedFetchForTest replaces the GitHub archive fetch used by app deploys.
+func SetHostedFetchForTest(h *Host, fn func(repo, ref string) ([]byte, error)) {
+	h.apps.mu.Lock()
+	h.apps.fetch = fn
+	h.apps.mu.Unlock()
+}
+
+// SetHostedDNSForTest replaces TXT lookups for custom-domain verification.
+func SetHostedDNSForTest(h *Host, fn func(name string) ([]string, error)) {
+	h.apps.mu.Lock()
+	h.apps.txt = fn
+	h.apps.mu.Unlock()
+}
+
+// SetHostedHTTPForTest replaces the HTTP-01 fetch for custom-domain verification.
+func SetHostedHTTPForTest(h *Host, fn func(rawURL string) (int, string, error)) {
+	h.apps.mu.Lock()
+	h.apps.httpGet = fn
+	h.apps.mu.Unlock()
+}
+
+// AgeHostedDomainForTest moves a domain claim into the past so a stale unverified name can be taken.
+func AgeHostedDomainForTest(h *Host, name string, age time.Duration) {
+	h.apps.mu.Lock()
+	defer h.apps.mu.Unlock()
+	name = strings.ToLower(name)
+	for _, a := range h.apps.apps {
+		for i := range a.Domains {
+			if a.Domains[i].Name == name {
+				a.Domains[i].Added = time.Now().Add(-age)
+			}
+		}
+	}
+}
+
+// UpdatePublicKeyForTest is the Ed25519 public key that signs hosted deploy manifests.
+func UpdatePublicKeyForTest(h *Host) []byte {
+	if h == nil || h.upd == nil {
+		return nil
+	}
+	return append([]byte(nil), h.upd.pub...)
 }
