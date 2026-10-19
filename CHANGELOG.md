@@ -9,6 +9,8 @@
 * Fixed races where a snapshot install or replication pull still in flight during `promote` could overwrite the promoted node's new replication id.
 * The macOS app's executable is the launcher again (the `redx` CLI moved to `RedX.app/Contents/Resources/bin`), and the `.pkg` always installs into `/Applications`.
 * `scripts/smoke.sh` runs on macOS (portable `stat`), and its Content-Range checks assert the full size; CI runs it on macOS too.
+* `redx doctor --tls-key`; a certificate given alone as a flag no longer fails the config check.
+* `redx-launcher` handles `--version` and `-h` (and refuses unknown arguments) without starting the host, and carries the release version.
 * `redx node status` no longer shows a stale "last error" after a successful promote.
 * Added the app connect handshake (`/v1/connect/*`): an app asks for its own workspace, the owner approves on a consent page in the console, and the app exchanges a one-time code plus its PKCE verifier for a key limited to that workspace. Apps can revoke their own key, and the console lists them under *Connected apps*. See [Connecting apps](docs/connect.md).
 

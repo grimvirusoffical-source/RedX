@@ -28,7 +28,7 @@ fi
 
 [ -x scripts/sync-ui-docs.sh ] && scripts/sync-ui-docs.sh >/dev/null
 rm -rf dist; mkdir -p dist; FAILED=""
-LDFLAGS="-s -w -X redx/host.Version=${VERSION}"
+LDFLAGS="-s -w -X redx/host.Version=${VERSION} -X main.version=${VERSION}"  # main.version: redx-launcher
 for t in "${TARGETS[@]}"; do
   IFS='/' read -r os arch arm <<< "$t"
   name="${arch}"; [ "$arch" = "arm" ] && name="armv${arm:-7}"

@@ -14,12 +14,54 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 	"time"
 )
 
 const defaultAddr = "127.0.0.1:7777"
 
+// version is stamped by the build scripts: -X main.version=X.Y.Z
+var version = "dev"
+
+const usage = `redx-launcher: starts the RedX host on this machine if it is not running and opens the console.
+
+usage: redx-launcher            start (if needed) and open the console
+       redx-launcher --version  print the version and exit
+       redx-launcher -h         this help
+
+Environment: REDX_LISTEN (default 127.0.0.1:7777), REDX_LAUNCHER_NO_OPEN=1 (do not open a browser).
+`
+
+// parseArgs decides what to do with the command line. It never starts anything itself.
+// macOS may pass a -psn_... argument when the app is opened from Finder; it is ignored.
+func parseArgs(args []string) (action string, out string, code int) {
+	for _, a := range args {
+		switch {
+		case a == "--version" || a == "-version" || a == "-v" || a == "version":
+			return "exit", fmt.Sprintf("redx-launcher %s (%s/%s)\n", version, runtime.GOOS, runtime.GOARCH), 0
+		case a == "-h" || a == "--help" || a == "-help" || a == "help":
+			return "exit", usage, 0
+		case strings.HasPrefix(a, "-psn_"):
+		default:
+			return "exit", "redx-launcher: unknown argument " + strconv.Quote(a) + "\n\n" + usage, 2
+		}
+	}
+	return "run", "", 0
+}
+
 func main() {
+	if action, out, code := parseArgs(os.Args[1:]); action == "exit" {
+		if code == 0 {
+			fmt.Print(out)
+		} else {
+			fmt.Fprint(os.Stderr, out)
+		}
+		if runtime.GOOS == "windows" { // a GUI program has no console to print to
+			showMessage("RedX", strings.TrimSpace(out))
+		}
+		os.Exit(code)
+	}
 	addr := os.Getenv("REDX_LISTEN")
 	if addr == "" {
 		addr = defaultAddr

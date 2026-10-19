@@ -15,7 +15,7 @@ build_bin() { # arch(go) outdir
   for c in redxd redx; do
     (cd "$ROOT" && GOOS=darwin GOARCH="$1" CGO_ENABLED=0 go build -trimpath -ldflags "$LD" -o "$2/$c" "./cmd/$c")
   done
-  (cd "$ROOT" && GOOS=darwin GOARCH="$1" CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "$2/redx-launcher" ./cmd/redx-launcher)
+  (cd "$ROOT" && GOOS=darwin GOARCH="$1" CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o "$2/redx-launcher" ./cmd/redx-launcher)
 }
 
 for ARCH in "$@"; do

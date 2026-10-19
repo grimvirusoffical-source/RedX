@@ -11,7 +11,7 @@ KIND="$1"; VERSION="$2"; mkdir -p dist
 LD="-s -w -X redx/host.Version=${VERSION}"
 launcher() { # os arch goarm outfile [ldflags]: reuse the one scripts/build.sh already put in the archive folder (same bytes everywhere)
   [ -f "$4" ] && return 0
-  GOOS=$1 GOARCH=$2 GOARM=${3:-} CGO_ENABLED=0 go build -trimpath -ldflags "-s -w ${5:-}" -o "$4" ./cmd/redx-launcher
+  GOOS=$1 GOARCH=$2 GOARM=${3:-} CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION} ${5:-}" -o "$4" ./cmd/redx-launcher
 }
 case "$KIND" in
   deb)
