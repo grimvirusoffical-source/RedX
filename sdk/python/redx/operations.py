@@ -79,6 +79,24 @@ OPERATIONS: Dict[str, Dict[str, Any]] = {
     "connectRevoke": {"id": "connectRevoke", "group": "connect", "method": "POST", "path": "/v1/connect/revoke", "shorthand": "", "auth": "app-key", "danger": "write", "danger_level": 1, "response": "json", "request": "", "host_confirm": "", "summary": "App side: revoke the app's own key (on uninstall)."},
     "connectApps": {"id": "connectApps", "group": "connect", "method": "GET", "path": "/v1/connect/apps", "shorthand": "", "auth": "host-admin", "danger": "safe", "danger_level": 0, "response": "json", "request": "", "host_confirm": "", "summary": "Connected apps."},
     "connectRevokeApp": {"id": "connectRevokeApp", "group": "connect", "method": "DELETE", "path": "/v1/connect/apps/{id}", "shorthand": "", "auth": "host-admin", "danger": "dangerous", "danger_level": 3, "response": "json", "request": "", "host_confirm": "", "summary": "Revoke a connected app's key."},
+    "updateKeys": {"id": "updateKeys", "group": "updates", "method": "GET", "path": "/v1/updates/keys", "shorthand": "", "auth": "none", "danger": "safe", "danger_level": 0, "response": "json", "request": "", "host_confirm": "", "summary": "Ed25519 public keys that sign update manifests."},
+    "listUpdateApps": {"id": "listUpdateApps", "group": "updates", "method": "GET", "path": "/v1/updates/apps", "shorthand": "", "auth": "key", "danger": "safe", "danger_level": 0, "response": "json", "request": "", "host_confirm": "", "summary": "Update status of every app this host knows."},
+    "updateApp": {"id": "updateApp", "group": "updates", "method": "GET", "path": "/v1/updates/apps/{app}", "shorthand": "", "auth": "key", "danger": "safe", "danger_level": 0, "response": "json", "request": "", "host_confirm": "", "summary": "Installed version, hosted flag, source preference and available manifests."},
+    "updateManifest": {"id": "updateManifest", "group": "updates", "method": "GET", "path": "/v1/updates/apps/{app}/manifests/{version}", "shorthand": "", "auth": "key", "danger": "safe", "danger_level": 0, "response": "json", "request": "", "host_confirm": "", "summary": "Signed redx.update-manifest/v1 body. Header X-RedX-Signature covers these exact bytes."},
+    "updateManifestSig": {"id": "updateManifestSig", "group": "updates", "method": "GET", "path": "/v1/updates/apps/{app}/manifests/{version}.sig", "shorthand": "", "auth": "key", "danger": "safe", "danger_level": 0, "response": "text", "request": "", "host_confirm": "", "summary": "The Ed25519 signature string for a manifest (ed25519:\u003cbase64\u003e)."},
+    "updateArtifact": {"id": "updateArtifact", "group": "updates", "method": "GET", "path": "/v1/updates/apps/{app}/manifests/{version}/artifacts/{artifact_id}", "shorthand": "", "auth": "key", "danger": "safe", "danger_level": 0, "response": "binary", "request": "", "host_confirm": "", "summary": "One published artifact. Verify its sha256 against the signed manifest."},
+    "updateHistory": {"id": "updateHistory", "group": "updates", "method": "GET", "path": "/v1/updates/apps/{app}/history", "shorthand": "", "auth": "key", "danger": "safe", "danger_level": 0, "response": "json", "request": "", "host_confirm": "", "summary": "Publish, apply, snapshot and rollback history for an app."},
+    "updateSnapshots": {"id": "updateSnapshots", "group": "updates", "method": "GET", "path": "/v1/updates/apps/{app}/snapshots", "shorthand": "", "auth": "key", "danger": "safe", "danger_level": 0, "response": "json", "request": "", "host_confirm": "", "summary": "Immutable snapshots taken before applies."},
+    "updateRollout": {"id": "updateRollout", "group": "updates", "method": "GET", "path": "/v1/updates/rollouts/{rollout_id}", "shorthand": "", "auth": "key", "danger": "safe", "danger_level": 0, "response": "json", "request": "", "host_confirm": "", "summary": "Rollout state, progress and health."},
+    "updateEvents": {"id": "updateEvents", "group": "updates", "method": "GET", "path": "/v1/updates/events", "shorthand": "", "auth": "key", "danger": "safe", "danger_level": 0, "response": "websocket", "request": "", "host_confirm": "", "summary": "WebSocket of update.available, update.analysed, rollout.state, rollout.health and rollback.done."},
+    "updateSource": {"id": "updateSource", "group": "updates", "method": "PUT", "path": "/v1/updates/apps/{app}/source", "shorthand": "", "auth": "host-admin", "danger": "admin", "danger_level": 2, "response": "json", "request": "json", "host_confirm": "", "summary": "Prefer host, github or both. host or both on an app Red-XAI does not host returns 409 not_hosted."},
+    "updatePolicy": {"id": "updatePolicy", "group": "updates", "method": "PUT", "path": "/v1/updates/apps/{app}/policy", "shorthand": "", "auth": "host-admin", "danger": "admin", "danger_level": 2, "response": "json", "request": "json", "host_confirm": "", "summary": "Auto-apply policy: off, security or all, on channel stable or beta, inside an optional cron window."},
+    "updateApply": {"id": "updateApply", "group": "updates", "method": "POST", "path": "/v1/updates/apps/{app}/apply", "shorthand": "", "auth": "host-admin", "danger": "dangerous", "danger_level": 3, "response": "json", "request": "json", "host_confirm": "", "summary": "Snapshot, then apply. strategy is direct, canary or blue_green. Refuses a failed snapshot and a sequence regression."},
+    "updatePromote": {"id": "updatePromote", "group": "updates", "method": "POST", "path": "/v1/updates/rollouts/{rollout_id}/promote", "shorthand": "", "auth": "host-admin", "danger": "dangerous", "danger_level": 3, "response": "json", "request": "", "host_confirm": "", "summary": "Move a healthy canary to the rest of the cluster."},
+    "updateRolloutRollback": {"id": "updateRolloutRollback", "group": "updates", "method": "POST", "path": "/v1/updates/rollouts/{rollout_id}/rollback", "shorthand": "", "auth": "host-admin", "danger": "dangerous", "danger_level": 3, "response": "json", "request": "json", "host_confirm": "", "summary": "Restore the snapshot taken before this rollout, including mid-canary."},
+    "updateAppRollback": {"id": "updateAppRollback", "group": "updates", "method": "POST", "path": "/v1/updates/apps/{app}/rollback", "shorthand": "", "auth": "host-admin", "danger": "dangerous", "danger_level": 3, "response": "json", "request": "json", "host_confirm": "", "summary": "Restore one snapshot for an app."},
+    "updatePublish": {"id": "updatePublish", "group": "updates", "method": "POST", "path": "/v1/updates/apps/{app}/publish", "shorthand": "", "auth": "host-admin", "danger": "dangerous", "danger_level": 3, "response": "json", "request": "json", "host_confirm": "", "summary": "Sign a host and/or github manifest. A host target marks the app hosted."},
+    "updateGitHubWebhook": {"id": "updateGitHubWebhook", "group": "updates", "method": "POST", "path": "/v1/updates/github/webhook", "shorthand": "", "auth": "none", "danger": "write", "danger_level": 1, "response": "json", "request": "", "host_confirm": "", "summary": "GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest."},
 }
 
 
@@ -359,3 +377,71 @@ class Operations:
     def connect_revoke_app(self, id: str, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
         """Revoke a connected app's key. (DELETE /v1/connect/apps/{id}; auth host-admin; danger dangerous)"""
         return self.call("connectRevokeApp", id=id, confirm=confirm, headers=headers)
+
+    def update_keys(self, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Ed25519 public keys that sign update manifests. (GET /v1/updates/keys; auth none; danger safe)"""
+        return self.call("updateKeys", confirm=confirm, headers=headers)
+
+    def list_update_apps(self, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Update status of every app this host knows. (GET /v1/updates/apps; auth key; danger safe)"""
+        return self.call("listUpdateApps", confirm=confirm, headers=headers)
+
+    def update_app(self, app: str, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Installed version, hosted flag, source preference and available manifests. (GET /v1/updates/apps/{app}; auth key; danger safe)"""
+        return self.call("updateApp", app=app, confirm=confirm, headers=headers)
+
+    def update_manifest(self, app: str, version: str, *, query: Optional[Dict[str, Any]] = None, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Signed redx.update-manifest/v1 body. Header X-RedX-Signature covers these exact bytes. (GET /v1/updates/apps/{app}/manifests/{version}; auth key; danger safe)"""
+        return self.call("updateManifest", app=app, version=version, query=query, confirm=confirm, headers=headers)
+
+    def update_manifest_sig(self, app: str, version: str, *, query: Optional[Dict[str, Any]] = None, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """The Ed25519 signature string for a manifest (ed25519:<base64>). (GET /v1/updates/apps/{app}/manifests/{version}.sig; auth key; danger safe)"""
+        return self.call("updateManifestSig", app=app, version=version, query=query, confirm=confirm, headers=headers)
+
+    def update_artifact(self, app: str, version: str, artifact_id: str, *, query: Optional[Dict[str, Any]] = None, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """One published artifact. Verify its sha256 against the signed manifest. (GET /v1/updates/apps/{app}/manifests/{version}/artifacts/{artifact_id}; auth key; danger safe)"""
+        return self.call("updateArtifact", app=app, version=version, artifact_id=artifact_id, query=query, confirm=confirm, headers=headers)
+
+    def update_history(self, app: str, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Publish, apply, snapshot and rollback history for an app. (GET /v1/updates/apps/{app}/history; auth key; danger safe)"""
+        return self.call("updateHistory", app=app, confirm=confirm, headers=headers)
+
+    def update_snapshots(self, app: str, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Immutable snapshots taken before applies. (GET /v1/updates/apps/{app}/snapshots; auth key; danger safe)"""
+        return self.call("updateSnapshots", app=app, confirm=confirm, headers=headers)
+
+    def update_rollout(self, rollout_id: str, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Rollout state, progress and health. (GET /v1/updates/rollouts/{rollout_id}; auth key; danger safe)"""
+        return self.call("updateRollout", rollout_id=rollout_id, confirm=confirm, headers=headers)
+
+    def update_source(self, app: str, *, body: Any = None, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Prefer host, github or both. host or both on an app Red-XAI does not host returns 409 not_hosted. (PUT /v1/updates/apps/{app}/source; auth host-admin; danger admin)"""
+        return self.call("updateSource", app=app, body=body, confirm=confirm, headers=headers)
+
+    def update_policy(self, app: str, *, body: Any = None, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Auto-apply policy: off, security or all, on channel stable or beta, inside an optional cron window. (PUT /v1/updates/apps/{app}/policy; auth host-admin; danger admin)"""
+        return self.call("updatePolicy", app=app, body=body, confirm=confirm, headers=headers)
+
+    def update_apply(self, app: str, *, body: Any = None, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Snapshot, then apply. strategy is direct, canary or blue_green. Refuses a failed snapshot and a sequence regression. (POST /v1/updates/apps/{app}/apply; auth host-admin; danger dangerous)"""
+        return self.call("updateApply", app=app, body=body, confirm=confirm, headers=headers)
+
+    def update_promote(self, rollout_id: str, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Move a healthy canary to the rest of the cluster. (POST /v1/updates/rollouts/{rollout_id}/promote; auth host-admin; danger dangerous)"""
+        return self.call("updatePromote", rollout_id=rollout_id, confirm=confirm, headers=headers)
+
+    def update_rollout_rollback(self, rollout_id: str, *, body: Any = None, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Restore the snapshot taken before this rollout, including mid-canary. (POST /v1/updates/rollouts/{rollout_id}/rollback; auth host-admin; danger dangerous)"""
+        return self.call("updateRolloutRollback", rollout_id=rollout_id, body=body, confirm=confirm, headers=headers)
+
+    def update_app_rollback(self, app: str, *, body: Any = None, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Restore one snapshot for an app. (POST /v1/updates/apps/{app}/rollback; auth host-admin; danger dangerous)"""
+        return self.call("updateAppRollback", app=app, body=body, confirm=confirm, headers=headers)
+
+    def update_publish(self, app: str, *, body: Any = None, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Sign a host and/or github manifest. A host target marks the app hosted. (POST /v1/updates/apps/{app}/publish; auth host-admin; danger dangerous)"""
+        return self.call("updatePublish", app=app, body=body, confirm=confirm, headers=headers)
+
+    def update_git_hub_webhook(self, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest. (POST /v1/updates/github/webhook; auth none; danger write)"""
+        return self.call("updateGitHubWebhook", confirm=confirm, headers=headers)

@@ -23,6 +23,41 @@ func SetConnectClock(h *Host, now func() time.Time) {
 	h.connect.mu.Unlock()
 }
 
+// SetUpdateMembers replaces the cluster member list the rollout planner sees.
+func SetUpdateMembers(h *Host, ids []string) {
+	h.upd.mu.Lock()
+	h.upd.members = append([]string(nil), ids...)
+	h.upd.mu.Unlock()
+}
+
+// SetUpdateHealth sets the error rate (0..1) and p95 latency the rollout health gate reads.
+func SetUpdateHealth(h *Host, errorRate, p95 float64) {
+	h.upd.mu.Lock()
+	h.upd.health = Health{ErrorRate: errorRate, P95MS: p95}
+	h.upd.mu.Unlock()
+}
+
+// SetUpdateSnapshotFail makes the next apply refuse with snapshot_failed.
+func SetUpdateSnapshotFail(h *Host, fail bool) {
+	h.upd.mu.Lock()
+	h.upd.snapFail = fail
+	h.upd.mu.Unlock()
+}
+
+// SetUpdateGitHubAPI points release publishing at a test server.
+func SetUpdateGitHubAPI(h *Host, base string) {
+	h.upd.mu.Lock()
+	h.upd.githubAPI = base
+	h.upd.mu.Unlock()
+}
+
+// SetUpdateAllowLoopback lets artifact downloads use a loopback URL (tests only).
+func SetUpdateAllowLoopback(h *Host, on bool) {
+	h.upd.mu.Lock()
+	h.upd.allowLoopback = on
+	h.upd.mu.Unlock()
+}
+
 // SetBeforeApplyHook runs fn after a follower fetched an entry and before it applies it, for one test.
 func SetBeforeApplyHook(t interface{ Cleanup(func()) }, fn func()) {
 	beforeApplyHook.Store(&fn)

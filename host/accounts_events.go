@@ -68,6 +68,12 @@ func (h *Host) PollAccountEventsNow(ctx context.Context) (int, error) {
 			return ended, err
 		}
 		for _, e := range evs {
+			if e.isUpdate() {
+				if h.upd != nil {
+					h.upd.emit(UpdateEvent{Type: e.Type, App: e.App, Version: e.Version, Source: e.Source, RolloutID: e.RolloutID, State: e.State})
+				}
+				continue
+			}
 			if !e.endsSessions() {
 				continue
 			}

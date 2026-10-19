@@ -913,6 +913,226 @@
    "summary": "Revoke a connected app's key.",
    "response": "json",
    "notes": "Server requires header X-RedX-Confirm: connectRevokeApp (or ?confirm=connectRevokeApp); HTTP 428 + code confirm_required otherwise."
+  },
+  {
+   "id": "updateKeys",
+   "group": "updates",
+   "method": "GET",
+   "path": "/v1/updates/keys",
+   "auth": "none",
+   "danger": "safe",
+   "summary": "Ed25519 public keys that sign update manifests.",
+   "response": "json"
+  },
+  {
+   "id": "listUpdateApps",
+   "group": "updates",
+   "method": "GET",
+   "path": "/v1/updates/apps",
+   "auth": "key",
+   "danger": "safe",
+   "summary": "Update status of every app this host knows.",
+   "response": "json"
+  },
+  {
+   "id": "updateApp",
+   "group": "updates",
+   "method": "GET",
+   "path": "/v1/updates/apps/{app}",
+   "auth": "key",
+   "danger": "safe",
+   "summary": "Installed version, hosted flag, source preference and available manifests.",
+   "response": "json"
+  },
+  {
+   "id": "updateManifest",
+   "group": "updates",
+   "method": "GET",
+   "path": "/v1/updates/apps/{app}/manifests/{version}",
+   "auth": "key",
+   "danger": "safe",
+   "summary": "Signed redx.update-manifest/v1 body. Header X-RedX-Signature covers these exact bytes.",
+   "response": "json",
+   "query": {
+    "source": "string"
+   }
+  },
+  {
+   "id": "updateManifestSig",
+   "group": "updates",
+   "method": "GET",
+   "path": "/v1/updates/apps/{app}/manifests/{version}.sig",
+   "auth": "key",
+   "danger": "safe",
+   "summary": "The Ed25519 signature string for a manifest (ed25519:<base64>).",
+   "response": "text",
+   "query": {
+    "source": "string"
+   }
+  },
+  {
+   "id": "updateArtifact",
+   "group": "updates",
+   "method": "GET",
+   "path": "/v1/updates/apps/{app}/manifests/{version}/artifacts/{artifact_id}",
+   "auth": "key",
+   "danger": "safe",
+   "summary": "One published artifact. Verify its sha256 against the signed manifest.",
+   "response": "binary",
+   "query": {
+    "source": "string"
+   }
+  },
+  {
+   "id": "updateHistory",
+   "group": "updates",
+   "method": "GET",
+   "path": "/v1/updates/apps/{app}/history",
+   "auth": "key",
+   "danger": "safe",
+   "summary": "Publish, apply, snapshot and rollback history for an app.",
+   "response": "json"
+  },
+  {
+   "id": "updateSnapshots",
+   "group": "updates",
+   "method": "GET",
+   "path": "/v1/updates/apps/{app}/snapshots",
+   "auth": "key",
+   "danger": "safe",
+   "summary": "Immutable snapshots taken before applies.",
+   "response": "json"
+  },
+  {
+   "id": "updateRollout",
+   "group": "updates",
+   "method": "GET",
+   "path": "/v1/updates/rollouts/{rollout_id}",
+   "auth": "key",
+   "danger": "safe",
+   "summary": "Rollout state, progress and health.",
+   "response": "json"
+  },
+  {
+   "id": "updateEvents",
+   "group": "updates",
+   "method": "GET",
+   "path": "/v1/updates/events",
+   "auth": "key",
+   "danger": "safe",
+   "summary": "WebSocket of update.available, update.analysed, rollout.state, rollout.health and rollback.done.",
+   "response": "websocket",
+   "notes": "update.* events that arrive on the Red-XAI Accounts poll GET /v1/apps/events are forwarded onto this socket. /v1/apps/events itself stays the Accounts JSON feed."
+  },
+  {
+   "id": "updateSource",
+   "group": "updates",
+   "method": "PUT",
+   "path": "/v1/updates/apps/{app}/source",
+   "auth": "host-admin",
+   "danger": "admin",
+   "summary": "Prefer host, github or both. host or both on an app Red-XAI does not host returns 409 not_hosted.",
+   "response": "json",
+   "body": {
+    "source": "string"
+   }
+  },
+  {
+   "id": "updatePolicy",
+   "group": "updates",
+   "method": "PUT",
+   "path": "/v1/updates/apps/{app}/policy",
+   "auth": "host-admin",
+   "danger": "admin",
+   "summary": "Auto-apply policy: off, security or all, on channel stable or beta, inside an optional cron window.",
+   "response": "json",
+   "body": {
+    "auto_apply": "string",
+    "channel": "string",
+    "window": "string"
+   }
+  },
+  {
+   "id": "updateApply",
+   "group": "updates",
+   "method": "POST",
+   "path": "/v1/updates/apps/{app}/apply",
+   "auth": "host-admin",
+   "danger": "dangerous",
+   "summary": "Snapshot, then apply. strategy is direct, canary or blue_green. Refuses a failed snapshot and a sequence regression.",
+   "response": "json",
+   "body": {
+    "version": "string",
+    "source": "string",
+    "strategy": "string",
+    "canary": "object",
+    "schedule_at": "string",
+    "dry_run": "boolean"
+   }
+  },
+  {
+   "id": "updatePromote",
+   "group": "updates",
+   "method": "POST",
+   "path": "/v1/updates/rollouts/{rollout_id}/promote",
+   "auth": "host-admin",
+   "danger": "dangerous",
+   "summary": "Move a healthy canary to the rest of the cluster.",
+   "response": "json"
+  },
+  {
+   "id": "updateRolloutRollback",
+   "group": "updates",
+   "method": "POST",
+   "path": "/v1/updates/rollouts/{rollout_id}/rollback",
+   "auth": "host-admin",
+   "danger": "dangerous",
+   "summary": "Restore the snapshot taken before this rollout, including mid-canary.",
+   "response": "json",
+   "body": {
+    "reason": "string"
+   }
+  },
+  {
+   "id": "updateAppRollback",
+   "group": "updates",
+   "method": "POST",
+   "path": "/v1/updates/apps/{app}/rollback",
+   "auth": "host-admin",
+   "danger": "dangerous",
+   "summary": "Restore one snapshot for an app.",
+   "response": "json",
+   "body": {
+    "snapshot_id": "string"
+   }
+  },
+  {
+   "id": "updatePublish",
+   "group": "updates",
+   "method": "POST",
+   "path": "/v1/updates/apps/{app}/publish",
+   "auth": "host-admin",
+   "danger": "dangerous",
+   "summary": "Sign a host and/or github manifest. A host target marks the app hosted.",
+   "response": "json",
+   "body": {
+    "version": "string",
+    "channel": "string",
+    "notes_md": "string",
+    "outcome_tags": "array",
+    "targets": "array",
+    "artifacts": "array"
+   }
+  },
+  {
+   "id": "updateGitHubWebhook",
+   "group": "updates",
+   "method": "POST",
+   "path": "/v1/updates/github/webhook",
+   "auth": "none",
+   "danger": "write",
+   "summary": "GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest.",
+   "response": "json"
   }
  ],
  "paramEncoding": {

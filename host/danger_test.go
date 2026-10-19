@@ -91,6 +91,11 @@ func TestDangerousOpsRequireConfirm(t *testing.T) {
 		{"repoint", "POST", "/v1/cluster/leader", `{"url":"http://127.0.0.1:1","join_token":"x"}`, "repoint", "", 0},
 		{"connectApprove", "POST", "/v1/connect/approve", `{"request_id":"nope"}`, "connectApprove", "", 0},
 		{"connectRevokeApp", "DELETE", "/v1/connect/apps/nope", "", "connectRevokeApp", "", 0},
+		{"updateApply", "POST", "/v1/updates/apps/redx/apply", `{"version":"0.0.1","source":"host"}`, "updateApply", "", 0},
+		{"updatePromote", "POST", "/v1/updates/rollouts/ro_missing/promote", `{}`, "updatePromote", "", 0},
+		{"updateRolloutRollback", "POST", "/v1/updates/rollouts/ro_missing/rollback", `{}`, "updateRolloutRollback", "", 0},
+		{"updateAppRollback", "POST", "/v1/updates/apps/redx/rollback", `{"snapshot_id":"snap_missing"}`, "updateAppRollback", "", 0},
+		{"updatePublish", "POST", "/v1/updates/apps/redx/publish", `{"version":"0.0.1","targets":["host"]}`, "updatePublish", "", 0},
 		{"deleteDatabase", "DELETE", "/v1/db/scratch", "", "deleteDatabase", "scratch", 200},
 	}
 	// recreate a key for rotate (revoke above consumed the seed)

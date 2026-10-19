@@ -59,7 +59,7 @@ namespace RedX
     {
         static readonly Regex DbName = new Regex("^[a-z0-9][a-z0-9_-]{0,62}$");
         static readonly Regex KeyShape = new Regex("rx_live_[A-Za-z0-9]+");
-        static readonly Regex Param = new Regex(@"\{([a-z]+)\}");
+        static readonly Regex Param = new Regex(@"\{([a-z][a-z0-9_]*)\}");
 
         readonly string key;
         readonly HttpClient http;

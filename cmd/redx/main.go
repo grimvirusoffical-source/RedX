@@ -102,6 +102,8 @@ func main() {
 		cmdNode(args)
 	case "preset":
 		cmdPreset(args)
+	case "update":
+		cmdUpdate(args)
 	case "backup":
 		cmdBackup(args)
 	case "restore":
@@ -139,6 +141,8 @@ func usage() {
   redx node token | join ADDR --token T | status | promote | repoint ADDR --token T
   redx preset ls | show NAME [--diff] | apply NAME [--dry-run] [--set key=value] [--join LINK]
                                            settings profiles (Server, VPS, Website, App, Game, Edge, Dev, Cluster, Backup, All)
+  redx update status [APP] | check | apply APP [--version V] [--source host|github] [--canary PERCENT]
+  redx update promote ID | rollback ID | snapshots APP | restore APP SNAP | source APP host|github|both
   redx backup --out FILE [--offline]      redx restore FILE [--force]
   redx doctor [--config FILE]
   redx version | --version

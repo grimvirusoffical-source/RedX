@@ -51,6 +51,8 @@ type Host struct {
 	diskAt      time.Time
 	diskBytes   int64
 
+	upd *updater // host update manifests, rollouts, snapshots
+
 	started time.Time
 	lock    *flock.Flock
 	pause   sync.RWMutex // writes hold RLock; backup/snapshot hold Lock
@@ -123,6 +125,9 @@ func New(cfg Config, opener Opener, logf func(string, ...interface{})) (*Host, e
 	}
 	h.Tracker = NewTTLTracker(filepath.Join(cfg.DataDir, "cluster", "ttl.json"))
 	if h.Cluster, err = newCluster(h); err != nil {
+		return fail(err)
+	}
+	if h.upd, err = openUpdater(h); err != nil {
 		return fail(err)
 	}
 	h.KS.SetOnChange(func(r KeyRecord) {
@@ -249,6 +254,7 @@ func (h *Host) maintenance(ctx context.Context) {
 		case now := <-t.C:
 			if h.Cluster.IsLeader() {
 				h.expireDue(now)
+				h.tickUpdates(now)
 			}
 			h.KS.Poll()
 			h.Cluster.log.MaybeCompact()

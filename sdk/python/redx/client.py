@@ -518,7 +518,7 @@ class RedX(Operations):
                 return "/".join(quote(seg, safe="") for seg in str(v).split("/"))
             return quote(str(v), safe="")
 
-        return re.sub(r"\{([a-z]+)\}", sub, p)
+        return re.sub(r"\{([a-z][a-z0-9_]*)\}", sub, p)
 
     # -- convenience calls (same names in every RedX SDK) ----------------------
     def tx(self, commands: list, params: Optional[Dict[str, Any]] = None) -> dict:

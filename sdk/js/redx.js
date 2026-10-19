@@ -305,7 +305,7 @@ class RedX {
       if (!db && op.shorthand) p = op.shorthand;
       else p = p.replace('{db}', db || 'default');
     }
-    return p.replace(/\{([a-z]+)\}/g, (_, n) => {
+    return p.replace(/\{([a-z][a-z0-9_]*)\}/g, (_, n) => {
       const v = opts[n];
       if (v === undefined || v === null || v === '') {
         if (n === 'folder') return '';

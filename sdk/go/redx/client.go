@@ -286,7 +286,7 @@ func (c *Client) opPath(op Operation, a *Args) (string, error) {
 	return p, err
 }
 
-var paramRe = regexp.MustCompile(`\{[a-z]+\}`)
+var paramRe = regexp.MustCompile(`\{[a-z][a-z0-9_]*\}`)
 
 func queryString(q map[string]any) string {
 	if len(q) == 0 {

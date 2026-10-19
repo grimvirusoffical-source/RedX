@@ -56,7 +56,7 @@ type Spec struct {
 	Operations []Op `json:"operations"`
 }
 
-var reParam = regexp.MustCompile(`\{([a-z]+)\}`)
+var reParam = regexp.MustCompile(`\{([a-z][a-z0-9_]*)\}`)
 
 func (o Op) params() []string {
 	var out []string

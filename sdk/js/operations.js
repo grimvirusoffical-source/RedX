@@ -77,6 +77,24 @@ const OPERATIONS = Object.freeze({
   connectRevoke: Object.freeze({ id: "connectRevoke", group: "connect", method: "POST", path: "/v1/connect/revoke", shorthand: "", auth: "app-key", danger: "write", dangerLevel: 1, response: "json", request: "", hostConfirm: "", summary: "App side: revoke the app's own key (on uninstall)." }),
   connectApps: Object.freeze({ id: "connectApps", group: "connect", method: "GET", path: "/v1/connect/apps", shorthand: "", auth: "host-admin", danger: "safe", dangerLevel: 0, response: "json", request: "", hostConfirm: "", summary: "Connected apps." }),
   connectRevokeApp: Object.freeze({ id: "connectRevokeApp", group: "connect", method: "DELETE", path: "/v1/connect/apps/{id}", shorthand: "", auth: "host-admin", danger: "dangerous", dangerLevel: 3, response: "json", request: "", hostConfirm: "", summary: "Revoke a connected app's key." }),
+  updateKeys: Object.freeze({ id: "updateKeys", group: "updates", method: "GET", path: "/v1/updates/keys", shorthand: "", auth: "none", danger: "safe", dangerLevel: 0, response: "json", request: "", hostConfirm: "", summary: "Ed25519 public keys that sign update manifests." }),
+  listUpdateApps: Object.freeze({ id: "listUpdateApps", group: "updates", method: "GET", path: "/v1/updates/apps", shorthand: "", auth: "key", danger: "safe", dangerLevel: 0, response: "json", request: "", hostConfirm: "", summary: "Update status of every app this host knows." }),
+  updateApp: Object.freeze({ id: "updateApp", group: "updates", method: "GET", path: "/v1/updates/apps/{app}", shorthand: "", auth: "key", danger: "safe", dangerLevel: 0, response: "json", request: "", hostConfirm: "", summary: "Installed version, hosted flag, source preference and available manifests." }),
+  updateManifest: Object.freeze({ id: "updateManifest", group: "updates", method: "GET", path: "/v1/updates/apps/{app}/manifests/{version}", shorthand: "", auth: "key", danger: "safe", dangerLevel: 0, response: "json", request: "", hostConfirm: "", summary: "Signed redx.update-manifest/v1 body. Header X-RedX-Signature covers these exact bytes." }),
+  updateManifestSig: Object.freeze({ id: "updateManifestSig", group: "updates", method: "GET", path: "/v1/updates/apps/{app}/manifests/{version}.sig", shorthand: "", auth: "key", danger: "safe", dangerLevel: 0, response: "text", request: "", hostConfirm: "", summary: "The Ed25519 signature string for a manifest (ed25519:\u003cbase64\u003e)." }),
+  updateArtifact: Object.freeze({ id: "updateArtifact", group: "updates", method: "GET", path: "/v1/updates/apps/{app}/manifests/{version}/artifacts/{artifact_id}", shorthand: "", auth: "key", danger: "safe", dangerLevel: 0, response: "binary", request: "", hostConfirm: "", summary: "One published artifact. Verify its sha256 against the signed manifest." }),
+  updateHistory: Object.freeze({ id: "updateHistory", group: "updates", method: "GET", path: "/v1/updates/apps/{app}/history", shorthand: "", auth: "key", danger: "safe", dangerLevel: 0, response: "json", request: "", hostConfirm: "", summary: "Publish, apply, snapshot and rollback history for an app." }),
+  updateSnapshots: Object.freeze({ id: "updateSnapshots", group: "updates", method: "GET", path: "/v1/updates/apps/{app}/snapshots", shorthand: "", auth: "key", danger: "safe", dangerLevel: 0, response: "json", request: "", hostConfirm: "", summary: "Immutable snapshots taken before applies." }),
+  updateRollout: Object.freeze({ id: "updateRollout", group: "updates", method: "GET", path: "/v1/updates/rollouts/{rollout_id}", shorthand: "", auth: "key", danger: "safe", dangerLevel: 0, response: "json", request: "", hostConfirm: "", summary: "Rollout state, progress and health." }),
+  updateEvents: Object.freeze({ id: "updateEvents", group: "updates", method: "GET", path: "/v1/updates/events", shorthand: "", auth: "key", danger: "safe", dangerLevel: 0, response: "websocket", request: "", hostConfirm: "", summary: "WebSocket of update.available, update.analysed, rollout.state, rollout.health and rollback.done." }),
+  updateSource: Object.freeze({ id: "updateSource", group: "updates", method: "PUT", path: "/v1/updates/apps/{app}/source", shorthand: "", auth: "host-admin", danger: "admin", dangerLevel: 2, response: "json", request: "json", hostConfirm: "", summary: "Prefer host, github or both. host or both on an app Red-XAI does not host returns 409 not_hosted." }),
+  updatePolicy: Object.freeze({ id: "updatePolicy", group: "updates", method: "PUT", path: "/v1/updates/apps/{app}/policy", shorthand: "", auth: "host-admin", danger: "admin", dangerLevel: 2, response: "json", request: "json", hostConfirm: "", summary: "Auto-apply policy: off, security or all, on channel stable or beta, inside an optional cron window." }),
+  updateApply: Object.freeze({ id: "updateApply", group: "updates", method: "POST", path: "/v1/updates/apps/{app}/apply", shorthand: "", auth: "host-admin", danger: "dangerous", dangerLevel: 3, response: "json", request: "json", hostConfirm: "", summary: "Snapshot, then apply. strategy is direct, canary or blue_green. Refuses a failed snapshot and a sequence regression." }),
+  updatePromote: Object.freeze({ id: "updatePromote", group: "updates", method: "POST", path: "/v1/updates/rollouts/{rollout_id}/promote", shorthand: "", auth: "host-admin", danger: "dangerous", dangerLevel: 3, response: "json", request: "", hostConfirm: "", summary: "Move a healthy canary to the rest of the cluster." }),
+  updateRolloutRollback: Object.freeze({ id: "updateRolloutRollback", group: "updates", method: "POST", path: "/v1/updates/rollouts/{rollout_id}/rollback", shorthand: "", auth: "host-admin", danger: "dangerous", dangerLevel: 3, response: "json", request: "json", hostConfirm: "", summary: "Restore the snapshot taken before this rollout, including mid-canary." }),
+  updateAppRollback: Object.freeze({ id: "updateAppRollback", group: "updates", method: "POST", path: "/v1/updates/apps/{app}/rollback", shorthand: "", auth: "host-admin", danger: "dangerous", dangerLevel: 3, response: "json", request: "json", hostConfirm: "", summary: "Restore one snapshot for an app." }),
+  updatePublish: Object.freeze({ id: "updatePublish", group: "updates", method: "POST", path: "/v1/updates/apps/{app}/publish", shorthand: "", auth: "host-admin", danger: "dangerous", dangerLevel: 3, response: "json", request: "json", hostConfirm: "", summary: "Sign a host and/or github manifest. A host target marks the app hosted." }),
+  updateGitHubWebhook: Object.freeze({ id: "updateGitHubWebhook", group: "updates", method: "POST", path: "/v1/updates/github/webhook", shorthand: "", auth: "none", danger: "write", dangerLevel: 1, response: "json", request: "", hostConfirm: "", summary: "GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest." }),
 });
 
 // install adds one method per operation to the client class: client.<id>({ db, <path params>, query, body, confirm }).
@@ -149,6 +167,23 @@ function install(proto) {
   if (!proto.connectRevoke) proto.connectRevoke = function (opts = {}) { return this.call("connectRevoke", opts); };
   if (!proto.connectApps) proto.connectApps = function (opts = {}) { return this.call("connectApps", opts); };
   if (!proto.connectRevokeApp) proto.connectRevokeApp = function (opts = {}) { return this.call("connectRevokeApp", opts); };
+  if (!proto.updateKeys) proto.updateKeys = function (opts = {}) { return this.call("updateKeys", opts); };
+  if (!proto.listUpdateApps) proto.listUpdateApps = function (opts = {}) { return this.call("listUpdateApps", opts); };
+  if (!proto.updateApp) proto.updateApp = function (opts = {}) { return this.call("updateApp", opts); };
+  if (!proto.updateManifest) proto.updateManifest = function (opts = {}) { return this.call("updateManifest", opts); };
+  if (!proto.updateManifestSig) proto.updateManifestSig = function (opts = {}) { return this.call("updateManifestSig", opts); };
+  if (!proto.updateArtifact) proto.updateArtifact = function (opts = {}) { return this.call("updateArtifact", opts); };
+  if (!proto.updateHistory) proto.updateHistory = function (opts = {}) { return this.call("updateHistory", opts); };
+  if (!proto.updateSnapshots) proto.updateSnapshots = function (opts = {}) { return this.call("updateSnapshots", opts); };
+  if (!proto.updateRollout) proto.updateRollout = function (opts = {}) { return this.call("updateRollout", opts); };
+  if (!proto.updateSource) proto.updateSource = function (opts = {}) { return this.call("updateSource", opts); };
+  if (!proto.updatePolicy) proto.updatePolicy = function (opts = {}) { return this.call("updatePolicy", opts); };
+  if (!proto.updateApply) proto.updateApply = function (opts = {}) { return this.call("updateApply", opts); };
+  if (!proto.updatePromote) proto.updatePromote = function (opts = {}) { return this.call("updatePromote", opts); };
+  if (!proto.updateRolloutRollback) proto.updateRolloutRollback = function (opts = {}) { return this.call("updateRolloutRollback", opts); };
+  if (!proto.updateAppRollback) proto.updateAppRollback = function (opts = {}) { return this.call("updateAppRollback", opts); };
+  if (!proto.updatePublish) proto.updatePublish = function (opts = {}) { return this.call("updatePublish", opts); };
+  if (!proto.updateGitHubWebhook) proto.updateGitHubWebhook = function (opts = {}) { return this.call("updateGitHubWebhook", opts); };
 }
 
 module.exports = { OPERATIONS, DANGER, SEGMENT_PARAMS, install };

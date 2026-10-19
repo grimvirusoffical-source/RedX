@@ -45,3 +45,14 @@ default_db = "default"                # database served by /v1/path/...
 # owner_emails = ["owner@example.com"]                   # deploy config only; or env REDXAI_OWNER_EMAILS.
 #                                                        # Owners also need a verified email and a 2FA sign-in.
 # Client secret (confidential clients only): env REDX_ACCOUNTS_CLIENT_SECRET, never in this file.
+
+# --- host updates (phase 1) ---
+# The Ed25519 signing key is never a config value. Set one of:
+#   env REDX_UPDATE_SIGNING_KEY            (base64 or hex, 32-byte seed or 64-byte key; not logged)
+#   update_signing_key_file = "/etc/redx/update-signing.key"   # mode 0600; or REDX_UPDATE_SIGNING_KEY_FILE
+# If neither is set, redxd creates <data_dir>/updates/signing.key (mode 0600) on first start.
+# update_signing_key_file = "/etc/redx/update-signing.key"
+# github_webhook_secret_file = "/etc/redx/github-webhook.secret"  # mode 0600; or env REDX_GITHUB_WEBHOOK_SECRET
+# github_repo = "red-xai/redx"            # default repo for POST /v1/updates/.../publish target github
+# hosted_apps = ["redx"]                  # app ids this host may serve as source "host" (or env REDX_HOSTED_APPS)
+# A GitHub token, when publishing to GitHub, is env REDX_GITHUB_TOKEN only.

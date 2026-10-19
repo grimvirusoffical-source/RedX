@@ -93,6 +93,24 @@ public let operations: [String: Operation] = [
     "connectRevoke": Operation(id: "connectRevoke", group: "connect", method: "POST", path: "/v1/connect/revoke", shorthand: "", auth: "app-key", response: "json", request: "", hostConfirm: "", summary: "App side: revoke the app's own key (on uninstall).", danger: .write),
     "connectApps": Operation(id: "connectApps", group: "connect", method: "GET", path: "/v1/connect/apps", shorthand: "", auth: "host-admin", response: "json", request: "", hostConfirm: "", summary: "Connected apps.", danger: .safe),
     "connectRevokeApp": Operation(id: "connectRevokeApp", group: "connect", method: "DELETE", path: "/v1/connect/apps/{id}", shorthand: "", auth: "host-admin", response: "json", request: "", hostConfirm: "", summary: "Revoke a connected app's key.", danger: .dangerous),
+    "updateKeys": Operation(id: "updateKeys", group: "updates", method: "GET", path: "/v1/updates/keys", shorthand: "", auth: "none", response: "json", request: "", hostConfirm: "", summary: "Ed25519 public keys that sign update manifests.", danger: .safe),
+    "listUpdateApps": Operation(id: "listUpdateApps", group: "updates", method: "GET", path: "/v1/updates/apps", shorthand: "", auth: "key", response: "json", request: "", hostConfirm: "", summary: "Update status of every app this host knows.", danger: .safe),
+    "updateApp": Operation(id: "updateApp", group: "updates", method: "GET", path: "/v1/updates/apps/{app}", shorthand: "", auth: "key", response: "json", request: "", hostConfirm: "", summary: "Installed version, hosted flag, source preference and available manifests.", danger: .safe),
+    "updateManifest": Operation(id: "updateManifest", group: "updates", method: "GET", path: "/v1/updates/apps/{app}/manifests/{version}", shorthand: "", auth: "key", response: "json", request: "", hostConfirm: "", summary: "Signed redx.update-manifest/v1 body. Header X-RedX-Signature covers these exact bytes.", danger: .safe),
+    "updateManifestSig": Operation(id: "updateManifestSig", group: "updates", method: "GET", path: "/v1/updates/apps/{app}/manifests/{version}.sig", shorthand: "", auth: "key", response: "text", request: "", hostConfirm: "", summary: "The Ed25519 signature string for a manifest (ed25519:\u003cbase64\u003e).", danger: .safe),
+    "updateArtifact": Operation(id: "updateArtifact", group: "updates", method: "GET", path: "/v1/updates/apps/{app}/manifests/{version}/artifacts/{artifact_id}", shorthand: "", auth: "key", response: "binary", request: "", hostConfirm: "", summary: "One published artifact. Verify its sha256 against the signed manifest.", danger: .safe),
+    "updateHistory": Operation(id: "updateHistory", group: "updates", method: "GET", path: "/v1/updates/apps/{app}/history", shorthand: "", auth: "key", response: "json", request: "", hostConfirm: "", summary: "Publish, apply, snapshot and rollback history for an app.", danger: .safe),
+    "updateSnapshots": Operation(id: "updateSnapshots", group: "updates", method: "GET", path: "/v1/updates/apps/{app}/snapshots", shorthand: "", auth: "key", response: "json", request: "", hostConfirm: "", summary: "Immutable snapshots taken before applies.", danger: .safe),
+    "updateRollout": Operation(id: "updateRollout", group: "updates", method: "GET", path: "/v1/updates/rollouts/{rollout_id}", shorthand: "", auth: "key", response: "json", request: "", hostConfirm: "", summary: "Rollout state, progress and health.", danger: .safe),
+    "updateEvents": Operation(id: "updateEvents", group: "updates", method: "GET", path: "/v1/updates/events", shorthand: "", auth: "key", response: "websocket", request: "", hostConfirm: "", summary: "WebSocket of update.available, update.analysed, rollout.state, rollout.health and rollback.done.", danger: .safe),
+    "updateSource": Operation(id: "updateSource", group: "updates", method: "PUT", path: "/v1/updates/apps/{app}/source", shorthand: "", auth: "host-admin", response: "json", request: "json", hostConfirm: "", summary: "Prefer host, github or both. host or both on an app Red-XAI does not host returns 409 not_hosted.", danger: .admin),
+    "updatePolicy": Operation(id: "updatePolicy", group: "updates", method: "PUT", path: "/v1/updates/apps/{app}/policy", shorthand: "", auth: "host-admin", response: "json", request: "json", hostConfirm: "", summary: "Auto-apply policy: off, security or all, on channel stable or beta, inside an optional cron window.", danger: .admin),
+    "updateApply": Operation(id: "updateApply", group: "updates", method: "POST", path: "/v1/updates/apps/{app}/apply", shorthand: "", auth: "host-admin", response: "json", request: "json", hostConfirm: "", summary: "Snapshot, then apply. strategy is direct, canary or blue_green. Refuses a failed snapshot and a sequence regression.", danger: .dangerous),
+    "updatePromote": Operation(id: "updatePromote", group: "updates", method: "POST", path: "/v1/updates/rollouts/{rollout_id}/promote", shorthand: "", auth: "host-admin", response: "json", request: "", hostConfirm: "", summary: "Move a healthy canary to the rest of the cluster.", danger: .dangerous),
+    "updateRolloutRollback": Operation(id: "updateRolloutRollback", group: "updates", method: "POST", path: "/v1/updates/rollouts/{rollout_id}/rollback", shorthand: "", auth: "host-admin", response: "json", request: "json", hostConfirm: "", summary: "Restore the snapshot taken before this rollout, including mid-canary.", danger: .dangerous),
+    "updateAppRollback": Operation(id: "updateAppRollback", group: "updates", method: "POST", path: "/v1/updates/apps/{app}/rollback", shorthand: "", auth: "host-admin", response: "json", request: "json", hostConfirm: "", summary: "Restore one snapshot for an app.", danger: .dangerous),
+    "updatePublish": Operation(id: "updatePublish", group: "updates", method: "POST", path: "/v1/updates/apps/{app}/publish", shorthand: "", auth: "host-admin", response: "json", request: "json", hostConfirm: "", summary: "Sign a host and/or github manifest. A host target marks the app hosted.", danger: .dangerous),
+    "updateGitHubWebhook": Operation(id: "updateGitHubWebhook", group: "updates", method: "POST", path: "/v1/updates/github/webhook", shorthand: "", auth: "none", response: "json", request: "", hostConfirm: "", summary: "GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest.", danger: .write),
 ]
 
 extension RedXClient {
@@ -502,6 +520,108 @@ extension RedXClient {
     @discardableResult
     public func connectRevokeApp(id: String, confirm: Bool = false) async throws -> RedXResult {
         try await call("connectRevokeApp", params: ["id": id], confirm: confirm)
+    }
+
+    /// Ed25519 public keys that sign update manifests. (GET /v1/updates/keys; auth none; danger safe)
+    @discardableResult
+    public func updateKeys() async throws -> RedXResult {
+        try await call("updateKeys", params: [:])
+    }
+
+    /// Update status of every app this host knows. (GET /v1/updates/apps; auth key; danger safe)
+    @discardableResult
+    public func listUpdateApps() async throws -> RedXResult {
+        try await call("listUpdateApps", params: [:])
+    }
+
+    /// Installed version, hosted flag, source preference and available manifests. (GET /v1/updates/apps/{app}; auth key; danger safe)
+    @discardableResult
+    public func updateApp(app: String) async throws -> RedXResult {
+        try await call("updateApp", params: ["app": app])
+    }
+
+    /// Signed redx.update-manifest/v1 body. Header X-RedX-Signature covers these exact bytes. (GET /v1/updates/apps/{app}/manifests/{version}; auth key; danger safe)
+    @discardableResult
+    public func updateManifest(app: String, version: String, query: [String: Any]? = nil) async throws -> RedXResult {
+        try await call("updateManifest", params: ["app": app, "version": version], query: query)
+    }
+
+    /// The Ed25519 signature string for a manifest (ed25519:<base64>). (GET /v1/updates/apps/{app}/manifests/{version}.sig; auth key; danger safe)
+    @discardableResult
+    public func updateManifestSig(app: String, version: String, query: [String: Any]? = nil) async throws -> RedXResult {
+        try await call("updateManifestSig", params: ["app": app, "version": version], query: query)
+    }
+
+    /// One published artifact. Verify its sha256 against the signed manifest. (GET /v1/updates/apps/{app}/manifests/{version}/artifacts/{artifact_id}; auth key; danger safe)
+    @discardableResult
+    public func updateArtifact(app: String, version: String, artifact_id: String, query: [String: Any]? = nil) async throws -> RedXResult {
+        try await call("updateArtifact", params: ["app": app, "version": version, "artifact_id": artifact_id], query: query)
+    }
+
+    /// Publish, apply, snapshot and rollback history for an app. (GET /v1/updates/apps/{app}/history; auth key; danger safe)
+    @discardableResult
+    public func updateHistory(app: String) async throws -> RedXResult {
+        try await call("updateHistory", params: ["app": app])
+    }
+
+    /// Immutable snapshots taken before applies. (GET /v1/updates/apps/{app}/snapshots; auth key; danger safe)
+    @discardableResult
+    public func updateSnapshots(app: String) async throws -> RedXResult {
+        try await call("updateSnapshots", params: ["app": app])
+    }
+
+    /// Rollout state, progress and health. (GET /v1/updates/rollouts/{rollout_id}; auth key; danger safe)
+    @discardableResult
+    public func updateRollout(rollout_id: String) async throws -> RedXResult {
+        try await call("updateRollout", params: ["rollout_id": rollout_id])
+    }
+
+    /// Prefer host, github or both. host or both on an app Red-XAI does not host returns 409 not_hosted. (PUT /v1/updates/apps/{app}/source; auth host-admin; danger admin)
+    @discardableResult
+    public func updateSource(app: String, body: [String: Any]? = nil) async throws -> RedXResult {
+        try await call("updateSource", params: ["app": app], body: body)
+    }
+
+    /// Auto-apply policy: off, security or all, on channel stable or beta, inside an optional cron window. (PUT /v1/updates/apps/{app}/policy; auth host-admin; danger admin)
+    @discardableResult
+    public func updatePolicy(app: String, body: [String: Any]? = nil) async throws -> RedXResult {
+        try await call("updatePolicy", params: ["app": app], body: body)
+    }
+
+    /// Snapshot, then apply. strategy is direct, canary or blue_green. Refuses a failed snapshot and a sequence regression. (POST /v1/updates/apps/{app}/apply; auth host-admin; danger dangerous)
+    @discardableResult
+    public func updateApply(app: String, body: [String: Any]? = nil, confirm: Bool = false) async throws -> RedXResult {
+        try await call("updateApply", params: ["app": app], body: body, confirm: confirm)
+    }
+
+    /// Move a healthy canary to the rest of the cluster. (POST /v1/updates/rollouts/{rollout_id}/promote; auth host-admin; danger dangerous)
+    @discardableResult
+    public func updatePromote(rollout_id: String, confirm: Bool = false) async throws -> RedXResult {
+        try await call("updatePromote", params: ["rollout_id": rollout_id], confirm: confirm)
+    }
+
+    /// Restore the snapshot taken before this rollout, including mid-canary. (POST /v1/updates/rollouts/{rollout_id}/rollback; auth host-admin; danger dangerous)
+    @discardableResult
+    public func updateRolloutRollback(rollout_id: String, body: [String: Any]? = nil, confirm: Bool = false) async throws -> RedXResult {
+        try await call("updateRolloutRollback", params: ["rollout_id": rollout_id], body: body, confirm: confirm)
+    }
+
+    /// Restore one snapshot for an app. (POST /v1/updates/apps/{app}/rollback; auth host-admin; danger dangerous)
+    @discardableResult
+    public func updateAppRollback(app: String, body: [String: Any]? = nil, confirm: Bool = false) async throws -> RedXResult {
+        try await call("updateAppRollback", params: ["app": app], body: body, confirm: confirm)
+    }
+
+    /// Sign a host and/or github manifest. A host target marks the app hosted. (POST /v1/updates/apps/{app}/publish; auth host-admin; danger dangerous)
+    @discardableResult
+    public func updatePublish(app: String, body: [String: Any]? = nil, confirm: Bool = false) async throws -> RedXResult {
+        try await call("updatePublish", params: ["app": app], body: body, confirm: confirm)
+    }
+
+    /// GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest. (POST /v1/updates/github/webhook; auth none; danger write)
+    @discardableResult
+    public func updateGitHubWebhook() async throws -> RedXResult {
+        try await call("updateGitHubWebhook", params: [:])
     }
 
 }

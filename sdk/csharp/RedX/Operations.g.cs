@@ -104,6 +104,24 @@ namespace RedX
             ["connectRevoke"] = new Operation { Id = "connectRevoke", Group = "connect", Method = "POST", Path = "/v1/connect/revoke", Shorthand = "", Auth = "app-key", Response = "json", Request = "", HostConfirm = "", Summary = "App side: revoke the app's own key (on uninstall).", Danger = DangerLevel.Write },
             ["connectApps"] = new Operation { Id = "connectApps", Group = "connect", Method = "GET", Path = "/v1/connect/apps", Shorthand = "", Auth = "host-admin", Response = "json", Request = "", HostConfirm = "", Summary = "Connected apps.", Danger = DangerLevel.Safe },
             ["connectRevokeApp"] = new Operation { Id = "connectRevokeApp", Group = "connect", Method = "DELETE", Path = "/v1/connect/apps/{id}", Shorthand = "", Auth = "host-admin", Response = "json", Request = "", HostConfirm = "", Summary = "Revoke a connected app's key.", Danger = DangerLevel.Dangerous },
+            ["updateKeys"] = new Operation { Id = "updateKeys", Group = "updates", Method = "GET", Path = "/v1/updates/keys", Shorthand = "", Auth = "none", Response = "json", Request = "", HostConfirm = "", Summary = "Ed25519 public keys that sign update manifests.", Danger = DangerLevel.Safe },
+            ["listUpdateApps"] = new Operation { Id = "listUpdateApps", Group = "updates", Method = "GET", Path = "/v1/updates/apps", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "Update status of every app this host knows.", Danger = DangerLevel.Safe },
+            ["updateApp"] = new Operation { Id = "updateApp", Group = "updates", Method = "GET", Path = "/v1/updates/apps/{app}", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "Installed version, hosted flag, source preference and available manifests.", Danger = DangerLevel.Safe },
+            ["updateManifest"] = new Operation { Id = "updateManifest", Group = "updates", Method = "GET", Path = "/v1/updates/apps/{app}/manifests/{version}", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "Signed redx.update-manifest/v1 body. Header X-RedX-Signature covers these exact bytes.", Danger = DangerLevel.Safe },
+            ["updateManifestSig"] = new Operation { Id = "updateManifestSig", Group = "updates", Method = "GET", Path = "/v1/updates/apps/{app}/manifests/{version}.sig", Shorthand = "", Auth = "key", Response = "text", Request = "", HostConfirm = "", Summary = "The Ed25519 signature string for a manifest (ed25519:\u003cbase64\u003e).", Danger = DangerLevel.Safe },
+            ["updateArtifact"] = new Operation { Id = "updateArtifact", Group = "updates", Method = "GET", Path = "/v1/updates/apps/{app}/manifests/{version}/artifacts/{artifact_id}", Shorthand = "", Auth = "key", Response = "binary", Request = "", HostConfirm = "", Summary = "One published artifact. Verify its sha256 against the signed manifest.", Danger = DangerLevel.Safe },
+            ["updateHistory"] = new Operation { Id = "updateHistory", Group = "updates", Method = "GET", Path = "/v1/updates/apps/{app}/history", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "Publish, apply, snapshot and rollback history for an app.", Danger = DangerLevel.Safe },
+            ["updateSnapshots"] = new Operation { Id = "updateSnapshots", Group = "updates", Method = "GET", Path = "/v1/updates/apps/{app}/snapshots", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "Immutable snapshots taken before applies.", Danger = DangerLevel.Safe },
+            ["updateRollout"] = new Operation { Id = "updateRollout", Group = "updates", Method = "GET", Path = "/v1/updates/rollouts/{rollout_id}", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "Rollout state, progress and health.", Danger = DangerLevel.Safe },
+            ["updateEvents"] = new Operation { Id = "updateEvents", Group = "updates", Method = "GET", Path = "/v1/updates/events", Shorthand = "", Auth = "key", Response = "websocket", Request = "", HostConfirm = "", Summary = "WebSocket of update.available, update.analysed, rollout.state, rollout.health and rollback.done.", Danger = DangerLevel.Safe },
+            ["updateSource"] = new Operation { Id = "updateSource", Group = "updates", Method = "PUT", Path = "/v1/updates/apps/{app}/source", Shorthand = "", Auth = "host-admin", Response = "json", Request = "json", HostConfirm = "", Summary = "Prefer host, github or both. host or both on an app Red-XAI does not host returns 409 not_hosted.", Danger = DangerLevel.Admin },
+            ["updatePolicy"] = new Operation { Id = "updatePolicy", Group = "updates", Method = "PUT", Path = "/v1/updates/apps/{app}/policy", Shorthand = "", Auth = "host-admin", Response = "json", Request = "json", HostConfirm = "", Summary = "Auto-apply policy: off, security or all, on channel stable or beta, inside an optional cron window.", Danger = DangerLevel.Admin },
+            ["updateApply"] = new Operation { Id = "updateApply", Group = "updates", Method = "POST", Path = "/v1/updates/apps/{app}/apply", Shorthand = "", Auth = "host-admin", Response = "json", Request = "json", HostConfirm = "", Summary = "Snapshot, then apply. strategy is direct, canary or blue_green. Refuses a failed snapshot and a sequence regression.", Danger = DangerLevel.Dangerous },
+            ["updatePromote"] = new Operation { Id = "updatePromote", Group = "updates", Method = "POST", Path = "/v1/updates/rollouts/{rollout_id}/promote", Shorthand = "", Auth = "host-admin", Response = "json", Request = "", HostConfirm = "", Summary = "Move a healthy canary to the rest of the cluster.", Danger = DangerLevel.Dangerous },
+            ["updateRolloutRollback"] = new Operation { Id = "updateRolloutRollback", Group = "updates", Method = "POST", Path = "/v1/updates/rollouts/{rollout_id}/rollback", Shorthand = "", Auth = "host-admin", Response = "json", Request = "json", HostConfirm = "", Summary = "Restore the snapshot taken before this rollout, including mid-canary.", Danger = DangerLevel.Dangerous },
+            ["updateAppRollback"] = new Operation { Id = "updateAppRollback", Group = "updates", Method = "POST", Path = "/v1/updates/apps/{app}/rollback", Shorthand = "", Auth = "host-admin", Response = "json", Request = "json", HostConfirm = "", Summary = "Restore one snapshot for an app.", Danger = DangerLevel.Dangerous },
+            ["updatePublish"] = new Operation { Id = "updatePublish", Group = "updates", Method = "POST", Path = "/v1/updates/apps/{app}/publish", Shorthand = "", Auth = "host-admin", Response = "json", Request = "json", HostConfirm = "", Summary = "Sign a host and/or github manifest. A host target marks the app hosted.", Danger = DangerLevel.Dangerous },
+            ["updateGitHubWebhook"] = new Operation { Id = "updateGitHubWebhook", Group = "updates", Method = "POST", Path = "/v1/updates/github/webhook", Shorthand = "", Auth = "none", Response = "json", Request = "", HostConfirm = "", Summary = "GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest.", Danger = DangerLevel.Write },
         };
     }
 
@@ -376,6 +394,74 @@ namespace RedX
         /// <summary>Revoke a connected app's key. (DELETE /v1/connect/apps/{id}; auth host-admin; danger dangerous)</summary>
         public Task<RedXResult> ConnectRevokeAppAsync(string id, bool confirm = false, CancellationToken ct = default) =>
             CallAsync("connectRevokeApp", new Dictionary<string, string> { ["id"] = id }, null, null, null, null, confirm, ct);
+
+        /// <summary>Ed25519 public keys that sign update manifests. (GET /v1/updates/keys; auth none; danger safe)</summary>
+        public Task<RedXResult> UpdateKeysAsync(CancellationToken ct = default) =>
+            CallAsync("updateKeys", null, null, null, null, null, false, ct);
+
+        /// <summary>Update status of every app this host knows. (GET /v1/updates/apps; auth key; danger safe)</summary>
+        public Task<RedXResult> ListUpdateAppsAsync(CancellationToken ct = default) =>
+            CallAsync("listUpdateApps", null, null, null, null, null, false, ct);
+
+        /// <summary>Installed version, hosted flag, source preference and available manifests. (GET /v1/updates/apps/{app}; auth key; danger safe)</summary>
+        public Task<RedXResult> UpdateAppAsync(string app, CancellationToken ct = default) =>
+            CallAsync("updateApp", new Dictionary<string, string> { ["app"] = app }, null, null, null, null, false, ct);
+
+        /// <summary>Signed redx.update-manifest/v1 body. Header X-RedX-Signature covers these exact bytes. (GET /v1/updates/apps/{app}/manifests/{version}; auth key; danger safe)</summary>
+        public Task<RedXResult> UpdateManifestAsync(string app, string version, IDictionary<string, object?>? query = null, CancellationToken ct = default) =>
+            CallAsync("updateManifest", new Dictionary<string, string> { ["app"] = app, ["version"] = version }, null, null, null, query, false, ct);
+
+        /// <summary>The Ed25519 signature string for a manifest (ed25519:&lt;base64&gt;). (GET /v1/updates/apps/{app}/manifests/{version}.sig; auth key; danger safe)</summary>
+        public Task<RedXResult> UpdateManifestSigAsync(string app, string version, IDictionary<string, object?>? query = null, CancellationToken ct = default) =>
+            CallAsync("updateManifestSig", new Dictionary<string, string> { ["app"] = app, ["version"] = version }, null, null, null, query, false, ct);
+
+        /// <summary>One published artifact. Verify its sha256 against the signed manifest. (GET /v1/updates/apps/{app}/manifests/{version}/artifacts/{artifact_id}; auth key; danger safe)</summary>
+        public Task<RedXResult> UpdateArtifactAsync(string app, string version, string artifact_id, IDictionary<string, object?>? query = null, CancellationToken ct = default) =>
+            CallAsync("updateArtifact", new Dictionary<string, string> { ["app"] = app, ["version"] = version, ["artifact_id"] = artifact_id }, null, null, null, query, false, ct);
+
+        /// <summary>Publish, apply, snapshot and rollback history for an app. (GET /v1/updates/apps/{app}/history; auth key; danger safe)</summary>
+        public Task<RedXResult> UpdateHistoryAsync(string app, CancellationToken ct = default) =>
+            CallAsync("updateHistory", new Dictionary<string, string> { ["app"] = app }, null, null, null, null, false, ct);
+
+        /// <summary>Immutable snapshots taken before applies. (GET /v1/updates/apps/{app}/snapshots; auth key; danger safe)</summary>
+        public Task<RedXResult> UpdateSnapshotsAsync(string app, CancellationToken ct = default) =>
+            CallAsync("updateSnapshots", new Dictionary<string, string> { ["app"] = app }, null, null, null, null, false, ct);
+
+        /// <summary>Rollout state, progress and health. (GET /v1/updates/rollouts/{rollout_id}; auth key; danger safe)</summary>
+        public Task<RedXResult> UpdateRolloutAsync(string rollout_id, CancellationToken ct = default) =>
+            CallAsync("updateRollout", new Dictionary<string, string> { ["rollout_id"] = rollout_id }, null, null, null, null, false, ct);
+
+        /// <summary>Prefer host, github or both. host or both on an app Red-XAI does not host returns 409 not_hosted. (PUT /v1/updates/apps/{app}/source; auth host-admin; danger admin)</summary>
+        public Task<RedXResult> UpdateSourceAsync(string app, object? body = null, CancellationToken ct = default) =>
+            CallAsync("updateSource", new Dictionary<string, string> { ["app"] = app }, null, body, null, null, false, ct);
+
+        /// <summary>Auto-apply policy: off, security or all, on channel stable or beta, inside an optional cron window. (PUT /v1/updates/apps/{app}/policy; auth host-admin; danger admin)</summary>
+        public Task<RedXResult> UpdatePolicyAsync(string app, object? body = null, CancellationToken ct = default) =>
+            CallAsync("updatePolicy", new Dictionary<string, string> { ["app"] = app }, null, body, null, null, false, ct);
+
+        /// <summary>Snapshot, then apply. strategy is direct, canary or blue_green. Refuses a failed snapshot and a sequence regression. (POST /v1/updates/apps/{app}/apply; auth host-admin; danger dangerous)</summary>
+        public Task<RedXResult> UpdateApplyAsync(string app, object? body = null, bool confirm = false, CancellationToken ct = default) =>
+            CallAsync("updateApply", new Dictionary<string, string> { ["app"] = app }, null, body, null, null, confirm, ct);
+
+        /// <summary>Move a healthy canary to the rest of the cluster. (POST /v1/updates/rollouts/{rollout_id}/promote; auth host-admin; danger dangerous)</summary>
+        public Task<RedXResult> UpdatePromoteAsync(string rollout_id, bool confirm = false, CancellationToken ct = default) =>
+            CallAsync("updatePromote", new Dictionary<string, string> { ["rollout_id"] = rollout_id }, null, null, null, null, confirm, ct);
+
+        /// <summary>Restore the snapshot taken before this rollout, including mid-canary. (POST /v1/updates/rollouts/{rollout_id}/rollback; auth host-admin; danger dangerous)</summary>
+        public Task<RedXResult> UpdateRolloutRollbackAsync(string rollout_id, object? body = null, bool confirm = false, CancellationToken ct = default) =>
+            CallAsync("updateRolloutRollback", new Dictionary<string, string> { ["rollout_id"] = rollout_id }, null, body, null, null, confirm, ct);
+
+        /// <summary>Restore one snapshot for an app. (POST /v1/updates/apps/{app}/rollback; auth host-admin; danger dangerous)</summary>
+        public Task<RedXResult> UpdateAppRollbackAsync(string app, object? body = null, bool confirm = false, CancellationToken ct = default) =>
+            CallAsync("updateAppRollback", new Dictionary<string, string> { ["app"] = app }, null, body, null, null, confirm, ct);
+
+        /// <summary>Sign a host and/or github manifest. A host target marks the app hosted. (POST /v1/updates/apps/{app}/publish; auth host-admin; danger dangerous)</summary>
+        public Task<RedXResult> UpdatePublishAsync(string app, object? body = null, bool confirm = false, CancellationToken ct = default) =>
+            CallAsync("updatePublish", new Dictionary<string, string> { ["app"] = app }, null, body, null, null, confirm, ct);
+
+        /// <summary>GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest. (POST /v1/updates/github/webhook; auth none; danger write)</summary>
+        public Task<RedXResult> UpdateGitHubWebhookAsync(CancellationToken ct = default) =>
+            CallAsync("updateGitHubWebhook", null, null, null, null, null, false, ct);
 
     }
 }

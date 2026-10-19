@@ -206,6 +206,15 @@ func (h *Host) effectiveConfig() map[string]interface{} {
 	if n := len(h.Cfg.OwnerEmails); n > 0 {
 		vals["owner_emails"] = fmt.Sprintf("(%d set, hidden)", n)
 	}
+	if os.Getenv("REDX_UPDATE_SIGNING_KEY") != "" {
+		vals["update_signing_key"] = "(set, hidden)"
+	}
+	if os.Getenv("REDX_GITHUB_WEBHOOK_SECRET") != "" {
+		vals["github_webhook_secret"] = "(set, hidden)"
+	}
+	if os.Getenv("REDX_GITHUB_TOKEN") != "" {
+		vals["github_token"] = "(set, hidden)"
+	}
 	_, mkErr := os.Stat(filepath.Join(h.Cfg.DataDir, "master.key"))
 	return map[string]interface{}{
 		"config": vals, "config_file": h.configPath(), "config_file_exists": fileExists(h.configPath()),

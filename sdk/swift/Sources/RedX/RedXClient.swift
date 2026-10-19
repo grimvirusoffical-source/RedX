@@ -100,7 +100,7 @@ public final class RedXClient: CustomStringConvertible, @unchecked Sendable {
         var allowed = CharacterSet.alphanumerics
         allowed.insert(charactersIn: "-._~")
         func esc(_ s: String) -> String { s.addingPercentEncoding(withAllowedCharacters: allowed) ?? s }
-        while let r = p.range(of: "\\{[a-z]+\\}", options: .regularExpression) {
+        while let r = p.range(of: "\\{[a-z][a-z0-9_]*\\}", options: .regularExpression) {
             let name = String(p[r].dropFirst().dropLast())
             let v = params[name] ?? ""
             if v.isEmpty && name != "folder" { throw RedXError(status: 0, code: nil, message: "\(op.id) needs \(name)") }

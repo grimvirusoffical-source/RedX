@@ -37,13 +37,19 @@ type Identity struct {
 }
 
 // Event is one entry of the fake /v1/apps/events feed (v1 shape).
+// App, Version, Source, RolloutID and State are set only for host-update events on the same feed.
 type Event struct {
-	Seq     int64  `json:"seq"`
-	AtMs    int64  `json:"atMs"`
-	Type    string `json:"type"`
-	Account string `json:"account"`
-	UntilMs int64  `json:"untilMs"`
-	Reason  string `json:"reason"`
+	Seq       int64  `json:"seq"`
+	AtMs      int64  `json:"atMs"`
+	Type      string `json:"type"`
+	Account   string `json:"account"`
+	UntilMs   int64  `json:"untilMs,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+	App       string `json:"app,omitempty"`
+	Version   string `json:"version,omitempty"`
+	Source    string `json:"source,omitempty"`
+	RolloutID string `json:"rollout_id,omitempty"`
+	State     string `json:"state,omitempty"`
 }
 
 // Moderation is a recorded owner action.
@@ -171,7 +177,7 @@ func (s *Server) Handler() http.Handler {
 			e(w, 400, "bad_request", "POST an event")
 			return
 		}
-		s.AddEvent(ev.Type, ev.Account)
+		s.Add(ev)
 		j(w, 200, map[string]bool{"ok": true})
 	})
 	m.HandleFunc("/v1/rules", func(w http.ResponseWriter, r *http.Request) {
@@ -340,9 +346,18 @@ func (s *Server) ExpireAccessTokens() {
 
 // AddEvent appends an event to the feed.
 func (s *Server) AddEvent(typ, account string) {
+	s.Add(Event{Type: typ, Account: account})
+}
+
+// Add appends one feed event, assigning seq and time when they are empty.
+func (s *Server) Add(ev Event) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.events = append(s.events, Event{Seq: int64(len(s.events) + 1), AtMs: time.Now().UnixMilli(), Type: typ, Account: account})
+	ev.Seq = int64(len(s.events) + 1)
+	if ev.AtMs == 0 {
+		ev.AtMs = time.Now().UnixMilli()
+	}
+	s.events = append(s.events, ev)
 }
 
 func (s *Server) eventsFeed(w http.ResponseWriter, r *http.Request) {

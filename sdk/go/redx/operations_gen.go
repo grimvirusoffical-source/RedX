@@ -6,77 +6,95 @@ import "context"
 
 // Operations is the table of every RedX HTTP operation, keyed by id.
 var Operations = map[string]Operation{
-	"health":            {ID: "health", Group: "host", Method: "GET", Path: "/healthz", Shorthand: "", Auth: "none", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Liveness, node id, role and version (no key needed)."},
-	"whoami":            {ID: "whoami", Group: "host", Method: "GET", Path: "/v1/ui/whoami", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "The calling key's id, scope, database and prefix."},
-	"stats":             {ID: "stats", Group: "database", Method: "GET", Path: "/v1/db/{db}/stats", Shorthand: "/v1/stats", Auth: "read", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Engine and host counters of a database."},
-	"listDatabases":     {ID: "listDatabases", Group: "host", Method: "GET", Path: "/v1/dbs", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Databases the key can see."},
-	"createDatabase":    {ID: "createDatabase", Group: "host", Method: "POST", Path: "/v1/dbs", Shorthand: "", Auth: "host-admin", Danger: DangerAdmin, Response: "json", Request: "json", HostConfirm: "", Summary: "Create a database."},
-	"deleteDatabase":    {ID: "deleteDatabase", Group: "host", Method: "DELETE", Path: "/v1/db/{db}", Shorthand: "", Auth: "host-admin", Danger: DangerDangerous, Response: "json", Request: "", HostConfirm: "db", Summary: "Delete a database and all its files (irreversible)."},
-	"validate":          {ID: "validate", Group: "host", Method: "POST", Path: "/v1/ui/validate", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "json", Request: "json", HostConfirm: "", Summary: "Parse Box text, BoxQL or a policy and report line:col errors."},
-	"adminStatus":       {ID: "adminStatus", Group: "host", Method: "GET", Path: "/v1/admin/status", Shorthand: "", Auth: "host-admin", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Dashboard status: version, data dir, TLS, cluster, warnings."},
-	"adminAudit":        {ID: "adminAudit", Group: "host", Method: "GET", Path: "/v1/admin/audit", Shorthand: "", Auth: "host-admin", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Newest audit events (never contain keys)."},
-	"adminConfig":       {ID: "adminConfig", Group: "host", Method: "GET", Path: "/v1/admin/config", Shorthand: "", Auth: "host-admin", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Effective configuration with secrets hidden."},
-	"listPresets":       {ID: "listPresets", Group: "host", Method: "GET", Path: "/v1/admin/presets", Shorthand: "", Auth: "host-admin", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Settings presets with every value and reason."},
-	"backup":            {ID: "backup", Group: "host", Method: "GET", Path: "/v1/admin/backup", Shorthand: "", Auth: "host-admin", Danger: DangerAdmin, Response: "binary", Request: "", HostConfirm: "", Summary: "Online backup of all databases and keys as one archive (contains everything: store it safely)."},
-	"listFiles":         {ID: "listFiles", Group: "database", Method: "GET", Path: "/v1/db/{db}/files", Shorthand: "", Auth: "admin", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Files of a database with type and size."},
-	"listKeys":          {ID: "listKeys", Group: "keys", Method: "GET", Path: "/v1/keys", Shorthand: "", Auth: "admin", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Keys (ids, scopes, status; never the secrets)."},
-	"getKey":            {ID: "getKey", Group: "keys", Method: "GET", Path: "/v1/keys/{id}", Shorthand: "", Auth: "admin", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "One key's details."},
-	"createKey":         {ID: "createKey", Group: "keys", Method: "POST", Path: "/v1/keys", Shorthand: "", Auth: "admin", Danger: DangerDangerous, Response: "json", Request: "json", HostConfirm: "", Summary: "Create an API key; the secret is returned once."},
-	"revokeKey":         {ID: "revokeKey", Group: "keys", Method: "DELETE", Path: "/v1/keys/{id}", Shorthand: "", Auth: "admin", Danger: DangerDangerous, Response: "json", Request: "", HostConfirm: "", Summary: "Revoke a key at once."},
-	"rotateKey":         {ID: "rotateKey", Group: "keys", Method: "POST", Path: "/v1/keys/{id}/rotate", Shorthand: "", Auth: "admin", Danger: DangerDangerous, Response: "json", Request: "json", HostConfirm: "", Summary: "Issue a replacement key; the old one stops after the grace period."},
-	"createPairingCode": {ID: "createPairingCode", Group: "keys", Method: "POST", Path: "/v1/keys/pairing", Shorthand: "", Auth: "admin", Danger: DangerDangerous, Response: "json", Request: "json", HostConfirm: "", Summary: "One-time sign-in code (5 min) that another device trades for a new key."},
-	"pairExchange":      {ID: "pairExchange", Group: "keys", Method: "POST", Path: "/v1/pair/exchange", Shorthand: "", Auth: "none", Danger: DangerWrite, Response: "json", Request: "json", HostConfirm: "", Summary: "Trade a sign-in code for a key."},
-	"getPath":           {ID: "getPath", Group: "database", Method: "GET", Path: "/v1/db/{db}/path/{path}", Shorthand: "/v1/path/{path}", Auth: "read", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Read the value at a path ({path, value} with value as Box text)."},
-	"getPathBox":        {ID: "getPathBox", Group: "database", Method: "GET", Path: "/v1/db/{db}/path/{path}", Shorthand: "/v1/path/{path}", Auth: "read", Danger: DangerSafe, Response: "text", Request: "", HostConfirm: "", Summary: "Read the value at a path as raw Box text."},
-	"setPath":           {ID: "setPath", Group: "database", Method: "PUT", Path: "/v1/db/{db}/path/{path}", Shorthand: "/v1/path/{path}", Auth: "write", Danger: DangerWrite, Response: "json", Request: "json", HostConfirm: "", Summary: "Write a value (JSON envelope or Box text) with optional TTL."},
-	"deletePath":        {ID: "deletePath", Group: "database", Method: "DELETE", Path: "/v1/db/{db}/path/{path}", Shorthand: "/v1/path/{path}", Auth: "write", Danger: DangerWrite, Response: "json", Request: "", HostConfirm: "", Summary: "Delete the value at a path."},
-	"pathQuery":         {ID: "pathQuery", Group: "database", Method: "POST", Path: "/v1/db/{db}/query", Shorthand: "/v1/query", Auth: "read", Danger: DangerSafe, Response: "json", Request: "json", HostConfirm: "", Summary: "Path-pattern query, e.g. file:Box[ID=*].Name."},
-	"bx":                {ID: "bx", Group: "database", Method: "POST", Path: "/v1/db/{db}/bx", Shorthand: "/v1/bx", Auth: "read", Danger: DangerWrite, Response: "json", Request: "json", HostConfirm: "", Summary: "Run one BoxQL command or {Tx[]} transaction with $params."},
-	"bxWatch":           {ID: "bxWatch", Group: "database", Method: "GET", Path: "/v1/db/{db}/bx/watch", Shorthand: "/v1/bx/watch", Auth: "read", Danger: DangerSafe, Response: "websocket", Request: "", HostConfirm: "", Summary: "WebSocket: stream changes matching a {Watch[]} command."},
-	"subscribe":         {ID: "subscribe", Group: "database", Method: "GET", Path: "/v1/db/{db}/subscribe", Shorthand: "/v1/subscribe", Auth: "read", Danger: DangerSafe, Response: "websocket", Request: "", HostConfirm: "", Summary: "WebSocket: stream changes under a path prefix."},
-	"listPacks":         {ID: "listPacks", Group: "files", Method: "GET", Path: "/v1/db/{db}/pack", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "File packs of a database."},
-	"packList":          {ID: "packList", Group: "files", Method: "GET", Path: "/v1/db/{db}/pack/{pack}/ls/{folder}", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "List a folder of a pack."},
-	"packStat":          {ID: "packStat", Group: "files", Method: "GET", Path: "/v1/db/{db}/pack/{pack}/stat/{file}", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "One file's size, hash and type."},
-	"packGet":           {ID: "packGet", Group: "files", Method: "GET", Path: "/v1/db/{db}/pack/{pack}/file/{file}", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "binary", Request: "", HostConfirm: "", Summary: "Download a file (HTTP Range supported)."},
-	"packPut":           {ID: "packPut", Group: "files", Method: "PUT", Path: "/v1/db/{db}/pack/{pack}/file/{file}", Shorthand: "", Auth: "write", Danger: DangerWrite, Response: "json", Request: "binary", HostConfirm: "", Summary: "Upload a file (streamed; X-Redx-SHA256 verified)."},
-	"packDelete":        {ID: "packDelete", Group: "files", Method: "DELETE", Path: "/v1/db/{db}/pack/{pack}/file/{file}", Shorthand: "", Auth: "write", Danger: DangerWrite, Response: "json", Request: "", HostConfirm: "", Summary: "Delete a file."},
-	"packGc":            {ID: "packGc", Group: "files", Method: "POST", Path: "/v1/db/{db}/pack/{pack}/gc", Shorthand: "", Auth: "admin", Danger: DangerAdmin, Response: "json", Request: "", HostConfirm: "", Summary: "Free chunks of deleted or replaced files."},
-	"packFsck":          {ID: "packFsck", Group: "files", Method: "GET", Path: "/v1/db/{db}/pack/{pack}/fsck", Shorthand: "", Auth: "admin", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Integrity report (changes nothing)."},
-	"listMedia":         {ID: "listMedia", Group: "files", Method: "GET", Path: "/v1/db/{db}/media", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Media libraries of a database."},
-	"mediaList":         {ID: "mediaList", Group: "files", Method: "GET", Path: "/v1/db/{db}/media/{lib}", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Items of a media library."},
-	"mediaStat":         {ID: "mediaStat", Group: "files", Method: "GET", Path: "/v1/db/{db}/media/{lib}/stat/{name}", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "One item's manifest."},
-	"mediaGet":          {ID: "mediaGet", Group: "files", Method: "GET", Path: "/v1/db/{db}/media/{lib}/file/{name}", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "binary", Request: "", HostConfirm: "", Summary: "Download an item (HTTP Range supported)."},
-	"mediaPut":          {ID: "mediaPut", Group: "files", Method: "PUT", Path: "/v1/db/{db}/media/{lib}/file/{name}", Shorthand: "", Auth: "write", Danger: DangerWrite, Response: "json", Request: "binary", HostConfirm: "", Summary: "Upload an item (?type= declares the media type)."},
-	"mediaDelete":       {ID: "mediaDelete", Group: "files", Method: "DELETE", Path: "/v1/db/{db}/media/{lib}/file/{name}", Shorthand: "", Auth: "write", Danger: DangerWrite, Response: "json", Request: "", HostConfirm: "", Summary: "Delete an item."},
-	"listIndexes":       {ID: "listIndexes", Group: "database", Method: "GET", Path: "/v1/db/{db}/idx", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Index sets of a database."},
-	"indexQuery":        {ID: "indexQuery", Group: "database", Method: "GET", Path: "/v1/db/{db}/idx/{set}/{index}/query", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Query an index (exact, prefix, range, text)."},
-	"defineIndex":       {ID: "defineIndex", Group: "database", Method: "PUT", Path: "/v1/db/{db}/idx/{set}", Shorthand: "", Auth: "admin", Danger: DangerAdmin, Response: "json", Request: "text", HostConfirm: "", Summary: "Define or replace an index set (Box text)."},
-	"dropIndex":         {ID: "dropIndex", Group: "database", Method: "DELETE", Path: "/v1/db/{db}/idx/{set}", Shorthand: "", Auth: "admin", Danger: DangerAdmin, Response: "json", Request: "", HostConfirm: "", Summary: "Drop an index set (the data stays)."},
-	"rebuildIndex":      {ID: "rebuildIndex", Group: "database", Method: "POST", Path: "/v1/db/{db}/idx/{set}/rebuild", Shorthand: "", Auth: "admin", Danger: DangerAdmin, Response: "json", Request: "", HostConfirm: "", Summary: "Rebuild an index set from the data."},
-	"checkIndex":        {ID: "checkIndex", Group: "database", Method: "GET", Path: "/v1/db/{db}/idx/{set}/check", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Compare an index set with the data."},
-	"getRules":          {ID: "getRules", Group: "database", Method: "GET", Path: "/v1/db/{db}/pulse", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Pulse rules and pending timers."},
-	"putRules":          {ID: "putRules", Group: "database", Method: "PUT", Path: "/v1/db/{db}/pulse", Shorthand: "", Auth: "admin", Danger: DangerAdmin, Response: "json", Request: "text", HostConfirm: "", Summary: "Replace the rule set (Box text, validated first)."},
-	"deleteRules":       {ID: "deleteRules", Group: "database", Method: "DELETE", Path: "/v1/db/{db}/pulse", Shorthand: "", Auth: "admin", Danger: DangerAdmin, Response: "json", Request: "", HostConfirm: "", Summary: "Remove all rules."},
-	"rulesSubscribe":    {ID: "rulesSubscribe", Group: "database", Method: "GET", Path: "/v1/db/{db}/pulse/subscribe", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "websocket", Request: "", HostConfirm: "", Summary: "WebSocket: rule events."},
-	"getPolicy":         {ID: "getPolicy", Group: "database", Method: "GET", Path: "/v1/db/{db}/sec", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Access policy summary (source for admins)."},
-	"putPolicy":         {ID: "putPolicy", Group: "database", Method: "PUT", Path: "/v1/db/{db}/sec", Shorthand: "", Auth: "admin", Danger: DangerDangerous, Response: "json", Request: "text", HostConfirm: "", Summary: "Replace the access policy (changes who can read what)."},
-	"deletePolicy":      {ID: "deletePolicy", Group: "database", Method: "DELETE", Path: "/v1/db/{db}/sec", Shorthand: "", Auth: "admin", Danger: DangerDangerous, Response: "json", Request: "", HostConfirm: "", Summary: "Remove the access policy."},
-	"listScripts":       {ID: "listScripts", Group: "database", Method: "GET", Path: "/v1/db/{db}/code", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Script files of a database."},
-	"putScript":         {ID: "putScript", Group: "database", Method: "PUT", Path: "/v1/db/{db}/code/file/{file}", Shorthand: "", Auth: "admin", Danger: DangerAdmin, Response: "json", Request: "text", HostConfirm: "", Summary: "Define or replace a script file."},
-	"deleteScript":      {ID: "deleteScript", Group: "database", Method: "DELETE", Path: "/v1/db/{db}/code/file/{file}", Shorthand: "", Auth: "admin", Danger: DangerAdmin, Response: "json", Request: "", HostConfirm: "", Summary: "Delete a script file."},
-	"runScript":         {ID: "runScript", Group: "database", Method: "POST", Path: "/v1/db/{db}/code/run/{script}", Shorthand: "", Auth: "write", Danger: DangerWrite, Response: "json", Request: "json", HostConfirm: "", Summary: "Run a script with arguments."},
-	"clusterStatus":     {ID: "clusterStatus", Group: "cluster", Method: "GET", Path: "/v1/cluster/status", Shorthand: "", Auth: "host-admin", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Role, leader, members, replication offsets, fence."},
-	"createJoinToken":   {ID: "createJoinToken", Group: "cluster", Method: "POST", Path: "/v1/cluster/join-token", Shorthand: "", Auth: "host-admin", Danger: DangerDangerous, Response: "json", Request: "json", HostConfirm: "", Summary: "Join token or pairing code that lets a node join and receive all data."},
-	"promote":           {ID: "promote", Group: "cluster", Method: "POST", Path: "/v1/cluster/promote", Shorthand: "", Auth: "host-admin", Danger: DangerDangerous, Response: "json", Request: "", HostConfirm: "", Summary: "Make this follower the leader (fences the old leader; unreplicated writes are lost)."},
-	"repoint":           {ID: "repoint", Group: "cluster", Method: "POST", Path: "/v1/cluster/leader", Shorthand: "", Auth: "host-admin", Danger: DangerDangerous, Response: "json", Request: "json", HostConfirm: "", Summary: "Make this node follow another leader (its own un-replicated writes are discarded)."},
-	"connectStart":      {ID: "connectStart", Group: "connect", Method: "POST", Path: "/v1/connect/start", Shorthand: "", Auth: "host-admin", Danger: DangerAdmin, Response: "json", Request: "json", HostConfirm: "", Summary: "Register an app's connect request (what the console does with a link)."},
-	"connectPending":    {ID: "connectPending", Group: "connect", Method: "GET", Path: "/v1/connect/pending", Shorthand: "", Auth: "host-admin", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Open connect requests."},
-	"connectApprove":    {ID: "connectApprove", Group: "connect", Method: "POST", Path: "/v1/connect/approve", Shorthand: "", Auth: "host-admin", Danger: DangerDangerous, Response: "json", Request: "json", HostConfirm: "", Summary: "Approve: creates the workspace and a one-time code for the app's key."},
-	"connectDeny":       {ID: "connectDeny", Group: "connect", Method: "POST", Path: "/v1/connect/deny", Shorthand: "", Auth: "host-admin", Danger: DangerWrite, Response: "json", Request: "json", HostConfirm: "", Summary: "Deny an open request."},
-	"connectExchange":   {ID: "connectExchange", Group: "connect", Method: "POST", Path: "/v1/connect/exchange", Shorthand: "", Auth: "none", Danger: DangerWrite, Response: "json", Request: "json", HostConfirm: "", Summary: "App side: trade the code plus PKCE verifier for the workspace key."},
-	"connectRevoke":     {ID: "connectRevoke", Group: "connect", Method: "POST", Path: "/v1/connect/revoke", Shorthand: "", Auth: "app-key", Danger: DangerWrite, Response: "json", Request: "", HostConfirm: "", Summary: "App side: revoke the app's own key (on uninstall)."},
-	"connectApps":       {ID: "connectApps", Group: "connect", Method: "GET", Path: "/v1/connect/apps", Shorthand: "", Auth: "host-admin", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Connected apps."},
-	"connectRevokeApp":  {ID: "connectRevokeApp", Group: "connect", Method: "DELETE", Path: "/v1/connect/apps/{id}", Shorthand: "", Auth: "host-admin", Danger: DangerDangerous, Response: "json", Request: "", HostConfirm: "", Summary: "Revoke a connected app's key."},
+	"health":                {ID: "health", Group: "host", Method: "GET", Path: "/healthz", Shorthand: "", Auth: "none", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Liveness, node id, role and version (no key needed)."},
+	"whoami":                {ID: "whoami", Group: "host", Method: "GET", Path: "/v1/ui/whoami", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "The calling key's id, scope, database and prefix."},
+	"stats":                 {ID: "stats", Group: "database", Method: "GET", Path: "/v1/db/{db}/stats", Shorthand: "/v1/stats", Auth: "read", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Engine and host counters of a database."},
+	"listDatabases":         {ID: "listDatabases", Group: "host", Method: "GET", Path: "/v1/dbs", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Databases the key can see."},
+	"createDatabase":        {ID: "createDatabase", Group: "host", Method: "POST", Path: "/v1/dbs", Shorthand: "", Auth: "host-admin", Danger: DangerAdmin, Response: "json", Request: "json", HostConfirm: "", Summary: "Create a database."},
+	"deleteDatabase":        {ID: "deleteDatabase", Group: "host", Method: "DELETE", Path: "/v1/db/{db}", Shorthand: "", Auth: "host-admin", Danger: DangerDangerous, Response: "json", Request: "", HostConfirm: "db", Summary: "Delete a database and all its files (irreversible)."},
+	"validate":              {ID: "validate", Group: "host", Method: "POST", Path: "/v1/ui/validate", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "json", Request: "json", HostConfirm: "", Summary: "Parse Box text, BoxQL or a policy and report line:col errors."},
+	"adminStatus":           {ID: "adminStatus", Group: "host", Method: "GET", Path: "/v1/admin/status", Shorthand: "", Auth: "host-admin", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Dashboard status: version, data dir, TLS, cluster, warnings."},
+	"adminAudit":            {ID: "adminAudit", Group: "host", Method: "GET", Path: "/v1/admin/audit", Shorthand: "", Auth: "host-admin", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Newest audit events (never contain keys)."},
+	"adminConfig":           {ID: "adminConfig", Group: "host", Method: "GET", Path: "/v1/admin/config", Shorthand: "", Auth: "host-admin", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Effective configuration with secrets hidden."},
+	"listPresets":           {ID: "listPresets", Group: "host", Method: "GET", Path: "/v1/admin/presets", Shorthand: "", Auth: "host-admin", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Settings presets with every value and reason."},
+	"backup":                {ID: "backup", Group: "host", Method: "GET", Path: "/v1/admin/backup", Shorthand: "", Auth: "host-admin", Danger: DangerAdmin, Response: "binary", Request: "", HostConfirm: "", Summary: "Online backup of all databases and keys as one archive (contains everything: store it safely)."},
+	"listFiles":             {ID: "listFiles", Group: "database", Method: "GET", Path: "/v1/db/{db}/files", Shorthand: "", Auth: "admin", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Files of a database with type and size."},
+	"listKeys":              {ID: "listKeys", Group: "keys", Method: "GET", Path: "/v1/keys", Shorthand: "", Auth: "admin", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Keys (ids, scopes, status; never the secrets)."},
+	"getKey":                {ID: "getKey", Group: "keys", Method: "GET", Path: "/v1/keys/{id}", Shorthand: "", Auth: "admin", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "One key's details."},
+	"createKey":             {ID: "createKey", Group: "keys", Method: "POST", Path: "/v1/keys", Shorthand: "", Auth: "admin", Danger: DangerDangerous, Response: "json", Request: "json", HostConfirm: "", Summary: "Create an API key; the secret is returned once."},
+	"revokeKey":             {ID: "revokeKey", Group: "keys", Method: "DELETE", Path: "/v1/keys/{id}", Shorthand: "", Auth: "admin", Danger: DangerDangerous, Response: "json", Request: "", HostConfirm: "", Summary: "Revoke a key at once."},
+	"rotateKey":             {ID: "rotateKey", Group: "keys", Method: "POST", Path: "/v1/keys/{id}/rotate", Shorthand: "", Auth: "admin", Danger: DangerDangerous, Response: "json", Request: "json", HostConfirm: "", Summary: "Issue a replacement key; the old one stops after the grace period."},
+	"createPairingCode":     {ID: "createPairingCode", Group: "keys", Method: "POST", Path: "/v1/keys/pairing", Shorthand: "", Auth: "admin", Danger: DangerDangerous, Response: "json", Request: "json", HostConfirm: "", Summary: "One-time sign-in code (5 min) that another device trades for a new key."},
+	"pairExchange":          {ID: "pairExchange", Group: "keys", Method: "POST", Path: "/v1/pair/exchange", Shorthand: "", Auth: "none", Danger: DangerWrite, Response: "json", Request: "json", HostConfirm: "", Summary: "Trade a sign-in code for a key."},
+	"getPath":               {ID: "getPath", Group: "database", Method: "GET", Path: "/v1/db/{db}/path/{path}", Shorthand: "/v1/path/{path}", Auth: "read", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Read the value at a path ({path, value} with value as Box text)."},
+	"getPathBox":            {ID: "getPathBox", Group: "database", Method: "GET", Path: "/v1/db/{db}/path/{path}", Shorthand: "/v1/path/{path}", Auth: "read", Danger: DangerSafe, Response: "text", Request: "", HostConfirm: "", Summary: "Read the value at a path as raw Box text."},
+	"setPath":               {ID: "setPath", Group: "database", Method: "PUT", Path: "/v1/db/{db}/path/{path}", Shorthand: "/v1/path/{path}", Auth: "write", Danger: DangerWrite, Response: "json", Request: "json", HostConfirm: "", Summary: "Write a value (JSON envelope or Box text) with optional TTL."},
+	"deletePath":            {ID: "deletePath", Group: "database", Method: "DELETE", Path: "/v1/db/{db}/path/{path}", Shorthand: "/v1/path/{path}", Auth: "write", Danger: DangerWrite, Response: "json", Request: "", HostConfirm: "", Summary: "Delete the value at a path."},
+	"pathQuery":             {ID: "pathQuery", Group: "database", Method: "POST", Path: "/v1/db/{db}/query", Shorthand: "/v1/query", Auth: "read", Danger: DangerSafe, Response: "json", Request: "json", HostConfirm: "", Summary: "Path-pattern query, e.g. file:Box[ID=*].Name."},
+	"bx":                    {ID: "bx", Group: "database", Method: "POST", Path: "/v1/db/{db}/bx", Shorthand: "/v1/bx", Auth: "read", Danger: DangerWrite, Response: "json", Request: "json", HostConfirm: "", Summary: "Run one BoxQL command or {Tx[]} transaction with $params."},
+	"bxWatch":               {ID: "bxWatch", Group: "database", Method: "GET", Path: "/v1/db/{db}/bx/watch", Shorthand: "/v1/bx/watch", Auth: "read", Danger: DangerSafe, Response: "websocket", Request: "", HostConfirm: "", Summary: "WebSocket: stream changes matching a {Watch[]} command."},
+	"subscribe":             {ID: "subscribe", Group: "database", Method: "GET", Path: "/v1/db/{db}/subscribe", Shorthand: "/v1/subscribe", Auth: "read", Danger: DangerSafe, Response: "websocket", Request: "", HostConfirm: "", Summary: "WebSocket: stream changes under a path prefix."},
+	"listPacks":             {ID: "listPacks", Group: "files", Method: "GET", Path: "/v1/db/{db}/pack", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "File packs of a database."},
+	"packList":              {ID: "packList", Group: "files", Method: "GET", Path: "/v1/db/{db}/pack/{pack}/ls/{folder}", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "List a folder of a pack."},
+	"packStat":              {ID: "packStat", Group: "files", Method: "GET", Path: "/v1/db/{db}/pack/{pack}/stat/{file}", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "One file's size, hash and type."},
+	"packGet":               {ID: "packGet", Group: "files", Method: "GET", Path: "/v1/db/{db}/pack/{pack}/file/{file}", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "binary", Request: "", HostConfirm: "", Summary: "Download a file (HTTP Range supported)."},
+	"packPut":               {ID: "packPut", Group: "files", Method: "PUT", Path: "/v1/db/{db}/pack/{pack}/file/{file}", Shorthand: "", Auth: "write", Danger: DangerWrite, Response: "json", Request: "binary", HostConfirm: "", Summary: "Upload a file (streamed; X-Redx-SHA256 verified)."},
+	"packDelete":            {ID: "packDelete", Group: "files", Method: "DELETE", Path: "/v1/db/{db}/pack/{pack}/file/{file}", Shorthand: "", Auth: "write", Danger: DangerWrite, Response: "json", Request: "", HostConfirm: "", Summary: "Delete a file."},
+	"packGc":                {ID: "packGc", Group: "files", Method: "POST", Path: "/v1/db/{db}/pack/{pack}/gc", Shorthand: "", Auth: "admin", Danger: DangerAdmin, Response: "json", Request: "", HostConfirm: "", Summary: "Free chunks of deleted or replaced files."},
+	"packFsck":              {ID: "packFsck", Group: "files", Method: "GET", Path: "/v1/db/{db}/pack/{pack}/fsck", Shorthand: "", Auth: "admin", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Integrity report (changes nothing)."},
+	"listMedia":             {ID: "listMedia", Group: "files", Method: "GET", Path: "/v1/db/{db}/media", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Media libraries of a database."},
+	"mediaList":             {ID: "mediaList", Group: "files", Method: "GET", Path: "/v1/db/{db}/media/{lib}", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Items of a media library."},
+	"mediaStat":             {ID: "mediaStat", Group: "files", Method: "GET", Path: "/v1/db/{db}/media/{lib}/stat/{name}", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "One item's manifest."},
+	"mediaGet":              {ID: "mediaGet", Group: "files", Method: "GET", Path: "/v1/db/{db}/media/{lib}/file/{name}", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "binary", Request: "", HostConfirm: "", Summary: "Download an item (HTTP Range supported)."},
+	"mediaPut":              {ID: "mediaPut", Group: "files", Method: "PUT", Path: "/v1/db/{db}/media/{lib}/file/{name}", Shorthand: "", Auth: "write", Danger: DangerWrite, Response: "json", Request: "binary", HostConfirm: "", Summary: "Upload an item (?type= declares the media type)."},
+	"mediaDelete":           {ID: "mediaDelete", Group: "files", Method: "DELETE", Path: "/v1/db/{db}/media/{lib}/file/{name}", Shorthand: "", Auth: "write", Danger: DangerWrite, Response: "json", Request: "", HostConfirm: "", Summary: "Delete an item."},
+	"listIndexes":           {ID: "listIndexes", Group: "database", Method: "GET", Path: "/v1/db/{db}/idx", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Index sets of a database."},
+	"indexQuery":            {ID: "indexQuery", Group: "database", Method: "GET", Path: "/v1/db/{db}/idx/{set}/{index}/query", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Query an index (exact, prefix, range, text)."},
+	"defineIndex":           {ID: "defineIndex", Group: "database", Method: "PUT", Path: "/v1/db/{db}/idx/{set}", Shorthand: "", Auth: "admin", Danger: DangerAdmin, Response: "json", Request: "text", HostConfirm: "", Summary: "Define or replace an index set (Box text)."},
+	"dropIndex":             {ID: "dropIndex", Group: "database", Method: "DELETE", Path: "/v1/db/{db}/idx/{set}", Shorthand: "", Auth: "admin", Danger: DangerAdmin, Response: "json", Request: "", HostConfirm: "", Summary: "Drop an index set (the data stays)."},
+	"rebuildIndex":          {ID: "rebuildIndex", Group: "database", Method: "POST", Path: "/v1/db/{db}/idx/{set}/rebuild", Shorthand: "", Auth: "admin", Danger: DangerAdmin, Response: "json", Request: "", HostConfirm: "", Summary: "Rebuild an index set from the data."},
+	"checkIndex":            {ID: "checkIndex", Group: "database", Method: "GET", Path: "/v1/db/{db}/idx/{set}/check", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Compare an index set with the data."},
+	"getRules":              {ID: "getRules", Group: "database", Method: "GET", Path: "/v1/db/{db}/pulse", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Pulse rules and pending timers."},
+	"putRules":              {ID: "putRules", Group: "database", Method: "PUT", Path: "/v1/db/{db}/pulse", Shorthand: "", Auth: "admin", Danger: DangerAdmin, Response: "json", Request: "text", HostConfirm: "", Summary: "Replace the rule set (Box text, validated first)."},
+	"deleteRules":           {ID: "deleteRules", Group: "database", Method: "DELETE", Path: "/v1/db/{db}/pulse", Shorthand: "", Auth: "admin", Danger: DangerAdmin, Response: "json", Request: "", HostConfirm: "", Summary: "Remove all rules."},
+	"rulesSubscribe":        {ID: "rulesSubscribe", Group: "database", Method: "GET", Path: "/v1/db/{db}/pulse/subscribe", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "websocket", Request: "", HostConfirm: "", Summary: "WebSocket: rule events."},
+	"getPolicy":             {ID: "getPolicy", Group: "database", Method: "GET", Path: "/v1/db/{db}/sec", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Access policy summary (source for admins)."},
+	"putPolicy":             {ID: "putPolicy", Group: "database", Method: "PUT", Path: "/v1/db/{db}/sec", Shorthand: "", Auth: "admin", Danger: DangerDangerous, Response: "json", Request: "text", HostConfirm: "", Summary: "Replace the access policy (changes who can read what)."},
+	"deletePolicy":          {ID: "deletePolicy", Group: "database", Method: "DELETE", Path: "/v1/db/{db}/sec", Shorthand: "", Auth: "admin", Danger: DangerDangerous, Response: "json", Request: "", HostConfirm: "", Summary: "Remove the access policy."},
+	"listScripts":           {ID: "listScripts", Group: "database", Method: "GET", Path: "/v1/db/{db}/code", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Script files of a database."},
+	"putScript":             {ID: "putScript", Group: "database", Method: "PUT", Path: "/v1/db/{db}/code/file/{file}", Shorthand: "", Auth: "admin", Danger: DangerAdmin, Response: "json", Request: "text", HostConfirm: "", Summary: "Define or replace a script file."},
+	"deleteScript":          {ID: "deleteScript", Group: "database", Method: "DELETE", Path: "/v1/db/{db}/code/file/{file}", Shorthand: "", Auth: "admin", Danger: DangerAdmin, Response: "json", Request: "", HostConfirm: "", Summary: "Delete a script file."},
+	"runScript":             {ID: "runScript", Group: "database", Method: "POST", Path: "/v1/db/{db}/code/run/{script}", Shorthand: "", Auth: "write", Danger: DangerWrite, Response: "json", Request: "json", HostConfirm: "", Summary: "Run a script with arguments."},
+	"clusterStatus":         {ID: "clusterStatus", Group: "cluster", Method: "GET", Path: "/v1/cluster/status", Shorthand: "", Auth: "host-admin", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Role, leader, members, replication offsets, fence."},
+	"createJoinToken":       {ID: "createJoinToken", Group: "cluster", Method: "POST", Path: "/v1/cluster/join-token", Shorthand: "", Auth: "host-admin", Danger: DangerDangerous, Response: "json", Request: "json", HostConfirm: "", Summary: "Join token or pairing code that lets a node join and receive all data."},
+	"promote":               {ID: "promote", Group: "cluster", Method: "POST", Path: "/v1/cluster/promote", Shorthand: "", Auth: "host-admin", Danger: DangerDangerous, Response: "json", Request: "", HostConfirm: "", Summary: "Make this follower the leader (fences the old leader; unreplicated writes are lost)."},
+	"repoint":               {ID: "repoint", Group: "cluster", Method: "POST", Path: "/v1/cluster/leader", Shorthand: "", Auth: "host-admin", Danger: DangerDangerous, Response: "json", Request: "json", HostConfirm: "", Summary: "Make this node follow another leader (its own un-replicated writes are discarded)."},
+	"connectStart":          {ID: "connectStart", Group: "connect", Method: "POST", Path: "/v1/connect/start", Shorthand: "", Auth: "host-admin", Danger: DangerAdmin, Response: "json", Request: "json", HostConfirm: "", Summary: "Register an app's connect request (what the console does with a link)."},
+	"connectPending":        {ID: "connectPending", Group: "connect", Method: "GET", Path: "/v1/connect/pending", Shorthand: "", Auth: "host-admin", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Open connect requests."},
+	"connectApprove":        {ID: "connectApprove", Group: "connect", Method: "POST", Path: "/v1/connect/approve", Shorthand: "", Auth: "host-admin", Danger: DangerDangerous, Response: "json", Request: "json", HostConfirm: "", Summary: "Approve: creates the workspace and a one-time code for the app's key."},
+	"connectDeny":           {ID: "connectDeny", Group: "connect", Method: "POST", Path: "/v1/connect/deny", Shorthand: "", Auth: "host-admin", Danger: DangerWrite, Response: "json", Request: "json", HostConfirm: "", Summary: "Deny an open request."},
+	"connectExchange":       {ID: "connectExchange", Group: "connect", Method: "POST", Path: "/v1/connect/exchange", Shorthand: "", Auth: "none", Danger: DangerWrite, Response: "json", Request: "json", HostConfirm: "", Summary: "App side: trade the code plus PKCE verifier for the workspace key."},
+	"connectRevoke":         {ID: "connectRevoke", Group: "connect", Method: "POST", Path: "/v1/connect/revoke", Shorthand: "", Auth: "app-key", Danger: DangerWrite, Response: "json", Request: "", HostConfirm: "", Summary: "App side: revoke the app's own key (on uninstall)."},
+	"connectApps":           {ID: "connectApps", Group: "connect", Method: "GET", Path: "/v1/connect/apps", Shorthand: "", Auth: "host-admin", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Connected apps."},
+	"connectRevokeApp":      {ID: "connectRevokeApp", Group: "connect", Method: "DELETE", Path: "/v1/connect/apps/{id}", Shorthand: "", Auth: "host-admin", Danger: DangerDangerous, Response: "json", Request: "", HostConfirm: "", Summary: "Revoke a connected app's key."},
+	"updateKeys":            {ID: "updateKeys", Group: "updates", Method: "GET", Path: "/v1/updates/keys", Shorthand: "", Auth: "none", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Ed25519 public keys that sign update manifests."},
+	"listUpdateApps":        {ID: "listUpdateApps", Group: "updates", Method: "GET", Path: "/v1/updates/apps", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Update status of every app this host knows."},
+	"updateApp":             {ID: "updateApp", Group: "updates", Method: "GET", Path: "/v1/updates/apps/{app}", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Installed version, hosted flag, source preference and available manifests."},
+	"updateManifest":        {ID: "updateManifest", Group: "updates", Method: "GET", Path: "/v1/updates/apps/{app}/manifests/{version}", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Signed redx.update-manifest/v1 body. Header X-RedX-Signature covers these exact bytes."},
+	"updateManifestSig":     {ID: "updateManifestSig", Group: "updates", Method: "GET", Path: "/v1/updates/apps/{app}/manifests/{version}.sig", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "text", Request: "", HostConfirm: "", Summary: "The Ed25519 signature string for a manifest (ed25519:\u003cbase64\u003e)."},
+	"updateArtifact":        {ID: "updateArtifact", Group: "updates", Method: "GET", Path: "/v1/updates/apps/{app}/manifests/{version}/artifacts/{artifact_id}", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "binary", Request: "", HostConfirm: "", Summary: "One published artifact. Verify its sha256 against the signed manifest."},
+	"updateHistory":         {ID: "updateHistory", Group: "updates", Method: "GET", Path: "/v1/updates/apps/{app}/history", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Publish, apply, snapshot and rollback history for an app."},
+	"updateSnapshots":       {ID: "updateSnapshots", Group: "updates", Method: "GET", Path: "/v1/updates/apps/{app}/snapshots", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Immutable snapshots taken before applies."},
+	"updateRollout":         {ID: "updateRollout", Group: "updates", Method: "GET", Path: "/v1/updates/rollouts/{rollout_id}", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Rollout state, progress and health."},
+	"updateEvents":          {ID: "updateEvents", Group: "updates", Method: "GET", Path: "/v1/updates/events", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "websocket", Request: "", HostConfirm: "", Summary: "WebSocket of update.available, update.analysed, rollout.state, rollout.health and rollback.done."},
+	"updateSource":          {ID: "updateSource", Group: "updates", Method: "PUT", Path: "/v1/updates/apps/{app}/source", Shorthand: "", Auth: "host-admin", Danger: DangerAdmin, Response: "json", Request: "json", HostConfirm: "", Summary: "Prefer host, github or both. host or both on an app Red-XAI does not host returns 409 not_hosted."},
+	"updatePolicy":          {ID: "updatePolicy", Group: "updates", Method: "PUT", Path: "/v1/updates/apps/{app}/policy", Shorthand: "", Auth: "host-admin", Danger: DangerAdmin, Response: "json", Request: "json", HostConfirm: "", Summary: "Auto-apply policy: off, security or all, on channel stable or beta, inside an optional cron window."},
+	"updateApply":           {ID: "updateApply", Group: "updates", Method: "POST", Path: "/v1/updates/apps/{app}/apply", Shorthand: "", Auth: "host-admin", Danger: DangerDangerous, Response: "json", Request: "json", HostConfirm: "", Summary: "Snapshot, then apply. strategy is direct, canary or blue_green. Refuses a failed snapshot and a sequence regression."},
+	"updatePromote":         {ID: "updatePromote", Group: "updates", Method: "POST", Path: "/v1/updates/rollouts/{rollout_id}/promote", Shorthand: "", Auth: "host-admin", Danger: DangerDangerous, Response: "json", Request: "", HostConfirm: "", Summary: "Move a healthy canary to the rest of the cluster."},
+	"updateRolloutRollback": {ID: "updateRolloutRollback", Group: "updates", Method: "POST", Path: "/v1/updates/rollouts/{rollout_id}/rollback", Shorthand: "", Auth: "host-admin", Danger: DangerDangerous, Response: "json", Request: "json", HostConfirm: "", Summary: "Restore the snapshot taken before this rollout, including mid-canary."},
+	"updateAppRollback":     {ID: "updateAppRollback", Group: "updates", Method: "POST", Path: "/v1/updates/apps/{app}/rollback", Shorthand: "", Auth: "host-admin", Danger: DangerDangerous, Response: "json", Request: "json", HostConfirm: "", Summary: "Restore one snapshot for an app."},
+	"updatePublish":         {ID: "updatePublish", Group: "updates", Method: "POST", Path: "/v1/updates/apps/{app}/publish", Shorthand: "", Auth: "host-admin", Danger: DangerDangerous, Response: "json", Request: "json", HostConfirm: "", Summary: "Sign a host and/or github manifest. A host target marks the app hosted."},
+	"updateGitHubWebhook":   {ID: "updateGitHubWebhook", Group: "updates", Method: "POST", Path: "/v1/updates/github/webhook", Shorthand: "", Auth: "none", Danger: DangerWrite, Response: "json", Request: "", HostConfirm: "", Summary: "GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest."},
 }
 
 // segmentParams are pack and media paths: each slash-separated segment is escaped, the slashes stay.
@@ -577,4 +595,137 @@ func (c *Client) ConnectApps(ctx context.Context, a Args) (*Result, error) {
 func (c *Client) ConnectRevokeApp(ctx context.Context, id string, a Args) (*Result, error) {
 	a.Params = withParams(a.Params, map[string]string{"id": id})
 	return c.Call(ctx, "connectRevokeApp", a)
+}
+
+// UpdateKeys: Ed25519 public keys that sign update manifests.
+//
+// GET /v1/updates/keys, auth none, danger safe.
+func (c *Client) UpdateKeys(ctx context.Context, a Args) (*Result, error) {
+	return c.Call(ctx, "updateKeys", a)
+}
+
+// ListUpdateApps: Update status of every app this host knows.
+//
+// GET /v1/updates/apps, auth key, danger safe.
+func (c *Client) ListUpdateApps(ctx context.Context, a Args) (*Result, error) {
+	return c.Call(ctx, "listUpdateApps", a)
+}
+
+// UpdateApp: Installed version, hosted flag, source preference and available manifests.
+//
+// GET /v1/updates/apps/{app}, auth key, danger safe.
+func (c *Client) UpdateApp(ctx context.Context, app string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"app": app})
+	return c.Call(ctx, "updateApp", a)
+}
+
+// UpdateManifest: Signed redx.update-manifest/v1 body. Header X-RedX-Signature covers these exact bytes.
+//
+// GET /v1/updates/apps/{app}/manifests/{version}, auth key, danger safe.
+func (c *Client) UpdateManifest(ctx context.Context, app string, version string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"app": app, "version": version})
+	return c.Call(ctx, "updateManifest", a)
+}
+
+// UpdateManifestSig: The Ed25519 signature string for a manifest (ed25519:<base64>).
+//
+// GET /v1/updates/apps/{app}/manifests/{version}.sig, auth key, danger safe.
+func (c *Client) UpdateManifestSig(ctx context.Context, app string, version string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"app": app, "version": version})
+	return c.Call(ctx, "updateManifestSig", a)
+}
+
+// UpdateArtifact: One published artifact. Verify its sha256 against the signed manifest.
+//
+// GET /v1/updates/apps/{app}/manifests/{version}/artifacts/{artifact_id}, auth key, danger safe.
+func (c *Client) UpdateArtifact(ctx context.Context, app string, version string, artifact_id string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"app": app, "version": version, "artifact_id": artifact_id})
+	return c.Call(ctx, "updateArtifact", a)
+}
+
+// UpdateHistory: Publish, apply, snapshot and rollback history for an app.
+//
+// GET /v1/updates/apps/{app}/history, auth key, danger safe.
+func (c *Client) UpdateHistory(ctx context.Context, app string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"app": app})
+	return c.Call(ctx, "updateHistory", a)
+}
+
+// UpdateSnapshots: Immutable snapshots taken before applies.
+//
+// GET /v1/updates/apps/{app}/snapshots, auth key, danger safe.
+func (c *Client) UpdateSnapshots(ctx context.Context, app string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"app": app})
+	return c.Call(ctx, "updateSnapshots", a)
+}
+
+// UpdateRollout: Rollout state, progress and health.
+//
+// GET /v1/updates/rollouts/{rollout_id}, auth key, danger safe.
+func (c *Client) UpdateRollout(ctx context.Context, rollout_id string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"rollout_id": rollout_id})
+	return c.Call(ctx, "updateRollout", a)
+}
+
+// UpdateSource: Prefer host, github or both. host or both on an app Red-XAI does not host returns 409 not_hosted.
+//
+// PUT /v1/updates/apps/{app}/source, auth host-admin, danger admin.
+func (c *Client) UpdateSource(ctx context.Context, app string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"app": app})
+	return c.Call(ctx, "updateSource", a)
+}
+
+// UpdatePolicy: Auto-apply policy: off, security or all, on channel stable or beta, inside an optional cron window.
+//
+// PUT /v1/updates/apps/{app}/policy, auth host-admin, danger admin.
+func (c *Client) UpdatePolicy(ctx context.Context, app string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"app": app})
+	return c.Call(ctx, "updatePolicy", a)
+}
+
+// UpdateApply: Snapshot, then apply. strategy is direct, canary or blue_green. Refuses a failed snapshot and a sequence regression.
+//
+// POST /v1/updates/apps/{app}/apply, auth host-admin, danger dangerous.
+func (c *Client) UpdateApply(ctx context.Context, app string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"app": app})
+	return c.Call(ctx, "updateApply", a)
+}
+
+// UpdatePromote: Move a healthy canary to the rest of the cluster.
+//
+// POST /v1/updates/rollouts/{rollout_id}/promote, auth host-admin, danger dangerous.
+func (c *Client) UpdatePromote(ctx context.Context, rollout_id string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"rollout_id": rollout_id})
+	return c.Call(ctx, "updatePromote", a)
+}
+
+// UpdateRolloutRollback: Restore the snapshot taken before this rollout, including mid-canary.
+//
+// POST /v1/updates/rollouts/{rollout_id}/rollback, auth host-admin, danger dangerous.
+func (c *Client) UpdateRolloutRollback(ctx context.Context, rollout_id string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"rollout_id": rollout_id})
+	return c.Call(ctx, "updateRolloutRollback", a)
+}
+
+// UpdateAppRollback: Restore one snapshot for an app.
+//
+// POST /v1/updates/apps/{app}/rollback, auth host-admin, danger dangerous.
+func (c *Client) UpdateAppRollback(ctx context.Context, app string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"app": app})
+	return c.Call(ctx, "updateAppRollback", a)
+}
+
+// UpdatePublish: Sign a host and/or github manifest. A host target marks the app hosted.
+//
+// POST /v1/updates/apps/{app}/publish, auth host-admin, danger dangerous.
+func (c *Client) UpdatePublish(ctx context.Context, app string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"app": app})
+	return c.Call(ctx, "updatePublish", a)
+}
+
+// UpdateGitHubWebhook: GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest.
+//
+// POST /v1/updates/github/webhook, auth none, danger write.
+func (c *Client) UpdateGitHubWebhook(ctx context.Context, a Args) (*Result, error) {
+	return c.Call(ctx, "updateGitHubWebhook", a)
 }

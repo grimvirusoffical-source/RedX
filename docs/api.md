@@ -189,3 +189,35 @@ and script runs are forwarded to / run on the leader.
 | `GET /v1/cluster/status`, `POST /v1/cluster/promote`, `POST /v1/cluster/leader` | host admin | status (incl. `fenced`), promote, repoint (`{"url","join_token","pin_sha256"}`) |
 | `POST /v1/cluster/superseded` | node secret | a promoted node fences the old leader (see [Clustering](clustering.md#failover-promote-fencing-and-repoint)) |
 | `/v1/connect/*` | see [Connecting apps](connect.md) | app connect handshake, Connected apps, revoke |
+
+## Host updates (`/v1/updates`)
+
+Phase 1 of the host update system. Manifests are `redx.update-manifest/v1`, signed with Ed25519
+(`X-RedX-Signature: ed25519:<base64>` over the exact JSON bytes). The signing key comes from
+`REDX_UPDATE_SIGNING_KEY`, `update_signing_key_file` / `REDX_UPDATE_SIGNING_KEY_FILE` (mode 0600),
+or a key generated under `<data>/updates/signing.key`. It is never written into config, git, or the audit log.
+`GET /v1/updates/keys` needs no key.
+
+Reads need any valid key. Mutations need a host-admin key. Apply, rollback, restore and promote call the
+same `ownerOnlyOK` / `refuseMasterMutation` / `refuseHiddenDB` gates as backup and cluster changes. While
+Red-XAI Accounts is on (`AccountsEnabled`), those calls are owner-only because a snapshot includes every
+database. An app id equal to the master accounts database is hidden (`404`).
+
+| Route | Auth | Purpose |
+|---|---|---|
+| `GET /v1/updates/apps`, `GET /v1/updates/apps/{app}` | key | hosted, source_pref, installed, available |
+| `GET .../manifests/{version}`, `.../{version}.sig`, `.../artifacts/{artifact_id}` | key | signed manifest, signature, artifact |
+| `PUT .../source`, `PUT .../policy` | host admin | `host`/`github`/`both`; auto-apply. `host` or `both` when the app is not hosted → `409 not_hosted` |
+| `POST .../apply` | host admin | immutable snapshot, then direct / canary / blue-green. Snapshot failure refuses the apply |
+| `GET /v1/updates/rollouts/{rollout_id}`, `POST .../promote`, `POST .../rollback` | key / host admin | progress, health gate, rollback mid-rollout |
+| `GET .../snapshots`, `POST .../rollback` | key / host admin | list and one-click restore |
+| `GET .../history` | key | publish, apply, snapshot, rollback |
+| `POST .../publish` | host admin | sign a host and/or GitHub manifest |
+| `POST /v1/updates/github/webhook` | HMAC `X-Hub-Signature-256` | verify SHA256SUMS, then sign a github-source manifest |
+| `GET /v1/updates/events` | key | WebSocket: `update.available`, `update.analysed`, `rollout.state`, `rollout.health`, `rollback.done` |
+| `GET /v1/apps/events` | Accounts client auth | Existing Accounts JSON poll. `update.*` events on that feed are forwarded to the WebSocket and do not end sessions |
+
+Errors are `{ "error": { "code", "message" } }` with `not_hosted`, `bad_signature`, `sequence_regression`,
+`snapshot_failed`, `rollout_conflict`, `not_found`, `forbidden`. Validation uses `invalid`.
+BoxQL is unchanged: updates are not a query language.
+The CLI is `redx update status|check|apply|promote|rollback|snapshots|restore|source`.

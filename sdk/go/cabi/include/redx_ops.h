@@ -77,5 +77,22 @@
 #define REDX_OP_CONNECT_REVOKE "connectRevoke" /* POST /v1/connect/revoke, write */
 #define REDX_OP_CONNECT_APPS "connectApps" /* GET /v1/connect/apps, safe */
 #define REDX_OP_CONNECT_REVOKE_APP "connectRevokeApp" /* DELETE /v1/connect/apps/{id}, dangerous */
+#define REDX_OP_UPDATE_KEYS "updateKeys" /* GET /v1/updates/keys, safe */
+#define REDX_OP_LIST_UPDATE_APPS "listUpdateApps" /* GET /v1/updates/apps, safe */
+#define REDX_OP_UPDATE_APP "updateApp" /* GET /v1/updates/apps/{app}, safe */
+#define REDX_OP_UPDATE_MANIFEST "updateManifest" /* GET /v1/updates/apps/{app}/manifests/{version}, safe */
+#define REDX_OP_UPDATE_MANIFEST_SIG "updateManifestSig" /* GET /v1/updates/apps/{app}/manifests/{version}.sig, safe */
+#define REDX_OP_UPDATE_ARTIFACT "updateArtifact" /* GET /v1/updates/apps/{app}/manifests/{version}/artifacts/{artifact_id}, safe */
+#define REDX_OP_UPDATE_HISTORY "updateHistory" /* GET /v1/updates/apps/{app}/history, safe */
+#define REDX_OP_UPDATE_SNAPSHOTS "updateSnapshots" /* GET /v1/updates/apps/{app}/snapshots, safe */
+#define REDX_OP_UPDATE_ROLLOUT "updateRollout" /* GET /v1/updates/rollouts/{rollout_id}, safe */
+#define REDX_OP_UPDATE_SOURCE "updateSource" /* PUT /v1/updates/apps/{app}/source, admin */
+#define REDX_OP_UPDATE_POLICY "updatePolicy" /* PUT /v1/updates/apps/{app}/policy, admin */
+#define REDX_OP_UPDATE_APPLY "updateApply" /* POST /v1/updates/apps/{app}/apply, dangerous */
+#define REDX_OP_UPDATE_PROMOTE "updatePromote" /* POST /v1/updates/rollouts/{rollout_id}/promote, dangerous */
+#define REDX_OP_UPDATE_ROLLOUT_ROLLBACK "updateRolloutRollback" /* POST /v1/updates/rollouts/{rollout_id}/rollback, dangerous */
+#define REDX_OP_UPDATE_APP_ROLLBACK "updateAppRollback" /* POST /v1/updates/apps/{app}/rollback, dangerous */
+#define REDX_OP_UPDATE_PUBLISH "updatePublish" /* POST /v1/updates/apps/{app}/publish, dangerous */
+#define REDX_OP_UPDATE_GIT_HUB_WEBHOOK "updateGitHubWebhook" /* POST /v1/updates/github/webhook, write */
 
 #endif

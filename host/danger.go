@@ -45,6 +45,11 @@ var dangerousOps = []dangerousOp{
 	{ID: "repoint", Method: "POST", PathPattern: "/v1/cluster/leader"},
 	{ID: "connectApprove", Method: "POST", PathPattern: "/v1/connect/approve"},
 	{ID: "connectRevokeApp", Method: "DELETE", PathPattern: "/v1/connect/apps/{id}"},
+	{ID: "updateApply", Method: "POST", PathPattern: "/v1/updates/apps/{app}/apply"},
+	{ID: "updatePromote", Method: "POST", PathPattern: "/v1/updates/rollouts/{rollout_id}/promote"},
+	{ID: "updateRolloutRollback", Method: "POST", PathPattern: "/v1/updates/rollouts/{rollout_id}/rollback"},
+	{ID: "updateAppRollback", Method: "POST", PathPattern: "/v1/updates/apps/{app}/rollback"},
+	{ID: "updatePublish", Method: "POST", PathPattern: "/v1/updates/apps/{app}/publish"},
 }
 
 // matchDangerous returns the dangerous operation for method+path, or nil.

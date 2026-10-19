@@ -114,6 +114,8 @@ func (h *Host) routes() http.Handler {
 			}
 		case strings.HasPrefix(p, "/v1/cluster/"):
 			h.clusterRoute(w, r)
+		case p == "/v1/updates" || strings.HasPrefix(p, "/v1/updates/"):
+			h.updateRoute(w, r)
 		default:
 			writeErr(w, 404, "not found")
 		}

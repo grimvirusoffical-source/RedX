@@ -78,7 +78,9 @@ redxd polls `GET /v1/apps/events?since=<cursor>&limit=…` with HTTP Basic clien
 cursor under `<data_dir>/accounts/events.json` (mode 0600), and ends console sessions (and WebSocket
 subscriptions) for `account.kicked`, `account.banned`, `account.terminated` and `account.deleted`. Delivery is
 at-least-once; events are deduped by `seq`. The wire-shape adapter lives in `host/accounts_events_adapter.go`
-so a docs bump can change that file alone. Unknown event types are ignored.
+so a docs bump can change that file alone. Unknown event types are ignored. `update.available`,
+`update.analysed`, `rollout.state`, `rollout.health` and `rollback.done` on this same feed are forwarded to
+`GET /v1/updates/events` and do not end sessions.
 
 ## Sign-up
 

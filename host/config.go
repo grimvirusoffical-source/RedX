@@ -85,6 +85,17 @@ type Config struct {
 	AccountsSMSResendPath string `toml:"accounts_sms_resend_path"`
 	// AccountsEventsPoll is how often (seconds) redxd polls /v1/apps/events for bans and terminations (default 15).
 	AccountsEventsPoll int `toml:"accounts_events_poll_seconds"`
+	// UpdateSigningKeyFile is a path to the Ed25519 seed used to sign update manifests.
+	// The key itself is never read from the config file. Env REDX_UPDATE_SIGNING_KEY (the key)
+	// or REDX_UPDATE_SIGNING_KEY_FILE (a path) override this. Mode must be 0600.
+	UpdateSigningKeyFile string `toml:"update_signing_key_file"`
+	// GithubWebhookSecretFile is a path to the GitHub webhook HMAC secret. The secret is
+	// never stored in the config. Env REDX_GITHUB_WEBHOOK_SECRET overrides the file.
+	GithubWebhookSecretFile string `toml:"github_webhook_secret_file"`
+	// GithubRepo is owner/name used when publishing a release (env REDX_GITHUB_REPO, token REDX_GITHUB_TOKEN).
+	GithubRepo string `toml:"github_repo"`
+	// HostedApps are store slugs this host is allowed to serve as source "host".
+	HostedApps []string `toml:"hosted_apps"`
 
 	ConfigFile string `toml:"-"`
 }
@@ -166,6 +177,10 @@ func (c *Config) RegisterFlags(fs *flag.FlagSet) {
 	fs.StringVar(&c.Preset, "preset", c.Preset, "settings profile: "+strings.Join(PresetNames(), "|"))
 	fs.StringVar(&c.Bootstrap, "bootstrap", c.Bootstrap, "first admin key: auto|web|console|off")
 	SecretVar(fs, &c.Join, "join", "one-time join link or 'URL CODE' from the leader (becomes a follower); never printed", "$REDX_JOIN or redx.toml")
+	fs.StringVar(&c.UpdateSigningKeyFile, "update-signing-key-file", c.UpdateSigningKeyFile, "path to the Ed25519 update signing key (mode 0600); the key is never a flag")
+	fs.StringVar(&c.GithubWebhookSecretFile, "github-webhook-secret-file", c.GithubWebhookSecretFile, "path to the GitHub webhook HMAC secret (mode 0600)")
+	fs.StringVar(&c.GithubRepo, "github-repo", c.GithubRepo, "owner/name used when publishing a GitHub release")
+	fs.Var((*csv)(&c.HostedApps), "hosted-apps", "comma separated app ids hosted on this Red-XAI host")
 }
 
 type csv []string
@@ -245,6 +260,9 @@ func (c *Config) ApplyEnv(get func(string) string) error {
 	if v := get("REDXAI_OWNER_EMAILS"); v != "" {
 		_ = (*csv)(&c.OwnerEmails).Set(v)
 	}
+	s("REDX_UPDATE_SIGNING_KEY_FILE", &c.UpdateSigningKeyFile)
+	s("REDX_GITHUB_WEBHOOK_SECRET_FILE", &c.GithubWebhookSecretFile)
+	s("REDX_GITHUB_REPO", &c.GithubRepo)
 	if get("REDX_NO_BOOTSTRAP") != "" {
 		c.Bootstrap = "off"
 	}
@@ -256,6 +274,9 @@ func (c *Config) ApplyEnv(get func(string) string) error {
 	}
 	if v := get("REDX_TLS_HOSTS"); v != "" {
 		_ = (*csv)(&c.TLSHosts).Set(v)
+	}
+	if v := get("REDX_HOSTED_APPS"); v != "" {
+		_ = (*csv)(&c.HostedApps).Set(v)
 	}
 	if v := get("REDX_KEYSTORE_ENCRYPT"); v != "" {
 		b, err := strconv.ParseBool(v)
@@ -387,7 +408,7 @@ func LoadConfig(args []string, getenv func(string) string, fs *flag.FlagSet) (Co
 	cf := pre.String("config", "", "")
 	pf := pre.String("preset", "", "")
 	ddFlag := pre.String("data-dir", "", "")
-	for _, n := range []string{"listen", "node-id", "role", "peers", "advertise", "tls", "tls-cert", "tls-key", "default-db", "master-key-file", "code-allowed-boxes", "log-level", "bootstrap", "join"} {
+	for _, n := range []string{"listen", "node-id", "role", "peers", "advertise", "tls", "tls-cert", "tls-key", "default-db", "master-key-file", "code-allowed-boxes", "log-level", "bootstrap", "join", "update-signing-key-file", "github-webhook-secret-file", "github-repo", "hosted-apps"} {
 		pre.String(n, "", "")
 	}
 	pre.Bool("keystore-encrypt", false, "")

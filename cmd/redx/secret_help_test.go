@@ -13,7 +13,8 @@ func TestHelpNeverShowsSecretsFromEnv(t *testing.T) {
 	cmds := [][]string{{"-h"}, {"help"}, {"key", "rotate", "-h"}, {"key", "create", "-h"}, {"key", "list", "-h"}, {"db", "list", "-h"},
 		{"get", "-h"}, {"set", "-h"}, {"query", "-h"}, {"stats", "-h"}, {"subscribe", "-h"}, {"node", "status", "-h"}, {"node", "token", "-h"},
 		{"node", "join", "-h"}, {"node", "repoint", "-h"}, {"node", "promote", "-h"}, {"doctor", "-h"}, {"backup", "-h"}, {"restore", "-h"},
-		{"bx", "-h"}, {"pack", "list", "-h"}, {"media", "list", "-h"}, {"pulse", "list", "-h"}, {"idx", "list", "-h"}, {"sec", "show", "-h"}, {"preset", "-h"}}
+		{"bx", "-h"}, {"pack", "list", "-h"}, {"media", "list", "-h"}, {"pulse", "list", "-h"}, {"idx", "list", "-h"}, {"sec", "show", "-h"}, {"preset", "-h"},
+		{"update", "-h"}, {"update", "apply", "-h"}}
 	sawKeyFlag := false
 	for _, c := range cmds {
 		so, se, _ := runCLI(t, "http://127.0.0.1:1", dummy, c...)

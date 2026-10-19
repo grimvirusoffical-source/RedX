@@ -3280,6 +3280,821 @@
     "x-redx-danger-level": 0,
     "x-rottenapple-level": "L1"
    }
+  },
+  "/v1/updates/apps": {
+   "get": {
+    "operationId": "listUpdateApps",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Update status of every app this host knows.",
+    "tags": [
+     "updates"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "safe",
+    "x-redx-danger-level": 0,
+    "x-rottenapple-level": "L1"
+   }
+  },
+  "/v1/updates/apps/{app}": {
+   "get": {
+    "operationId": "updateApp",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "app",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Installed version, hosted flag, source preference and available manifests.",
+    "tags": [
+     "updates"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "safe",
+    "x-redx-danger-level": 0,
+    "x-rottenapple-level": "L1"
+   }
+  },
+  "/v1/updates/apps/{app}/apply": {
+   "post": {
+    "operationId": "updateApply",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "app",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "canary": {
+          "type": "object"
+         },
+         "dry_run": {
+          "type": "boolean"
+         },
+         "schedule_at": {
+          "type": "string"
+         },
+         "source": {
+          "type": "string"
+         },
+         "strategy": {
+          "type": "string"
+         },
+         "version": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Snapshot, then apply. strategy is direct, canary or blue_green. Refuses a failed snapshot and a sequence regression.",
+    "tags": [
+     "updates"
+    ],
+    "x-redx-auth": "host-admin",
+    "x-redx-danger": "dangerous",
+    "x-redx-danger-level": 3,
+    "x-rottenapple-level": "developer-tool"
+   }
+  },
+  "/v1/updates/apps/{app}/history": {
+   "get": {
+    "operationId": "updateHistory",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "app",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Publish, apply, snapshot and rollback history for an app.",
+    "tags": [
+     "updates"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "safe",
+    "x-redx-danger-level": 0,
+    "x-rottenapple-level": "L1"
+   }
+  },
+  "/v1/updates/apps/{app}/manifests/{version}": {
+   "get": {
+    "operationId": "updateManifest",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "app",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "version",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "source",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Signed redx.update-manifest/v1 body. Header X-RedX-Signature covers these exact bytes.",
+    "tags": [
+     "updates"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "safe",
+    "x-redx-danger-level": 0,
+    "x-rottenapple-level": "L1"
+   }
+  },
+  "/v1/updates/apps/{app}/manifests/{version}.sig": {
+   "get": {
+    "operationId": "updateManifestSig",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "app",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "version",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "source",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "text/x-redx-box": {
+        "schema": {
+         "type": "string"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "The Ed25519 signature string for a manifest (ed25519:\u003cbase64\u003e).",
+    "tags": [
+     "updates"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "safe",
+    "x-redx-danger-level": 0,
+    "x-rottenapple-level": "L1"
+   }
+  },
+  "/v1/updates/apps/{app}/manifests/{version}/artifacts/{artifact_id}": {
+   "get": {
+    "operationId": "updateArtifact",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "app",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "version",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "artifact_id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "source",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/octet-stream": {
+        "schema": {
+         "format": "binary",
+         "type": "string"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "One published artifact. Verify its sha256 against the signed manifest.",
+    "tags": [
+     "updates"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "safe",
+    "x-redx-danger-level": 0,
+    "x-rottenapple-level": "L1"
+   }
+  },
+  "/v1/updates/apps/{app}/policy": {
+   "put": {
+    "operationId": "updatePolicy",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "app",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "auto_apply": {
+          "type": "string"
+         },
+         "channel": {
+          "type": "string"
+         },
+         "window": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Auto-apply policy: off, security or all, on channel stable or beta, inside an optional cron window.",
+    "tags": [
+     "updates"
+    ],
+    "x-redx-auth": "host-admin",
+    "x-redx-danger": "admin",
+    "x-redx-danger-level": 2,
+    "x-rottenapple-level": "developer-tool"
+   }
+  },
+  "/v1/updates/apps/{app}/publish": {
+   "post": {
+    "operationId": "updatePublish",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "app",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "artifacts": {
+          "type": "array"
+         },
+         "channel": {
+          "type": "string"
+         },
+         "notes_md": {
+          "type": "string"
+         },
+         "outcome_tags": {
+          "type": "array"
+         },
+         "targets": {
+          "type": "array"
+         },
+         "version": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Sign a host and/or github manifest. A host target marks the app hosted.",
+    "tags": [
+     "updates"
+    ],
+    "x-redx-auth": "host-admin",
+    "x-redx-danger": "dangerous",
+    "x-redx-danger-level": 3,
+    "x-rottenapple-level": "developer-tool"
+   }
+  },
+  "/v1/updates/apps/{app}/rollback": {
+   "post": {
+    "operationId": "updateAppRollback",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "app",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "snapshot_id": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Restore one snapshot for an app.",
+    "tags": [
+     "updates"
+    ],
+    "x-redx-auth": "host-admin",
+    "x-redx-danger": "dangerous",
+    "x-redx-danger-level": 3,
+    "x-rottenapple-level": "developer-tool"
+   }
+  },
+  "/v1/updates/apps/{app}/snapshots": {
+   "get": {
+    "operationId": "updateSnapshots",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "app",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Immutable snapshots taken before applies.",
+    "tags": [
+     "updates"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "safe",
+    "x-redx-danger-level": 0,
+    "x-rottenapple-level": "L1"
+   }
+  },
+  "/v1/updates/apps/{app}/source": {
+   "put": {
+    "operationId": "updateSource",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "app",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "source": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Prefer host, github or both. host or both on an app Red-XAI does not host returns 409 not_hosted.",
+    "tags": [
+     "updates"
+    ],
+    "x-redx-auth": "host-admin",
+    "x-redx-danger": "admin",
+    "x-redx-danger-level": 2,
+    "x-rottenapple-level": "developer-tool"
+   }
+  },
+  "/v1/updates/events": {
+   "get": {
+    "description": "update.* events that arrive on the Red-XAI Accounts poll GET /v1/apps/events are forwarded onto this socket. /v1/apps/events itself stays the Accounts JSON feed.",
+    "operationId": "updateEvents",
+    "responses": {
+     "101": {
+      "description": "WebSocket upgrade (101); one JSON event per message"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "WebSocket of update.available, update.analysed, rollout.state, rollout.health and rollback.done.",
+    "tags": [
+     "updates"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "safe",
+    "x-redx-danger-level": 0,
+    "x-redx-websocket": true,
+    "x-rottenapple-level": "L1"
+   }
+  },
+  "/v1/updates/github/webhook": {
+   "post": {
+    "operationId": "updateGitHubWebhook",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "security": [],
+    "summary": "GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest.",
+    "tags": [
+     "updates"
+    ],
+    "x-redx-auth": "none",
+    "x-redx-danger": "write",
+    "x-redx-danger-level": 1,
+    "x-rottenapple-level": "L1"
+   }
+  },
+  "/v1/updates/keys": {
+   "get": {
+    "operationId": "updateKeys",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "security": [],
+    "summary": "Ed25519 public keys that sign update manifests.",
+    "tags": [
+     "updates"
+    ],
+    "x-redx-auth": "none",
+    "x-redx-danger": "safe",
+    "x-redx-danger-level": 0,
+    "x-rottenapple-level": "L1"
+   }
+  },
+  "/v1/updates/rollouts/{rollout_id}": {
+   "get": {
+    "operationId": "updateRollout",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "rollout_id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Rollout state, progress and health.",
+    "tags": [
+     "updates"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "safe",
+    "x-redx-danger-level": 0,
+    "x-rottenapple-level": "L1"
+   }
+  },
+  "/v1/updates/rollouts/{rollout_id}/promote": {
+   "post": {
+    "operationId": "updatePromote",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "rollout_id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Move a healthy canary to the rest of the cluster.",
+    "tags": [
+     "updates"
+    ],
+    "x-redx-auth": "host-admin",
+    "x-redx-danger": "dangerous",
+    "x-redx-danger-level": 3,
+    "x-rottenapple-level": "developer-tool"
+   }
+  },
+  "/v1/updates/rollouts/{rollout_id}/rollback": {
+   "post": {
+    "operationId": "updateRolloutRollback",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "rollout_id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "reason": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Restore the snapshot taken before this rollout, including mid-canary.",
+    "tags": [
+     "updates"
+    ],
+    "x-redx-auth": "host-admin",
+    "x-redx-danger": "dangerous",
+    "x-redx-danger-level": 3,
+    "x-rottenapple-level": "developer-tool"
+   }
   }
  },
  "security": [

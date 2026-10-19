@@ -155,6 +155,40 @@ export interface RedXOperations {
   connectApps(opts?: { headers?: Record<string, string> }): Promise<any>;
   /** Revoke a connected app's key. (DELETE /v1/connect/apps/{id}; auth host-admin; danger dangerous) */
   connectRevokeApp(opts: { id: string; confirm: true; headers?: Record<string, string> }): Promise<any>;
+  /** Ed25519 public keys that sign update manifests. (GET /v1/updates/keys; auth none; danger safe) */
+  updateKeys(opts?: { headers?: Record<string, string> }): Promise<any>;
+  /** Update status of every app this host knows. (GET /v1/updates/apps; auth key; danger safe) */
+  listUpdateApps(opts?: { headers?: Record<string, string> }): Promise<any>;
+  /** Installed version, hosted flag, source preference and available manifests. (GET /v1/updates/apps/{app}; auth key; danger safe) */
+  updateApp(opts: { app: string; headers?: Record<string, string> }): Promise<any>;
+  /** Signed redx.update-manifest/v1 body. Header X-RedX-Signature covers these exact bytes. (GET /v1/updates/apps/{app}/manifests/{version}; auth key; danger safe) */
+  updateManifest(opts: { app: string; version: string; query?: { source?: string }; headers?: Record<string, string> }): Promise<any>;
+  /** The Ed25519 signature string for a manifest (ed25519:<base64>). (GET /v1/updates/apps/{app}/manifests/{version}.sig; auth key; danger safe) */
+  updateManifestSig(opts: { app: string; version: string; query?: { source?: string }; headers?: Record<string, string> }): Promise<string>;
+  /** One published artifact. Verify its sha256 against the signed manifest. (GET /v1/updates/apps/{app}/manifests/{version}/artifacts/{artifact_id}; auth key; danger safe) */
+  updateArtifact(opts: { app: string; version: string; artifact_id: string; query?: { source?: string }; headers?: Record<string, string> }): Promise<Buffer>;
+  /** Publish, apply, snapshot and rollback history for an app. (GET /v1/updates/apps/{app}/history; auth key; danger safe) */
+  updateHistory(opts: { app: string; headers?: Record<string, string> }): Promise<any>;
+  /** Immutable snapshots taken before applies. (GET /v1/updates/apps/{app}/snapshots; auth key; danger safe) */
+  updateSnapshots(opts: { app: string; headers?: Record<string, string> }): Promise<any>;
+  /** Rollout state, progress and health. (GET /v1/updates/rollouts/{rollout_id}; auth key; danger safe) */
+  updateRollout(opts: { rollout_id: string; headers?: Record<string, string> }): Promise<any>;
+  /** Prefer host, github or both. host or both on an app Red-XAI does not host returns 409 not_hosted. (PUT /v1/updates/apps/{app}/source; auth host-admin; danger admin) */
+  updateSource(opts: { app: string; body?: { source?: string }; headers?: Record<string, string> }): Promise<any>;
+  /** Auto-apply policy: off, security or all, on channel stable or beta, inside an optional cron window. (PUT /v1/updates/apps/{app}/policy; auth host-admin; danger admin) */
+  updatePolicy(opts: { app: string; body?: { auto_apply?: string; channel?: string; window?: string }; headers?: Record<string, string> }): Promise<any>;
+  /** Snapshot, then apply. strategy is direct, canary or blue_green. Refuses a failed snapshot and a sequence regression. (POST /v1/updates/apps/{app}/apply; auth host-admin; danger dangerous) */
+  updateApply(opts: { app: string; body?: { canary?: Record<string, unknown>; dry_run?: boolean; schedule_at?: string; source?: string; strategy?: string; version?: string }; confirm: true; headers?: Record<string, string> }): Promise<any>;
+  /** Move a healthy canary to the rest of the cluster. (POST /v1/updates/rollouts/{rollout_id}/promote; auth host-admin; danger dangerous) */
+  updatePromote(opts: { rollout_id: string; confirm: true; headers?: Record<string, string> }): Promise<any>;
+  /** Restore the snapshot taken before this rollout, including mid-canary. (POST /v1/updates/rollouts/{rollout_id}/rollback; auth host-admin; danger dangerous) */
+  updateRolloutRollback(opts: { rollout_id: string; body?: { reason?: string }; confirm: true; headers?: Record<string, string> }): Promise<any>;
+  /** Restore one snapshot for an app. (POST /v1/updates/apps/{app}/rollback; auth host-admin; danger dangerous) */
+  updateAppRollback(opts: { app: string; body?: { snapshot_id?: string }; confirm: true; headers?: Record<string, string> }): Promise<any>;
+  /** Sign a host and/or github manifest. A host target marks the app hosted. (POST /v1/updates/apps/{app}/publish; auth host-admin; danger dangerous) */
+  updatePublish(opts: { app: string; body?: { artifacts?: unknown[]; channel?: string; notes_md?: string; outcome_tags?: unknown[]; targets?: unknown[]; version?: string }; confirm: true; headers?: Record<string, string> }): Promise<any>;
+  /** GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest. (POST /v1/updates/github/webhook; auth none; danger write) */
+  updateGitHubWebhook(opts?: { headers?: Record<string, string> }): Promise<any>;
 }
 
 export declare const OPERATIONS: Readonly<Record<string, Operation>>;
