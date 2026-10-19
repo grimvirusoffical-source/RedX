@@ -1,6 +1,7 @@
 /*
  * RedX C ABI: a shared library built from the Go SDK (sdk/go/cabi) for C, C++ and game engines (Unreal, native
  * plugins). Build: go build -buildmode=c-shared -o libredx.so ./cabi   (libredx.dylib on macOS, redx.dll on Windows)
+ * On macOS, set an rpath install name afterwards: install_name_tool -id @rpath/libredx.dylib libredx.dylib
  *
  * Every function that returns char* returns a NUL-terminated JSON document that the caller frees with redx_free:
  *   success: {"ok":true,"status":200,"body":<JSON value | string for Box text>,"body_base64":"<binary bodies>"}
