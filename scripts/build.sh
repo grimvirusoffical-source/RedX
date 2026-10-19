@@ -32,6 +32,8 @@ fi
 [ -x scripts/sync-ui-docs.sh ] && scripts/sync-ui-docs.sh >/dev/null
 require_clean_tree "$RELEASE"  # after the docs sync: a sync that changed files means the tree was not release-ready
 rm -rf dist; mkdir -p dist; FAILED=""
+# Windows version resources (icon, version, copyright) are generated for THIS version, never committed
+case " ${TARGETS[*]} " in *" windows/"*) scripts/winres.sh "$VERSION" >/dev/null ;; esac
 LDFLAGS="-s -w -X redx/host.Version=${VERSION} -X main.version=${VERSION}"  # main.version: redx-launcher
 for t in "${TARGETS[@]}"; do
   IFS='/' read -r os arch arm <<< "$t"
@@ -52,6 +54,8 @@ for t in "${TARGETS[@]}"; do
   # icons: ship the source files so the installers can make menu entries / shortcuts
   cp assets/icons/redx.ico assets/icons/redx.icns assets/icons/redx.svg "$out/" 2>/dev/null || true
   cp deploy/redx.example.toml "$out/redx.example.toml" 2>/dev/null || true
+  # the license ships in every archive (LICENSE.txt on Windows so Notepad opens it); a missing LICENSE fails the build
+  if [ "$os" = windows ]; then cp LICENSE "$out/LICENSE.txt"; else cp LICENSE "$out/LICENSE"; fi
   if [ "$ARCHIVE" = 1 ]; then
     base="$(basename "$out")"
     if [ "$os" = "windows" ] && command -v zip >/dev/null; then

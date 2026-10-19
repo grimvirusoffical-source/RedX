@@ -1,6 +1,6 @@
 # Verifies the unsigned NSIS installer on a real Windows machine/runner: silent install, files, shortcuts,
 # one-click launch (no terminal), console served, uninstall. Used by CI; also fine to run by hand.
-param([Parameter(Mandatory = $true)][string]$Setup)
+param([Parameter(Mandatory = $true)][string]$Setup, [string]$Version = "")
 $ErrorActionPreference = "Stop"
 $fail = 0
 function Check($name, [bool]$cond) { if ($cond) { Write-Host "PASS  $name" } else { Write-Host "FAIL  $name"; $script:fail++ } }
@@ -9,7 +9,19 @@ $inst = Join-Path $env:LOCALAPPDATA "Programs\RedX"
 Write-Host "installing $Setup silently"
 $p = Start-Process -FilePath $Setup -ArgumentList "/S" -Wait -PassThru
 Check "installer exit code 0 (got $($p.ExitCode))" ($p.ExitCode -eq 0)
-foreach ($f in "redxd.exe", "redx.exe", "redx-launcher.exe", "redx.ico", "uninstall.exe") { Check "installed $f" (Test-Path (Join-Path $inst $f)) }
+foreach ($f in "redxd.exe", "redx.exe", "redx-launcher.exe", "redx.ico", "LICENSE.txt", "uninstall.exe") { Check "installed $f" (Test-Path (Join-Path $inst $f)) }
+Check "installed LICENSE names Red-XAI LLC" ((Get-Content -Raw (Join-Path $inst "LICENSE.txt")) -match "Red-XAI LLC")
+# the Windows version resource (Properties > Details) is generated from the release version at build time
+if ($Version -ne "") {
+  $num = ($Version -replace '^v', '' -replace '[^0-9.].*$', '') + ".0"
+  foreach ($f in "redxd.exe", "redx.exe", "redx-launcher.exe") {
+    $vi = (Get-Item (Join-Path $inst $f)).VersionInfo
+    Write-Host "$f FileVersion=$($vi.FileVersion) ProductVersion=$($vi.ProductVersion) LegalCopyright=$($vi.LegalCopyright)"
+    Check "$f FileVersion $num" ($vi.FileVersion -eq $num)
+    Check "$f ProductVersion $Version" ($vi.ProductVersion -eq $Version)
+    Check "$f LegalCopyright Red-XAI LLC" ($vi.LegalCopyright -eq "Copyright (c) 2026 Red-XAI LLC")
+  }
+}
 $sm = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\RedX\RedX.lnk"
 Check "Start-menu shortcut exists" (Test-Path $sm)
 Check "uninstall registry entry" (Test-Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\RedX")
