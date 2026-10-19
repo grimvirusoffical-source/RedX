@@ -14,6 +14,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -29,13 +30,39 @@ type Identity struct {
 	Username      string   `json:"username"`
 	AMR           []string `json:"amr"`
 	AgeBand       string   `json:"age_band"`
-	Error         string   `json:"error"` // e.g. access_denied: authorize redirects back with this error
+	Error         string   `json:"error"`       // e.g. access_denied: authorize redirects back with this error
+	OwnerScope    bool     `json:"owner_scope"` // grant the "owner" scope when it is requested
+	// ProfileOnlyInUserinfo leaves email/email_verified/preferred_username out of the ID token (userinfo has them).
+	ProfileOnlyInUserinfo bool `json:"profile_only_in_userinfo"`
+}
+
+// Event is one entry of the fake /v1/apps/events feed (v1 shape).
+type Event struct {
+	Seq     int64  `json:"seq"`
+	AtMs    int64  `json:"atMs"`
+	Type    string `json:"type"`
+	Account string `json:"account"`
+	UntilMs int64  `json:"untilMs"`
+	Reason  string `json:"reason"`
+}
+
+// Moderation is a recorded owner action.
+type Moderation struct {
+	Action, Account, Reason, By string
+	UntilMs                     int64
 }
 
 type code struct {
 	id                                           Identity
 	clientID, redirect, challenge, nonce, method string
+	scope                                        string
 	used                                         bool
+}
+
+type access struct {
+	id    Identity
+	scope string
+	exp   time.Time
 }
 
 type grant struct {
@@ -52,16 +79,27 @@ type Server struct {
 	TOSVersion string
 	TOTPCode   string // the only code /v1/me/2fa/confirm accepts
 	MinAge     int
-	next       Identity
-	key        *ecdsa.PrivateKey
-	kid        string
-	codes      map[string]*code
-	grants     map[string]*grant
-	sessions   map[string]string // session -> account username
-	taken      map[string]bool   // folded usernames and emails
-	Signups    []host.SignupRequest
-	Confirmed  []string
-	Tokens     int // successful token exchanges
+	// ClientSecret is the confidential client's secret: the token endpoint and the back-channel require it.
+	ClientSecret string
+	// SMSResendPath is where the sign-up SMS resend lives ("" = not served).
+	SMSResendPath string
+	next          Identity
+	access        map[string]*access
+	refresh       map[string]*access
+	events        []Event
+	Moderations   []Moderation
+	Resends       int
+	ClientIPs     []string // X-RedXAI-Client-IP seen on sign-up / token calls, in order
+	EventPolls    int
+	key           *ecdsa.PrivateKey
+	kid           string
+	codes         map[string]*code
+	grants        map[string]*grant
+	sessions      map[string]string // session -> account username
+	taken         map[string]bool   // folded usernames and emails
+	Signups       []host.SignupRequest
+	Confirmed     []string
+	Tokens        int // successful token exchanges
 }
 
 // New returns a fake with one ES256 signing key.
@@ -70,7 +108,8 @@ func New() *Server {
 	if err != nil {
 		panic(err)
 	}
-	return &Server{ClientID: "redx", TOSVersion: "2026-10-19", TOTPCode: "123456", MinAge: 13, key: k, kid: "fake-1",
+	return &Server{ClientID: "redx", ClientSecret: "test-client-secret", SMSResendPath: "/v1/signup/resend-sms", access: map[string]*access{}, refresh: map[string]*access{},
+		TOSVersion: "2026-10-19", TOTPCode: "123456", MinAge: 13, key: k, kid: "fake-1",
 		codes: map[string]*code{}, grants: map[string]*grant{}, sessions: map[string]string{}, taken: map[string]bool{"takenuser1": true, "taken@example.com": true},
 		next: Identity{Sub: "rxa_FAKEUSER0000000000000000001", Email: "user@example.com", EmailVerified: true, Username: "regular_user", AMR: []string{"pwd"}}}
 }
@@ -109,7 +148,32 @@ func (s *Server) Handler() http.Handler {
 	})
 	m.HandleFunc("/oauth2/authorize", s.authorize)
 	m.HandleFunc("/oauth2/token", s.token)
-	m.HandleFunc("/oauth2/userinfo", func(w http.ResponseWriter, r *http.Request) { e(w, 401, "invalid_token", "fake: use the ID token") })
+	m.HandleFunc("/oauth2/userinfo", func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		a := s.access[strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")]
+		s.mu.Unlock()
+		if a == nil || time.Now().After(a.exp) {
+			e(w, 401, "invalid_token", "unknown access token")
+			return
+		}
+		j(w, 200, map[string]interface{}{"sub": a.id.Sub, "email": a.id.Email, "email_verified": a.id.EmailVerified, "preferred_username": a.id.Username})
+	})
+	m.HandleFunc("/v1/apps/events", s.eventsFeed)
+	m.HandleFunc("/v1/owner/accounts/", s.moderate)
+	m.HandleFunc("/fake/moderations", func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		j(w, 200, map[string]interface{}{"moderations": s.Moderations, "resends": s.Resends})
+	})
+	m.HandleFunc("/fake/event", func(w http.ResponseWriter, r *http.Request) {
+		var ev Event
+		if r.Method != "POST" || json.NewDecoder(r.Body).Decode(&ev) != nil {
+			e(w, 400, "bad_request", "POST an event")
+			return
+		}
+		s.AddEvent(ev.Type, ev.Account)
+		j(w, 200, map[string]bool{"ok": true})
+	})
 	m.HandleFunc("/v1/rules", func(w http.ResponseWriter, r *http.Request) {
 		j(w, 200, map[string]interface{}{"minAge": s.MinAge, "centralMinAge": 13, "safeSpecials": host.SafeSpecials})
 	})
@@ -128,6 +192,7 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("/v1/validate/", s.validate)
 	m.HandleFunc("/v1/signup", s.signup)
 	m.HandleFunc("/v1/me/2fa/confirm", s.confirm)
+	m.HandleFunc("/v1/signup/resend-sms", s.resend)
 	m.HandleFunc("/v1/logout", func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		delete(s.sessions, strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
@@ -176,11 +241,41 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 		v.Set("error", s.next.Error)
 	} else {
 		c := rnd("c_")
-		s.codes[c] = &code{id: s.next, clientID: s.ClientID, redirect: redir, challenge: q.Get("code_challenge"), nonce: q.Get("nonce")}
+		s.codes[c] = &code{id: s.next, clientID: s.ClientID, redirect: redir, challenge: q.Get("code_challenge"), nonce: q.Get("nonce"), scope: q.Get("scope")}
 		v.Set("code", c)
 	}
 	u.RawQuery = v.Encode()
 	http.Redirect(w, r, u.String(), http.StatusFound)
+}
+
+// clientOK checks HTTP Basic client authentication (form-encoded parts, RFC 6749 2.3.1).
+func (s *Server) clientOK(r *http.Request) bool {
+	u, p, ok := r.BasicAuth()
+	if !ok {
+		return false
+	}
+	u, _ = url.QueryUnescape(u)
+	p, _ = url.QueryUnescape(p)
+	return u == s.ClientID && s.ClientSecret != "" && p == s.ClientSecret
+}
+
+func grantScope(requested string, id Identity) string {
+	var out []string
+	for _, sc := range strings.Fields(requested) {
+		if sc == "owner" && !id.OwnerScope {
+			continue
+		}
+		out = append(out, sc)
+	}
+	return strings.Join(out, " ")
+}
+
+func (s *Server) issue(id Identity, scope string) (string, string) {
+	at, rt := rnd("at_"), rnd("rt_")
+	a := &access{id: id, scope: scope, exp: time.Now().Add(10 * time.Minute)}
+	s.access[at] = a
+	s.refresh[rt] = a
+	return at, rt
 }
 
 func (s *Server) token(w http.ResponseWriter, r *http.Request) {
@@ -191,6 +286,22 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 	f := r.PostForm
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if !s.clientOK(r) {
+		e(w, 401, "invalid_client", "client authentication failed")
+		return
+	}
+	s.ClientIPs = append(s.ClientIPs, r.Header.Get("X-RedXAI-Client-IP"))
+	if f.Get("grant_type") == "refresh_token" {
+		a := s.refresh[f.Get("refresh_token")]
+		if a == nil {
+			e(w, 400, "invalid_grant", "unknown refresh token")
+			return
+		}
+		delete(s.refresh, f.Get("refresh_token")) // rotation
+		at, rt := s.issue(a.id, a.scope)
+		j(w, 200, map[string]interface{}{"access_token": at, "token_type": "Bearer", "expires_in": 600, "refresh_token": rt, "scope": a.scope})
+		return
+	}
 	c := s.codes[f.Get("code")]
 	sum := sha256.Sum256([]byte(f.Get("code_verifier")))
 	switch {
@@ -207,11 +318,97 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 	c.used = true
 	s.Tokens++
 	now := time.Now().Unix()
+	scope := grantScope(c.scope, c.id)
 	claims := map[string]interface{}{"iss": s.Issuer, "sub": c.id.Sub, "aud": c.clientID, "iat": now, "exp": now + 600, "auth_time": now,
-		"nonce": c.nonce, "amr": c.id.AMR, "sid": rnd("sid_"), "email": c.id.Email, "email_verified": c.id.EmailVerified,
-		"preferred_username": c.id.Username, "age_band": firstNonEmpty(c.id.AgeBand, "18plus"), "adult_verified": false}
-	j(w, 200, map[string]interface{}{"access_token": rnd("at_"), "token_type": "Bearer", "expires_in": 600, "id_token": s.Sign(claims),
-		"refresh_token": rnd("rt_"), "scope": "openid profile email"})
+		"nonce": c.nonce, "amr": c.id.AMR, "sid": rnd("sid_"), "age_band": firstNonEmpty(c.id.AgeBand, "18plus"), "adult_verified": false}
+	if !c.id.ProfileOnlyInUserinfo {
+		claims["email"], claims["email_verified"], claims["preferred_username"] = c.id.Email, c.id.EmailVerified, c.id.Username
+	}
+	at, rt := s.issue(c.id, scope)
+	j(w, 200, map[string]interface{}{"access_token": at, "token_type": "Bearer", "expires_in": 600, "id_token": s.Sign(claims),
+		"refresh_token": rt, "scope": scope})
+}
+
+// ExpireAccessTokens makes every access token expired (to exercise refresh).
+func (s *Server) ExpireAccessTokens() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, a := range s.access {
+		a.exp = time.Now().Add(-time.Minute)
+	}
+}
+
+// AddEvent appends an event to the feed.
+func (s *Server) AddEvent(typ, account string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, Event{Seq: int64(len(s.events) + 1), AtMs: time.Now().UnixMilli(), Type: typ, Account: account})
+}
+
+func (s *Server) eventsFeed(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.clientOK(r) {
+		e(w, 401, "invalid_client", "client authentication failed")
+		return
+	}
+	s.EventPolls++
+	since, _ := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 {
+		limit = 100
+	}
+	out := []Event{}
+	next := since
+	for _, ev := range s.events {
+		if ev.Seq > since && len(out) < limit {
+			out = append(out, ev)
+			next = ev.Seq
+		}
+	}
+	j(w, 200, map[string]interface{}{"events": out, "next": next, "hasMore": false})
+}
+
+func (s *Server) moderate(w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, "/v1/owner/accounts/")
+	id, action, _ := strings.Cut(rest, "/")
+	var b struct {
+		Reason  string `json:"reason"`
+		UntilMs int64  `json:"untilMs"`
+	}
+	if r.Method != "POST" || json.NewDecoder(r.Body).Decode(&b) != nil {
+		e(w, 400, "bad_request", "POST JSON")
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a := s.access[strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")]
+	switch {
+	case a == nil || time.Now().After(a.exp):
+		e(w, 401, "invalid_token", "unknown or expired access token")
+		return
+	case !strings.Contains(" "+a.scope+" ", " owner "):
+		e(w, 403, "owner_required", "the owner scope is required")
+		return
+	case action != "kick" && action != "ban" && action != "terminate":
+		e(w, 404, "not_found", "unknown action")
+		return
+	}
+	s.Moderations = append(s.Moderations, Moderation{Action: action, Account: id, Reason: b.Reason, By: a.id.Email, UntilMs: b.UntilMs})
+	typ := map[string]string{"kick": "account.kicked", "ban": "account.banned", "terminate": "account.terminated"}[action]
+	s.events = append(s.events, Event{Seq: int64(len(s.events) + 1), AtMs: time.Now().UnixMilli(), Type: typ, Account: id, UntilMs: b.UntilMs, Reason: b.Reason})
+	j(w, 200, map[string]interface{}{"ok": true})
+}
+
+func (s *Server) resend(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.sessions[strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")]; !ok {
+		e(w, 401, "unauthorized", "no session")
+		return
+	}
+	s.Resends++
+	j(w, 202, map[string]interface{}{"ok": true, "sent": true})
 }
 
 func firstNonEmpty(a, b string) string {
@@ -319,6 +516,7 @@ func (s *Server) signup(w http.ResponseWriter, r *http.Request) {
 		e(w, 400, "unknown_app", "unknown app")
 		return
 	}
+	s.ClientIPs = append(s.ClientIPs, r.Header.Get("X-RedXAI-Client-IP"))
 	cp := b
 	if fe := host.ValidateSignup(&cp, time.Now(), s.MinAge); fe != nil {
 		code := 400

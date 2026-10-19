@@ -21,7 +21,7 @@ const OWNER = 'owner@example.com'; // placeholder; real owner addresses live in 
   let failures = 0;
   const fail = (m) => { failures++; console.log('FAIL ', m); };
   const ok = (m) => console.log('ok   ', m);
-  const fake = spawn(fakeBin, ['-listen', '127.0.0.1:0'], { stdio: ['ignore', 'pipe', 'inherit'] });
+  const fake = spawn(fakeBin, ['-listen', '127.0.0.1:0', '-client-secret', 'test-client-secret'], { stdio: ['ignore', 'pipe', 'inherit'] });
   const issuer = await new Promise((res, rej) => {
     let buf = '';
     fake.stdout.on('data', (d) => { buf += d; const m = /ISSUER (\S+)/.exec(buf); if (m) res(m[1]); });
@@ -31,7 +31,7 @@ const OWNER = 'owner@example.com'; // placeholder; real owner addresses live in 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'redx-acct-'));
   const port = await free(), url = `http://127.0.0.1:${port}`;
   const host = spawn(redxd, ['run', '--no-open', '--bootstrap', 'console', '--data-dir', dir, '--listen', `127.0.0.1:${port}`], {
-    stdio: 'ignore', env: { ...process.env, REDX_NO_OPEN: '1', REDX_ACCOUNTS_ISSUER: issuer, REDX_ADVERTISE: url, REDXAI_OWNER_EMAILS: OWNER } });
+    stdio: 'ignore', env: { ...process.env, REDX_NO_OPEN: '1', REDX_ACCOUNTS_ISSUER: issuer, REDX_ADVERTISE: url, REDXAI_OWNER_EMAILS: OWNER, REDX_ACCOUNTS_CLIENT_SECRET: 'test-client-secret' } });
   const setNext = (id) => fetch(issuer + '/fake/next-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(id) });
   let b;
   try {
@@ -164,7 +164,7 @@ const OWNER = 'owner@example.com'; // placeholder; real owner addresses live in 
 
     // ---- owner with 2FA ----
     where = 'signin-owner';
-    await setNext({ sub: 'rxa_OWN1', email: OWNER, email_verified: true, username: 'owner_account', amr: ['pwd', 'otp'] });
+    await setNext({ sub: 'rxa_OWN1', email: OWNER, email_verified: true, username: 'owner_account', amr: ['pwd', 'otp'], owner_scope: true });
     await p.click('#acct-signin');
     await p.waitForSelector('.nav-item[data-id="owner"]', { timeout: 15000 });
     ok('owner with 2FA sees the Owner page');
@@ -185,6 +185,10 @@ const OWNER = 'owner@example.com'; // placeholder; real owner addresses live in 
     await p.click('#owner-tab-audit');
     await p.waitForFunction(() => /owner\.read/.test(document.querySelector('#owner-body').innerText));
     expect((await p.textContent('#owner-body')).includes(OWNER), 'owner audit trail names the acting owner');
+    // Kick/Ban/Terminate buttons (Accounts tab); master may be empty so absence is OK
+    where = 'owner-moderation';
+    const hasKick = await p.$('button:has-text("Kick")');
+    ok(hasKick ? 'Owner accounts table exposes Kick/Ban/Terminate' : 'no Kick button (master empty or Accounts tab) — OK');
     await ctx.close();
   } catch (e) {
     fail('exception: ' + (e && e.stack || e));

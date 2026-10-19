@@ -40,6 +40,8 @@ default_db = "default"                # database served by /v1/path/...
 # accounts_client_id = "redx"
 # accounts_redirect_url = "https://redx.example.com/v1/auth/callback"   # default <advertise>/v1/auth/callback
 # accounts_master_db = "redxai_accounts"                 # the master accounts DB: owners only
+# accounts_client_secret_file = "/run/secrets/redx-accounts-client"  # or env REDX_ACCOUNTS_CLIENT_SECRET (never commit)
+# accounts_events_poll_seconds = 15
 # owner_emails = ["owner@example.com"]                   # deploy config only; or env REDXAI_OWNER_EMAILS.
 #                                                        # Owners also need a verified email and a 2FA sign-in.
 # Client secret (confidential clients only): env REDX_ACCOUNTS_CLIENT_SECRET, never in this file.

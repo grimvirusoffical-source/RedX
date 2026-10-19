@@ -322,5 +322,19 @@ function twoFAStep(card, r) {
     parts.push(h('p', null, 'We sent a code by text message. Enter it below.'));
   }
   parts.push(h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Code'), code), err, go);
+  if (!r.totp && cfgCache && cfgCache.sms_resend) {
+    const resend = h('button', { class: 'btn', id: 'su-2fa-resend', type: 'button' }, 'Resend text message');
+    let busy = false;
+    resend.onclick = async () => {
+      if (busy) return;
+      busy = true; resend.disabled = true; err.hidden = true;
+      try {
+        await api('POST', '/v1/auth/signup/2fa/resend', { key: '', noAuthRedirect: true, json: { handle: r.handle } });
+        toast('Another code is on its way.', 'ok');
+      } catch (e) { err.textContent = (e.body && e.body.message) || e.message; err.hidden = false; }
+      setTimeout(() => { busy = false; resend.disabled = false; }, 30000);
+    };
+    parts.push(resend);
+  }
   card.replaceChildren(...parts);
 }

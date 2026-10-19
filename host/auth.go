@@ -155,6 +155,13 @@ func (a *Authenticator) authAccount(r *http.Request, ip, token string) (*Princip
 
 // auditTarget names what an owner request touches without logging record data: "db:<name>" for database
 // routes (plus the record path's file, never values), otherwise the route.
+func auditActor(pr *Principal) string {
+	if pr != nil && pr.Account != nil {
+		return pr.Account.Email
+	}
+	return ""
+}
+
 func auditTarget(r *http.Request) string {
 	p := r.URL.Path
 	if strings.HasPrefix(p, "/v1/db/") {

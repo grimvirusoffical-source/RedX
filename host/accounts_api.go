@@ -85,6 +85,8 @@ func (h *Host) authRoute(w http.ResponseWriter, r *http.Request) {
 		h.authSignup(w, r)
 	case rest == "signup/2fa" && r.Method == "POST":
 		h.authSignup2FA(w, r)
+	case rest == "signup/2fa/resend" && r.Method == "POST":
+		h.authSignupResend(w, r)
 	default:
 		writeErr(w, 404, "not found")
 	}
@@ -99,7 +101,7 @@ func (h *Host) authConfig(w http.ResponseWriter) {
 	app := url.QueryEscape(h.Cfg.AccountsClientID)
 	writeJSON(w, 200, map[string]interface{}{"enabled": true, "issuer": iss, "client_id": h.Cfg.AccountsClientID,
 		"hosted_signup": iss + "/signup?app=" + app, "hosted_account": iss + "/account", "forgot_password": iss + "/forgot-password",
-		"min_age": CentralMinAge})
+		"min_age": CentralMinAge, "sms_resend": h.Cfg.AccountsSMSResendPath != ""})
 }
 
 // redirectURI is the exact callback registered with Red-XAI Accounts for this host.
@@ -143,7 +145,7 @@ func (h *Host) authLogin(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{Name: oidcCookie, Value: state, Path: "/v1/auth/callback", MaxAge: int(acctLoginTTL / time.Second),
 		HttpOnly: true, Secure: strings.HasPrefix(p.redirect, "https://"), SameSite: http.SameSiteLaxMode})
 	q := url.Values{"response_type": {"code"}, "client_id": {h.Cfg.AccountsClientID}, "redirect_uri": {p.redirect},
-		"scope": {"openid profile email"}, "state": {state}, "nonce": {nonce},
+		"scope": {"openid profile email " + OwnerScope}, "state": {state}, "nonce": {nonce},
 		"code_challenge": {pkceChallenge(verifier)}, "code_challenge_method": {"S256"}}
 	sep := "?"
 	if strings.Contains(d.AuthorizationEndpoint, "?") {
@@ -202,7 +204,7 @@ func (h *Host) authCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
-	tok, err := h.oidc.exchange(ctx, code, p.redirect, p.verifier)
+	tok, err := h.oidc.exchange(ctx, code, p.redirect, p.verifier, remoteIP(r))
 	if err != nil {
 		h.Logf("accounts: token exchange: %v", err)
 		h.Audit.Log(AuditEvent{Event: "account.signin.fail", Remote: remoteIP(r), Reason: truncate(err.Error(), 120)})
@@ -216,7 +218,8 @@ func (h *Host) authCallback(w http.ResponseWriter, r *http.Request) {
 		fail("token")
 		return
 	}
-	id := AccountIdentity{Sub: cl.Sub, Username: cl.PreferredUsername, Email: cl.Email, AMR: cl.AMR, AgeBand: cl.AgeBand}
+	// Granted scopes come from the token response (strict: an omitted scope list grants no owner scope).
+	id := AccountIdentity{Sub: cl.Sub, Username: cl.PreferredUsername, Email: cl.Email, AMR: cl.AMR, AgeBand: cl.AgeBand, Scopes: strings.Fields(tok.Scope)}
 	if cl.EmailVerified != nil {
 		id.EmailVerified = *cl.EmailVerified
 	}
@@ -233,9 +236,12 @@ func (h *Host) authCallback(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	token, handoff := h.accts.newSession(id)
-	_ = token
 	owner, blocked := ownerStatus(&id, h.Cfg.OwnerEmails)
+	var keep *acctTokens
+	if owner { // only owner sessions keep Red-XAI tokens (in memory), for moderation calls
+		keep = &acctTokens{Access: tok.AccessToken, Refresh: tok.Refresh, AccessExp: time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second)}
+	}
+	_, handoff := h.accts.newSessionWithTokens(id, keep)
 	switch {
 	case owner:
 		h.Audit.Log(AuditEvent{Event: "owner.signin", KeyID: "acct:" + id.Sub, Actor: id.Email, Remote: remoteIP(r), Detail: "owner sign-in with 2FA"})
@@ -265,7 +271,7 @@ func accountView(a *AccountIdentity) map[string]interface{} {
 		return nil
 	}
 	return map[string]interface{}{"sub": a.Sub, "username": a.Username, "email": a.Email, "email_verified": a.EmailVerified,
-		"owner": a.Owner, "owner_blocked": a.OwnerBlocked, "two_factor_used": a.used2FA()}
+		"owner": a.Owner, "owner_blocked": a.OwnerBlocked, "two_factor_used": a.used2FA(), "owner_scope": containsStr(a.Scopes, OwnerScope)}
 }
 
 // authHandoff trades the single-use code from the callback redirect for the console session token.
@@ -316,19 +322,14 @@ func (h *Host) signupRules(ctx context.Context) map[string]interface{} {
 func (h *Host) appMinAge(ctx context.Context) int {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	st, b, err := h.oidc.call(ctx, "GET", "/v1/rules?app="+url.QueryEscape(h.Cfg.AccountsClientID), nil, "")
+	st, b, err := h.oidc.call(ctx, "GET", "/v1/rules?app="+url.QueryEscape(h.Cfg.AccountsClientID), nil, "", "")
 	min := CentralMinAge
 	if err == nil && st == 200 {
 		var rr struct {
-			MinAge    int `json:"minAge"`
-			AppMinAge int `json:"appMinAge"`
+			MinAge int `json:"minAge"` // this app's minimum age (never below the central 13)
 		}
-		if json.Unmarshal(b, &rr) == nil {
-			for _, v := range []int{rr.MinAge, rr.AppMinAge} {
-				if v > min {
-					min = v
-				}
-			}
+		if json.Unmarshal(b, &rr) == nil && rr.MinAge > min {
+			min = rr.MinAge
 		}
 	}
 	return min
@@ -337,14 +338,14 @@ func (h *Host) appMinAge(ctx context.Context) int {
 func (h *Host) proxyGET(w http.ResponseWriter, r *http.Request, path string) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
-	st, b, err := h.oidc.call(ctx, "GET", path, nil, "")
+	st, b, err := h.oidc.call(ctx, "GET", path, nil, "", remoteIP(r))
 	h.relay(w, st, b, err)
 }
 
 func (h *Host) proxyPOST(w http.ResponseWriter, r *http.Request, path string, body interface{}, bearerTok string) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
-	st, b, err := h.oidc.call(ctx, "POST", path, body, bearerTok)
+	st, b, err := h.oidc.call(ctx, "POST", path, body, bearerTok, remoteIP(r))
 	h.relay(w, st, b, err)
 }
 
@@ -401,7 +402,7 @@ func (h *Host) authValidate(w http.ResponseWriter, r *http.Request, field string
 	if remote != "" && firstFail(checks) == "" {
 		ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 		defer cancel()
-		st, rb, err := h.oidc.call(ctx, "POST", remote, map[string]string{field: strings.TrimSpace(b[field])}, "")
+		st, rb, err := h.oidc.call(ctx, "POST", remote, map[string]string{field: strings.TrimSpace(b[field])}, "", remoteIP(r))
 		var rr struct {
 			Checks  []RuleCheck `json:"checks"`
 			Error   string      `json:"error"`
@@ -451,7 +452,7 @@ func (h *Host) authSignup(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
-	st, b, err := h.oidc.call(ctx, "POST", "/v1/signup", req, "")
+	st, b, err := h.oidc.call(ctx, "POST", "/v1/signup", req, "", remoteIP(r))
 	if err != nil || st != 201 {
 		h.relay(w, st, b, err)
 		return
@@ -493,10 +494,30 @@ func (h *Host) authSignup2FA(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
-	st, rb, err := h.oidc.call(ctx, "POST", "/v1/me/2fa/confirm", map[string]string{"code": strings.TrimSpace(b.Code)}, sess)
+	st, rb, err := h.oidc.call(ctx, "POST", "/v1/me/2fa/confirm", map[string]string{"code": strings.TrimSpace(b.Code)}, sess, remoteIP(r))
 	if err == nil && st >= 200 && st < 300 {
 		h.accts.signup(b.Handle, true)
-		_, _, _ = h.oidc.call(ctx, "POST", "/v1/logout", map[string]string{}, sess) // RedX keeps no Red-XAI session
+		_, _, _ = h.oidc.call(ctx, "POST", "/v1/logout", map[string]string{}, sess, remoteIP(r)) // RedX keeps no Red-XAI session
 	}
 	h.relay(w, st, rb, err)
+}
+
+// authSignupResend asks Red-XAI Accounts to text the sign-up 2FA code again (configurable route; off when unset).
+func (h *Host) authSignupResend(w http.ResponseWriter, r *http.Request) {
+	if h.Cfg.AccountsSMSResendPath == "" {
+		acctErr(w, 404, "not_enabled", "Resending the text message is not available yet.")
+		return
+	}
+	var b struct {
+		Handle string `json:"handle"`
+	}
+	if h.acctThrottle(w, r, "smsresend", 1.0/30, 3) || !readJSON(w, r, &b) {
+		return
+	}
+	sess, ok := h.accts.signup(b.Handle, false)
+	if !ok {
+		acctErr(w, 401, "handle_invalid", "This sign-up has expired. Sign in to finish setting up two-factor authentication.")
+		return
+	}
+	h.proxyPOST(w, r, h.Cfg.AccountsSMSResendPath, map[string]string{}, sess)
 }

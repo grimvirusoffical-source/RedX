@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -52,11 +53,16 @@ func (h *Host) ownerRoute(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/owner/"), "/")
+	if r.Method == "POST" && strings.HasPrefix(rest, "accounts/") {
+		id, action, _ := strings.Cut(strings.TrimPrefix(rest, "accounts/"), "/")
+		h.ownerModerate(w, r, pr, id, action)
+		return
+	}
 	if r.Method != "GET" {
 		writeErr(w, 405, "method not allowed")
 		return
 	}
-	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/owner/"), "/")
 	switch {
 	case rest == "overview":
 		h.ownerOverview(w, pr)
@@ -272,4 +278,85 @@ func str(v interface{}) string { s, _ := v.(string); return s }
 func num(v interface{}) float64 {
 	f, _ := v.(float64)
 	return f
+}
+
+var accountIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+
+// ownerModerate kicks, bans or terminates a Red-XAI Account through the Red-XAI Accounts owner API, using this
+// owner's own access token (granted the "owner" scope). Local console sessions of the account end at once.
+//
+//	POST /v1/owner/accounts/{id}/kick      {reason}
+//	POST /v1/owner/accounts/{id}/ban       {reason, untilMs}   untilMs 0 = forever
+//	POST /v1/owner/accounts/{id}/terminate {reason, confirm: "TERMINATE"}
+func (h *Host) ownerModerate(w http.ResponseWriter, r *http.Request, pr *Principal, id, action string) {
+	if action != "kick" && action != "ban" && action != "terminate" {
+		writeErr(w, 404, "not found")
+		return
+	}
+	if !accountIDRe.MatchString(id) {
+		writeErr(w, 400, "bad account id")
+		return
+	}
+	var b struct {
+		Reason  string `json:"reason"`
+		UntilMs int64  `json:"untilMs"`
+		Confirm string `json:"confirm"`
+	}
+	if !readJSON(w, r, &b) {
+		return
+	}
+	b.Reason = strings.TrimSpace(b.Reason)
+	switch {
+	case b.Reason == "" || len(b.Reason) > 500:
+		acctErr(w, 400, "reason_required", "Give a reason (up to 500 characters); the person sees it.")
+		return
+	case action == "ban" && b.UntilMs < 0, action == "ban" && b.UntilMs != 0 && b.UntilMs < time.Now().UnixMilli():
+		acctErr(w, 400, "until_invalid", "The ban must end in the future (or 0 for forever).")
+		return
+	case action == "terminate" && b.Confirm != "TERMINATE":
+		// Red-XAI Accounts only needs {reason}; RedX still requires a typed confirm so the console cannot mis-click.
+		acctErr(w, 400, "confirm_required", `Terminating deletes the account in every app: send confirm "TERMINATE".`)
+		return
+	}
+	access, ok := h.ownerAccessToken(r)
+	if !ok {
+		acctErr(w, 401, "owner_reauth", "Your owner sign-in has expired for moderation. Sign out and sign in again.")
+		return
+	}
+	body := map[string]interface{}{"reason": b.Reason}
+	if action == "ban" {
+		body["untilMs"] = b.UntilMs
+	}
+	h.Audit.Log(AuditEvent{Event: "owner.write", KeyID: pr.Key.ID, Actor: pr.Account.Email, Target: action + " account " + id, Remote: remoteIP(r), Detail: truncate(b.Reason, 200)})
+	ctx := r.Context()
+	st, rb, err := h.oidc.call(ctx, "POST", "/v1/owner/accounts/"+id+"/"+action, body, access, remoteIP(r))
+	if err == nil && st >= 200 && st < 300 {
+		n := h.accts.endSessionsForSub(id)
+		h.Audit.Log(AuditEvent{Event: "account." + action, KeyID: pr.Key.ID, Actor: pr.Account.Email, Target: "account " + id, Detail: strconv.Itoa(n) + " console session(s) ended here"})
+	}
+	h.relay(w, st, rb, err)
+}
+
+// ownerAccessToken returns this owner session's Red-XAI access token, refreshing it when it is about to expire.
+func (h *Host) ownerAccessToken(r *http.Request) (string, bool) {
+	tok := bearer(r)
+	t, ok := h.accts.tokens(tok)
+	if !ok {
+		return "", false
+	}
+	if time.Until(t.AccessExp) > 30*time.Second {
+		return t.Access, true
+	}
+	if t.Refresh == "" {
+		return "", false
+	}
+	nt, err := h.oidc.refresh(r.Context(), t.Refresh, remoteIP(r))
+	if err != nil || !containsStr(strings.Fields(nt.Scope), OwnerScope) {
+		return "", false
+	}
+	if nt.Refresh == "" {
+		nt.Refresh = t.Refresh
+	}
+	h.accts.setTokens(tok, acctTokens{Access: nt.AccessToken, Refresh: nt.Refresh, AccessExp: time.Now().Add(time.Duration(nt.ExpiresIn) * time.Second)})
+	return nt.AccessToken, true
 }

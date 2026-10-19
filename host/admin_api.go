@@ -199,6 +199,9 @@ func (h *Host) effectiveConfig() map[string]interface{} {
 	if h.Cfg.Join != "" {
 		vals["join"] = "(set, hidden)"
 	}
+	if h.Cfg.AccountsClientSecretFile != "" {
+		vals["accounts_client_secret_file"] = "(set, hidden)"
+	}
 	if n := len(h.Cfg.OwnerEmails); n > 0 {
 		vals["owner_emails"] = fmt.Sprintf("(%d set, hidden)", n)
 	}
@@ -517,7 +520,11 @@ func (h *Host) filesRoute(w http.ResponseWriter, r *http.Request, db, rest strin
 }
 
 func (h *Host) dropDBHandler(w http.ResponseWriter, r *http.Request, db string) {
-	if _, ok := h.authz(w, r, ScopeAdmin, AllDBs, "", true); !ok {
+	pr, ok := h.authz(w, r, ScopeAdmin, AllDBs, "", true)
+	if !ok {
+		return
+	}
+	if !h.refuseMasterMutation(w, r, pr, db) {
 		return
 	}
 	if h.maybeForward(w, r) {
