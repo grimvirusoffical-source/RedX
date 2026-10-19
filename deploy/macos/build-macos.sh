@@ -49,7 +49,11 @@ for ARCH in "$@"; do
   PR="$W/pkgroot"; mkdir -p "$PR/Applications" "$PR/usr/local/bin"
   cp -R "$APP" "$PR/Applications/"
   cp "$W/bin/redx" "$W/bin/redxd" "$PR/usr/local/bin/"
-  pkgbuild --root "$PR" --identifier com.redx.pkg --version "${VERSION}" --install-location / "$OUT/${NAME}.pkg"
+  # not relocatable: otherwise Installer "updates" a RedX.app it finds elsewhere (e.g. ~/Applications) instead of /Applications
+  CPL="$W/component.plist"
+  pkgbuild --analyze --root "$PR" "$CPL"
+  plutil -replace 0.BundleIsRelocatable -bool NO "$CPL"
+  pkgbuild --root "$PR" --component-plist "$CPL" --identifier com.redx.pkg --version "${VERSION}" --install-location / "$OUT/${NAME}.pkg"
   rm -rf "$W"
   echo "built $OUT/${NAME}.dmg and .pkg"
 done

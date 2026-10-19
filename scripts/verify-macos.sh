@@ -18,10 +18,17 @@ plutil -lint "$A/Contents/Info.plist" >/dev/null && ok "Info.plist valid"
 lipo -info "$A/Contents/MacOS/redxd" | tee /dev/stderr | grep -q "x86_64" && lipo -info "$A/Contents/MacOS/redxd" | grep -q arm64 && ok "universal binary (arm64 + x86_64)" || bad "not universal"
 "$A/Contents/MacOS/redxd" --version && ok "redxd runs on $HOSTARCH"
 # run the app exactly as double-clicking would (the binary named in Info.plist, no arguments)
-export REDX_DATA_DIR="$(mktemp -d)" REDX_LISTEN="127.0.0.1:7791" CI=1
-"$A/Contents/MacOS/RedX" >/dev/null 2>&1 &
+export REDX_DATA_DIR="$(mktemp -d)" REDX_LISTEN="127.0.0.1:7791" CI=1 REDX_LAUNCHER_NO_OPEN=1 REDX_NO_OPEN=1
+LLOG="$(mktemp)"
+"$A/Contents/MacOS/RedX" >"$LLOG" 2>&1 &
 up=0; for i in $(seq 1 60); do curl -sf http://127.0.0.1:7791/healthz >/dev/null && { up=1; break; }; sleep 0.5; done
-[ $up = 1 ] && ok "app launcher started the host (healthz)" || bad "host did not start"
+if [ $up = 1 ]; then ok "app launcher started the host (healthz)"; else
+  bad "host did not start"
+  echo "--- launcher output:"; cat "$LLOG"
+  echo "--- redxd run in the foreground for 5 s:"
+  "$A/Contents/MacOS/redxd" run --no-open > "$LLOG.d" 2>&1 & dp=$!; sleep 5; kill $dp 2>/dev/null; cat "$LLOG.d"
+  ls -la "$A/Contents/MacOS" "$A/Contents/Resources"
+fi
 [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:7791/)" = 200 ] && ok "console served" || bad "console"
 pkill -x redxd; sleep 1
 # pkg
