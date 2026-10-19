@@ -107,6 +107,10 @@ Release binaries for every platform are cross-compiled from Linux. Only the Linu
 * Sharding and multi-key transactions across nodes are not implemented.
 * Per-feature limitations are listed in each feature document, and BoxQL limitations in [BoxQL section 17](docs/boxql.md#17-known-limitations).
 
+## About
+
+RedX is developed and maintained by Red-XAI LLC. Red-XAI LLC is wholly owned by GRIM-VIRUS, an independent recording artist who leads development under the alias MainDirectory. © Red-XAI LLC. All rights reserved.
+
 ## License
 
 All rights reserved. See [LICENSE](LICENSE).

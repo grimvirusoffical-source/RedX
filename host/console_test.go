@@ -753,3 +753,15 @@ func TestRedeemJoinThenFollow(t *testing.T) {
 	}
 	var _ = httptest.NewRecorder
 }
+
+// The console's About card carries the exact ownership copy (also in README.md).
+func TestConsoleAboutCopy(t *testing.T) {
+	const about = "RedX is developed and maintained by Red-XAI LLC. Red-XAI LLC is wholly owned by GRIM-VIRUS, an independent recording artist who leads development under the alias MainDirectory. © Red-XAI LLC. All rights reserved."
+	b, ok := host.UIAsset("js/pages/help.js")
+	if !ok {
+		t.Fatal("help.js is not embedded")
+	}
+	if !strings.Contains(string(b), "export const ABOUT = '"+about+"';") {
+		t.Error("help.js About text differs from the ownership copy")
+	}
+}
