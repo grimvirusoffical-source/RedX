@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"go/format"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -320,7 +321,7 @@ func goOps(s *Spec) string {
 	}
 	b.WriteString("}\n")
 	for _, o := range s.Operations {
-		if o.Response == "websocket" {
+		if o.Response == "websocket" || goHandwritten[o.ID] {
 			continue
 		}
 		var sig, args []string
@@ -335,8 +336,16 @@ func goOps(s *Spec) string {
 		}
 		fmt.Fprintf(&b, "\treturn c.Call(ctx, %s, a)\n}\n", q(o.ID))
 	}
-	return b.String()
+	src, err := format.Source([]byte(b.String()))
+	if err != nil {
+		panic(err)
+	}
+	return string(src)
 }
+
+// goHandwritten are operations whose Go method is written by hand with a typed signature (client.go); they
+// stay reachable by id through Call.
+var goHandwritten = map[string]bool{"bx": true}
 
 func requestKind(o Op) string {
 	if o.Request != "" {
