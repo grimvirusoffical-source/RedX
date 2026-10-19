@@ -1,6 +1,6 @@
 import { h, icon, mount, toast, $, clear } from './util.js';
 import { api, session, setUnauthorizedHandler, exchangePairingCode } from './api.js';
-import { state, subscribe, setMode, setTheme, setDb, applyTheme, loadWho, loadDbs, isHostAdmin, isOwner, wizard, pageAllowed, setConsoleMode, applyConsoleModeForRoute } from './state.js';
+import { state, subscribe, setMode, setTheme, setDb, applyTheme, loadWho, loadDbs, isHostAdmin, isOwner, wizard, pageAllowed, setConsoleMode, applyConsoleModeForRoute, stripModeQuery } from './state.js';
 
 // One registry. A later page is a new entry here: mode, route, label, role.
 // mode is database, host, or both. role is any, admin, or owner.
@@ -62,6 +62,7 @@ setUnauthorizedHandler(() => {
   if (!state.who) return;
   session.clear();
   state.who = null;
+  stripModeQuery();
   showLogin('Your key was rejected or has been revoked. Please sign in again.');
 });
 
@@ -256,6 +257,7 @@ async function signOut() {
   if (session.key.startsWith('rxs_')) { try { await api('POST', '/v1/auth/logout', { noAuthRedirect: true }); } catch { /* the session expires anyway */ } }
   session.clear();
   state.who = null;
+  stripModeQuery();
   location.hash = '';
   location.reload();
 }

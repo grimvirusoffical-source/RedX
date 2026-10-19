@@ -178,24 +178,31 @@ function formStep(card, back, tos, rules, accepted) {
   cal.max = today.toISOString().slice(0, 10);
   cal.min = (today.getFullYear() - 100) + '-01-01';
 
-  const tfaOpts = [
-    ['phone', 'Phone', 'A code by text message when you sign in.'],
-    ['app', 'App', 'An authenticator app (Google Authenticator, 1Password, Authy…).'],
-    ['redxai_auth', 'Red-XAI Auth', 'Coming soon'],
-    ['none', 'None', 'Not recommended.'],
-  ];
-  let tfa = 'app';
+  const tfaLabels = { phone: 'Phone', app: 'App', none: 'None', redxai_auth: 'Red-XAI Auth' };
+  const tfaSubs = {
+    phone: 'A code by text message when you sign in.',
+    app: 'An authenticator app (Google Authenticator, 1Password, Authy…).',
+    none: 'Not recommended.',
+  };
+  const offered = (Array.isArray(rules.twoFactor) ? rules.twoFactor : [
+    { id: 'phone', available: true }, { id: 'app', available: true }, { id: 'none', available: true },
+  ]).filter((o) => o && o.available === true && tfaLabels[o.id]);
+  const tfaOpts = offered.map((o) => {
+    const note = typeof o.note === 'string' ? o.note : '';
+    const sub = o.id === 'redxai_auth' ? (note && !/coming soon/i.test(note) ? note : 'Use Red-XAI Auth for this sign-in.') : (tfaSubs[o.id] || note);
+    return [o.id, tfaLabels[o.id], sub];
+  });
+  let tfa = offered.some((o) => o.id === 'app') ? 'app' : ((offered[0] && offered[0].id) || 'app');
   const phoneRow = h('div', { class: 'tfa-extra', hidden: true }, h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Phone number with country code'), phone));
   const noneRow = h('div', { class: 'tfa-extra warn-box', id: 'su-no2fa-warning', hidden: true }, icon('alert', 16), ' ',
     tos.no2faWarning || 'Without two-factor authentication anyone who learns your password can take over your account.',
     h('label', { class: 'check' }, ackNo2fa, ' I understand and accept this risk'));
   const tfaGroup = h('div', { class: 'tfa', role: 'radiogroup', 'aria-label': 'Two-factor authentication' },
     tfaOpts.map(([v, label, sub]) => {
-      const dis = v === 'redxai_auth';
-      const r = h('input', { type: 'radio', name: 'su-2fa', value: v, id: 'su-2fa-' + v, checked: v === tfa, disabled: dis });
+      const r = h('input', { type: 'radio', name: 'su-2fa', value: v, id: 'su-2fa-' + v, checked: v === tfa });
       r.addEventListener('change', () => { tfa = v; phoneRow.hidden = v !== 'phone'; noneRow.hidden = v !== 'none'; update(); });
-      return h('label', { class: 'tfa-opt' + (dis ? ' disabled' : ''), for: 'su-2fa-' + v }, r,
-        h('span', null, h('b', null, label), dis ? h('span', { class: 'chip soon' }, 'Coming soon') : null, h('small', { class: 'muted' }, ' ' + sub)));
+      return h('label', { class: 'tfa-opt', for: 'su-2fa-' + v }, r,
+        h('span', null, h('b', null, label), h('small', { class: 'muted' }, ' ' + sub)));
     }));
 
   const submit = h('button', { class: 'btn primary big', id: 'su-submit', type: 'button', disabled: true }, 'Create account');
@@ -217,7 +224,7 @@ function formStep(card, back, tos, rules, accepted) {
     const d = dobChecks(dob.value, minAge);
     hD.show(d.checks);
     ageNote.hidden = !(d.checks[1].ok && !d.checks[2].ok);
-    const tfaOK = tfa === 'app' || (tfa === 'phone' && /^\+[1-9][0-9]{7,14}$/.test(phone.value.trim())) || (tfa === 'none' && ackNo2fa.checked);
+    const tfaOK = tfa === 'app' || tfa === 'redxai_auth' || (tfa === 'phone' && /^\+[1-9][0-9]{7,14}$/.test(phone.value.trim())) || (tfa === 'none' && ackNo2fa.checked);
     const remoteOK = remote.username && remote.username.value === user.value.trim() && allOK(remote.username.checks) &&
       remote.email && remote.email.value === email.value.trim() && allOK(remote.email.checks);
     submit.disabled = !(allOK(u) && allOK(e) && allOK(e2) && allOK(p) && allOK(p2) && allOK(d.checks) && ackFalse.checked && tfaOK && remoteOK);

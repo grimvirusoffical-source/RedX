@@ -68,7 +68,7 @@ rest. The sidebar lists only the pages `GET /v1/ui/whoami` marks with `pages.<id
 `Esc` closes dialogs. The theme switcher (moon / monitor / sun) is in the top bar; layout is responsive down to phone width.
 See *Appearance* below.
 
-The header centre is a **Database / Host** switch. **Database** is the default and lists the database pages below, including Help. **Host** lists only the pages that work: Plans & billing, Usage & quotas, Updates, and Logs (this account's database activity). The owner audit log stays on the Owner page. The last choice is remembered for the signed-in user. `?mode=host` or `?mode=database` selects that mode (hash routes stay, for example `/?mode=host#/hosting`). Opening a host page selects Host. Owner and other role-gated pages stay hidden unless this session is allowed to open them.
+The header centre is a **Database / Host** switch. **Database** is the default and lists the database pages below, including Help. **Host** lists only the pages that work: Plans & billing, Usage & quotas, Updates, and Logs (this account's database activity). The owner audit log stays on the Owner page. The last choice is remembered for the signed-in user. `?mode=host` or `?mode=database` on the page you open selects that mode once (hash routes stay, for example `/?mode=host#/hosting`). Signing out, or a rejected key, removes `?mode=` so the next sign-in in the same tab uses that person's own choice. Opening a host page selects Host. Owner and other role-gated pages stay hidden unless this session is allowed to open them.
 
 | Page | What you can do | Terminal equivalent shown |
 |---|---|---|

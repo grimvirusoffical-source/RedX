@@ -19,12 +19,16 @@ export default async function render() {
   const body = h('div');
   root.append(pageHead('Plans & billing', 'RedX Hosted plans, the current plan, and a new database on this account.'), body);
 
-  let plans = { enabled: false, plans: [] };
+  let plans = null;
+  let plansFailed = false;
   try {
     plans = await api('GET', '/v1/billing/plans', { noAuthRedirect: true });
-  } catch { /* a missing price list is the same as plans not being on sale */ }
+  } catch { plansFailed = true; }
 
-  if (!plans || !plans.enabled) {
+  if (plansFailed) {
+    body.append(h('div', { class: 'callout info', id: 'hosting-plans-error', role: 'status' }, icon('info'),
+      h('div', null, "Couldn't load plans, try again")));
+  } else if (!plans || !plans.enabled) {
     body.append(h('div', { class: 'callout info', id: 'hosting-off', role: 'status' }, icon('info'),
       h('div', null, "Hosting plans aren't on sale yet")));
   }
