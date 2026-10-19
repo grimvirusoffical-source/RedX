@@ -389,7 +389,11 @@ func TestOfflineBackupRestore(t *testing.T) {
 	var buf strings.Builder
 	_ = buf
 	// offline path requires the daemon to be stopped (or force)
-	f, _ := os.CreateTemp(t.TempDir(), "bk")
+	f, err := os.CreateTemp(t.TempDir(), "bk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close() // Windows cannot remove the temp dir while the file is open
 	if err := host.OfflineBackup(dir, f, "", false); err == nil {
 		t.Fatal("offline backup must refuse while daemon runs")
 	}

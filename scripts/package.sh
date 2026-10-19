@@ -23,11 +23,14 @@ case "$KIND" in
     done ;;
   windows)
     command -v makensis >/dev/null || { echo "makensis not found (apt install nsis)" >&2; exit 1; }
+    # numeric X.Y.Z for the Windows version resource: "0.4.4-rc" -> 0.4.4, "1.2" -> 1.2.0
+    NUMVERSION="$(printf '%s' "$VERSION" | sed -E 's/^v//; s/[^0-9.].*$//')"
+    case "$NUMVERSION" in *.*.*) ;; *.*) NUMVERSION="$NUMVERSION.0" ;; "") NUMVERSION="0.0.0" ;; *) NUMVERSION="$NUMVERSION.0.0" ;; esac
     for t in amd64 arm64; do
       d="dist/redx-${VERSION}-windows-$t"; [ -d "$d" ] || { echo "missing $d (run scripts/build.sh first)" >&2; exit 1; }
       launcher windows "$t" "" "$d/redx-launcher.exe" "-H=windowsgui"
       # NSIS wants a plain 4-part product version
-      makensis -V2 -DVERSION="${VERSION}" -DARCH="$t" -DSRC="$PWD/$d" -DICON="$PWD/assets/icons/redx.ico" \
+      makensis -V2 -DVERSION="${VERSION}" -DNUMVERSION="${NUMVERSION}" -DARCH="$t" -DSRC="$PWD/$d" -DICON="$PWD/assets/icons/redx.ico" \
         -DOUT="$PWD/dist/redx-${VERSION}-windows-$t-setup.exe" deploy/windows/redx.nsi
     done ;;
   macos)

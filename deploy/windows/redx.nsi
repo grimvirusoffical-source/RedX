@@ -28,7 +28,11 @@ InstallDirRegKey HKCU "Software\RedX" "InstallDir"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
 BrandingText "RedX ${VERSION} (unsigned build)"
-VIProductVersion "${VERSION}.0"
+; Windows wants a numeric X.X.X.X here; NUMVERSION is VERSION without a suffix such as "-rc" (package.sh passes it)
+!ifndef NUMVERSION
+  !define NUMVERSION "${VERSION}"
+!endif
+VIProductVersion "${NUMVERSION}.0"
 VIAddVersionKey "ProductName" "RedX"
 VIAddVersionKey "FileDescription" "RedX database host installer"
 VIAddVersionKey "FileVersion" "${VERSION}"
