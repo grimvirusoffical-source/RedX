@@ -664,12 +664,14 @@ func (c *Cluster) pullOnce(ctx context.Context, stop <-chan struct{}) error {
 	}
 	c.mu.Unlock()
 	for _, e := range lr.Entries {
-		select {
-		case <-stop:
-			return nil
-		default:
+		if fn := beforeApplyHook.Load(); fn != nil {
+			(*fn)()
 		}
-		if err := c.applyEntry(e); err != nil {
+		applied, err := c.applyFollowed(e, stop)
+		if !applied && err == nil {
+			return nil // promoted or repointed meanwhile: entries of the old leader are not applied any more
+		}
+		if err != nil {
 			if errors.Is(err, ErrNeedResync) {
 				c.h.Logf("replication: backend asked for a full resync at seq %d", e.Seq)
 				return c.installSnapshot(ctx2, leader)
@@ -680,12 +682,27 @@ func (c *Cluster) pullOnce(ctx context.Context, stop <-chan struct{}) error {
 	return nil
 }
 
-// applyEntry applies a replicated entry locally. Note: TTLs are NOT applied to
-// the local store; followers never expire keys, the leader sends explicit dels.
-func (c *Cluster) applyEntry(e LogEntry) error {
+// beforeApplyHook runs (tests only) after an entry was fetched and before it is applied.
+var beforeApplyHook atomic.Pointer[func()]
+
+// applyFollowed applies one entry from the follow loop unless the loop was stopped. The check and the apply
+// happen under the same pause read lock that promote takes exclusively while it closes the loop, so an
+// entry of the old leader is either applied before the promote or not at all.
+func (c *Cluster) applyFollowed(e LogEntry, stop <-chan struct{}) (bool, error) {
+	c.h.pause.RLock()
+	defer c.h.pause.RUnlock()
+	select {
+	case <-stop:
+		return false, nil
+	default:
+	}
+	return true, c.applyEntryLocked(e)
+}
+
+// applyEntryLocked applies a replicated entry locally; the caller holds h.pause for reading. Note: TTLs are
+// NOT applied to the local store; followers never expire keys, the leader sends explicit dels.
+func (c *Cluster) applyEntryLocked(e LogEntry) error {
 	h := c.h
-	h.pause.RLock()
-	defer h.pause.RUnlock()
 	switch e.Op {
 	case "createdb":
 		if err := h.Reg.Ensure(e.DB); err != nil {

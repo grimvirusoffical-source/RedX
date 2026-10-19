@@ -6,7 +6,7 @@
 * Clustering: a promoted node now fences the old leader. When the old leader is reachable it stops accepting writes (`503`, `FENCED` in `redx node status`) until it is repointed; the fence survives restarts. See [Clustering](docs/clustering.md#failover-promote-fencing-and-repoint).
 * `redx node repoint` and `redx node join --local` accept `--leader-pin` (alias `--fingerprint`) or a join link, so a node can follow a new leader that uses a self-signed certificate. A fenced old leader reuses the fingerprint it learned from the fence.
 * `redx doctor` checks the TLS certificate also before the data directory exists, accepts `--tls` / `--tls-cert`, and reports the certificate the running daemon serves.
-* Fixed races where a snapshot install or replication pull still in flight during `promote` could overwrite the promoted node's new replication id.
+* Fixed races where a snapshot install or replication pull still in flight during `promote` could overwrite the promoted node's new replication id, or apply one more entry of the old leader.
 * The macOS app's executable is the launcher again (the `redx` CLI moved to `RedX.app/Contents/Resources/bin`), and the `.pkg` always installs into `/Applications`.
 * `scripts/smoke.sh` runs on macOS (portable `stat`), and its Content-Range checks assert the full size; CI runs it on macOS too.
 * `redx doctor --tls-key`; a certificate given alone as a flag no longer fails the config check.

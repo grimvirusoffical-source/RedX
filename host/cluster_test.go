@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -448,4 +449,42 @@ func TestOfflineBootstrapKeyBeforeFirstStartIsReplicated(t *testing.T) {
 		st, _, _ := do(t, "GET", f.URL+P+"nothing:here", key, "")
 		return st == 404
 	})
+}
+
+// An entry the follower already fetched from the old leader must not be applied once the follower has been
+// promoted: the stop check and the apply are atomic with respect to promote.
+func TestPromoteDuringFetchedEntryDoesNotApplyIt(t *testing.T) {
+	leader := startNode(t, t.TempDir(), nil)
+	f1 := newFollower(t, leader, "f1")
+	f1.Key = leader.Key
+	host.PartitionFenceNotify(t) // keep the old leader writable for the test
+	do(t, "PUT", leader.URL+P+"r:B.Before", leader.Key, "1")
+	eventually(t, "f1 synced", 5*time.Second, func() bool { st, _, _ := do(t, "GET", f1.URL+P+"r:B.Before", f1.Key, ""); return st == 200 })
+	var once sync.Once
+	promoted := make(chan int, 1)
+	host.SetBeforeApplyHook(t, func() {
+		once.Do(func() { // the entry for r:B.Late is in hand but not applied: promote now
+			st, _, _ := do(t, "POST", f1.URL+"/v1/cluster/promote", f1.Key, "")
+			promoted <- st
+		})
+	})
+	do(t, "PUT", leader.URL+P+"r:B.Late", leader.Key, "2")
+	select {
+	case st := <-promoted:
+		if st != 200 {
+			t.Fatalf("promote %d", st)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the follower never fetched the entry")
+	}
+	time.Sleep(300 * time.Millisecond)
+	if st, _, _ := do(t, "GET", f1.URL+P+"r:B.Late", f1.Key, ""); st != 404 {
+		t.Fatalf("an old-leader entry was applied after promote (GET %d)", st)
+	}
+	if st, _, _ := do(t, "GET", f1.URL+P+"r:B.Before", f1.Key, ""); st != 200 {
+		t.Fatal("data replicated before the promote must stay")
+	}
+	if cs := status(t, f1); cs.Role != "leader" {
+		t.Fatalf("f1 role %s", cs.Role)
+	}
 }

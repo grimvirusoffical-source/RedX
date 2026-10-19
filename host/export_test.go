@@ -22,3 +22,9 @@ func SetConnectClock(h *Host, now func() time.Time) {
 	h.connect.now = now
 	h.connect.mu.Unlock()
 }
+
+// SetBeforeApplyHook runs fn after a follower fetched an entry and before it applies it, for one test.
+func SetBeforeApplyHook(t interface{ Cleanup(func()) }, fn func()) {
+	beforeApplyHook.Store(&fn)
+	t.Cleanup(func() { beforeApplyHook.Store(nil) })
+}
