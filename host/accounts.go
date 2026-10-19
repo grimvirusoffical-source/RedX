@@ -37,7 +37,8 @@ const DefaultAccountsMasterDB = "redxai_accounts"
 const (
 	acctSessionTTL  = 12 * time.Hour
 	acctSessionIdle = 2 * time.Hour
-	acctLoginTTL    = 10 * time.Minute
+	acctLoginTTL    = 30 * time.Minute // PKCE sign-in; long enough to finish a slow sign-up
+	acctLoginGrace  = time.Hour        // keep an expired sign-in recognisable so it is not mistaken for a forged state
 	acctHandoffTTL  = 2 * time.Minute
 	acctSignupTTL   = 30 * time.Minute
 	acctMaxPending  = 10000
@@ -225,8 +226,9 @@ type acctTokens struct {
 }
 
 type acctPending struct {
-	verifier, nonce, redirect, ret string
-	created                        time.Time
+	verifier, nonce, redirect, ret, prefix string
+	created                                time.Time
+	consumed                               bool
 }
 
 type acctHandoff struct {
@@ -276,7 +278,9 @@ func (s *accountStore) gcLocked() {
 		}
 	}
 	for k, v := range s.pending {
-		if now.Sub(v.created) > acctLoginTTL {
+		// Past the grace window the state is forgotten. Until then an expired
+		// record stays so a late callback can restart instead of looking forged.
+		if now.Sub(v.created) > acctLoginTTL+acctLoginGrace {
 			delete(s.pending, k)
 		}
 	}
@@ -302,18 +306,69 @@ func (s *accountStore) addPending(state string, p *acctPending) error {
 		return errTooMany
 	}
 	p.created = s.now()
+	p.prefix = oidcStatePrefix(state)
 	s.pending[tokHash(state)] = p
 	return nil
 }
 
-func (s *accountStore) takePending(state string) *acctPending {
+// consumePending takes a still-valid sign-in so it can be finished once.
+// The record stays (marked consumed) until the grace window ends.
+// kind is "live", "expired" (past the TTL, or already consumed), or "unknown".
+func (s *accountStore) consumePending(state string) (*acctPending, string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.gcLocked()
-	k := tokHash(state)
-	p := s.pending[k]
-	delete(s.pending, k)
-	return p
+	p := s.pending[tokHash(state)]
+	if p == nil {
+		return nil, "unknown"
+	}
+	if p.consumed || s.now().Sub(p.created) > acctLoginTTL {
+		p.consumed = true
+		return nil, "expired"
+	}
+	p.consumed = true
+	cp := *p
+	return &cp, "live"
+}
+
+// pendingKind reports a sign-in without consuming it: "live", "expired", or "unknown".
+func (s *accountStore) pendingKind(state string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.gcLocked()
+	p := s.pending[tokHash(state)]
+	if p == nil {
+		return "unknown"
+	}
+	if p.consumed || s.now().Sub(p.created) > acctLoginTTL {
+		return "expired"
+	}
+	return "live"
+}
+
+// pendingReturn is the console page stored for this sign-in, or "" when there is none.
+func (s *accountStore) pendingReturn(state string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p := s.pending[tokHash(state)]
+	if p == nil || !safeReturn(p.ret) {
+		return ""
+	}
+	return p.ret
+}
+
+// dropByPrefix forgets in-flight sign-ins whose cookie was expired to make room.
+func (s *accountStore) dropByPrefix(prefix string) {
+	if prefix == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for k, v := range s.pending {
+		if v.prefix == prefix {
+			delete(s.pending, k)
+		}
+	}
 }
 
 // newSession stores a console session and returns a single-use handoff code for the browser.

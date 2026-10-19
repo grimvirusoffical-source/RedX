@@ -93,6 +93,30 @@ export function dobChecks(s, minAge = 13) {
 }
 const allOK = (checks) => checks.every((c) => c.ok);
 
+/** Shown when a live username/email check never reaches the server (after one retry). */
+export const REMOTE_CHECK_OFFLINE = "Couldn't check — check your connection.";
+
+/** True when the browser failed before any HTTP answer (VPN, offline, host unreachable). */
+export function isUnreachable(err) {
+  return !!err && err.status === 0;
+}
+
+/** Call fn, and once more if the first attempt never reached the server. */
+export async function retryUnreachable(fn) {
+  try {
+    return await fn();
+  } catch (e) {
+    if (!isUnreachable(e)) throw e;
+    return await fn();
+  }
+}
+
+/** Message for a failed live check. Network failures do not claim redxd is down. */
+export function remoteCheckMessage(err) {
+  if (isUnreachable(err)) return REMOTE_CHECK_OFFLINE;
+  return 'Could not check right now: ' + (err && err.message ? err.message : 'error');
+}
+
 function hintList(id) {
   const ul = h('ul', { class: 'hints', id, 'aria-live': 'polite' });
   ul.show = (checks) => {
@@ -226,12 +250,15 @@ function formStep(card, back, tos, rules, accepted) {
     const v = input.value.trim();
     const local = field === 'username' ? usernameChecks(v) : emailChecks(v);
     if (!allOK(local)) return;
+    const post = () => api('POST', '/v1/auth/validate/' + field, { key: '', noAuthRedirect: true, json: { [field]: v } });
     try {
-      const r = await api('POST', '/v1/auth/validate/' + field, { key: '', noAuthRedirect: true, json: { [field]: v } });
+      // One retry: a VPN or a blip used to look like "redxd is down" on the first failure.
+      const r = await retryUnreachable(post);
       const have = new Set(local.map((c) => c.id));
       remote[field] = { value: v, checks: (r.checks || []).filter((c) => !have.has(c.id)) };
     } catch (e2) {
-      remote[field] = { value: v, checks: [{ id: 'available', ok: false, message: 'Could not check right now: ' + e2.message }] };
+      // The server checks every field again on submit; this hint is only for the form.
+      remote[field] = { value: v, checks: [{ id: 'available', ok: false, message: remoteCheckMessage(e2) }] };
     }
     update();
   }, 350);

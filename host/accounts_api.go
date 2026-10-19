@@ -119,7 +119,19 @@ func (h *Host) redirectURI(r *http.Request) string {
 	return scheme + "://" + r.Host + "/v1/auth/callback"
 }
 
-const oidcCookie = "redx_oidc"
+// One cookie per in-flight sign-in, named from a prefix of that sign-in's state, so two tabs do not
+// overwrite each other. The value is the full state and must match the callback. An index cookie
+// (path /v1/auth, so /v1/auth/login can see it) remembers the order and the oldest is expired past the cap.
+const (
+	oidcCookiePrefix    = "redx_oidc_"
+	oidcRetryCookie     = "redx_oidc_retry" // set when a missing/expired sign-in is restarted; blocks a loop
+	oidcIndexCookie     = "redx_oidc_idx"
+	oidcStatePrefixN    = 16
+	oidcMaxStateCookies = 8
+	oidcRetryTTL        = 60 * time.Second
+	oidcCookiePath      = "/v1/auth/callback"
+	oidcIndexPath       = "/v1/auth"
+)
 
 // authLogin starts the authorization code flow with PKCE S256 and redirects to Red-XAI Accounts.
 func (h *Host) authLogin(w http.ResponseWriter, r *http.Request) {
@@ -142,8 +154,7 @@ func (h *Host) authLogin(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/#/signin?error=busy", http.StatusFound)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: oidcCookie, Value: state, Path: "/v1/auth/callback", MaxAge: int(acctLoginTTL / time.Second),
-		HttpOnly: true, Secure: strings.HasPrefix(p.redirect, "https://"), SameSite: http.SameSiteLaxMode})
+	h.rememberLoginCookie(w, r, state)
 	q := url.Values{"response_type": {"code"}, "client_id": {h.Cfg.AccountsClientID}, "redirect_uri": {p.redirect},
 		"scope": {"openid profile email " + OwnerScope}, "state": {state}, "nonce": {nonce},
 		"code_challenge": {pkceChallenge(verifier)}, "code_challenge_method": {"S256"}}
@@ -152,6 +163,159 @@ func (h *Host) authLogin(w http.ResponseWriter, r *http.Request) {
 		sep = "&"
 	}
 	http.Redirect(w, r, d.AuthorizationEndpoint+sep+q.Encode(), http.StatusFound)
+}
+
+func oidcCookieChar(c rune) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_'
+}
+
+func oidcStatePrefix(state string) string {
+	if len(state) > oidcStatePrefixN {
+		return state[:oidcStatePrefixN]
+	}
+	return state
+}
+
+// oidcStateCookieName is redx_oidc_<state prefix>. Reserved names and unsafe characters are refused.
+func oidcStateCookieName(state string) (string, bool) {
+	if state == "" || len(state) > 128 {
+		return "", false
+	}
+	for _, c := range state {
+		if !oidcCookieChar(c) {
+			return "", false
+		}
+	}
+	prefix := oidcStatePrefix(state)
+	if prefix == "retry" || prefix == "idx" {
+		return "", false
+	}
+	name := oidcCookiePrefix + prefix
+	if name == oidcRetryCookie || name == oidcIndexCookie {
+		return "", false
+	}
+	return name, true
+}
+
+func oidcPrefixOK(p string) bool {
+	if p == "" || len(p) > oidcStatePrefixN || p == "retry" || p == "idx" {
+		return false
+	}
+	for _, c := range p {
+		if !oidcCookieChar(c) {
+			return false
+		}
+	}
+	return oidcCookiePrefix+p != oidcRetryCookie && oidcCookiePrefix+p != oidcIndexCookie
+}
+
+func (h *Host) authCookieSecure(r *http.Request) bool {
+	return strings.HasPrefix(h.redirectURI(r), "https://")
+}
+
+func (h *Host) setAuthCookie(w http.ResponseWriter, r *http.Request, name, value, path string, maxAge int) {
+	http.SetCookie(w, &http.Cookie{
+		Name: name, Value: value, Path: path, MaxAge: maxAge,
+		HttpOnly: true, Secure: h.authCookieSecure(r), SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func (h *Host) clearAuthCookie(w http.ResponseWriter, r *http.Request, name, path string) {
+	h.setAuthCookie(w, r, name, "", path, -1)
+}
+
+func oidcIndex(r *http.Request) []string {
+	c, err := r.Cookie(oidcIndexCookie)
+	if err != nil || c.Value == "" {
+		return nil
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, p := range strings.Split(c.Value, ",") {
+		if oidcPrefixOK(p) && !seen[p] {
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func (h *Host) writeOIDCIndex(w http.ResponseWriter, r *http.Request, order []string) {
+	if len(order) == 0 {
+		h.clearAuthCookie(w, r, oidcIndexCookie, oidcIndexPath)
+		return
+	}
+	h.setAuthCookie(w, r, oidcIndexCookie, strings.Join(order, ","), oidcIndexPath, int(acctLoginTTL/time.Second))
+}
+
+// rememberLoginCookie stores this sign-in's state and expires the oldest per-state cookies past the cap.
+func (h *Host) rememberLoginCookie(w http.ResponseWriter, r *http.Request, state string) {
+	name, ok := oidcStateCookieName(state)
+	if !ok {
+		return
+	}
+	prefix := oidcStatePrefix(state)
+	var order []string
+	for _, p := range oidcIndex(r) {
+		if p != prefix {
+			order = append(order, p)
+		}
+	}
+	order = append(order, prefix)
+	for len(order) > oidcMaxStateCookies {
+		old := order[0]
+		order = order[1:]
+		h.clearAuthCookie(w, r, oidcCookiePrefix+old, oidcCookiePath)
+		h.accts.dropByPrefix(old)
+	}
+	// The state cookie is set first so a client that only reads the first Set-Cookie still sees it.
+	h.setAuthCookie(w, r, name, state, oidcCookiePath, int(acctLoginTTL/time.Second))
+	h.writeOIDCIndex(w, r, order)
+}
+
+// forgetLoginCookie clears this sign-in's cookie and drops it from the index. Other tabs are left alone.
+func (h *Host) forgetLoginCookie(w http.ResponseWriter, r *http.Request, state string) {
+	name, ok := oidcStateCookieName(state)
+	if !ok {
+		return
+	}
+	h.clearAuthCookie(w, r, name, oidcCookiePath)
+	prefix := oidcStatePrefix(state)
+	var order []string
+	for _, p := range oidcIndex(r) {
+		if p != prefix {
+			order = append(order, p)
+		}
+	}
+	h.writeOIDCIndex(w, r, order)
+}
+
+// stateMatches is true when the cookie value is exactly this callback's state.
+func stateMatches(cookie, state string) bool {
+	if cookie == "" || len(cookie) > 128 || len(state) > 128 || len(cookie) != len(state) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(cookie), []byte(state)) == 1
+}
+
+// restartLogin sends the browser through /v1/auth/login one time. A second miss inside the retry
+// window shows code instead. The target is always this host's login path (return is the page name
+// stored for this sign-in, never a URL from the query).
+func (h *Host) restartLogin(w http.ResponseWriter, r *http.Request, code string) {
+	if _, err := r.Cookie(oidcRetryCookie); err == nil {
+		h.failSignin(w, r, code)
+		return
+	}
+	h.setAuthCookie(w, r, oidcRetryCookie, "1", oidcCookiePath, int(oidcRetryTTL/time.Second))
+	dest := "/v1/auth/login"
+	if ret := h.accts.pendingReturn(r.URL.Query().Get("state")); ret != "" {
+		dest += "?return=" + url.QueryEscape(ret)
+	}
+	http.Redirect(w, r, dest, http.StatusFound)
+}
+
+func (h *Host) failSignin(w http.ResponseWriter, r *http.Request, code string) {
+	http.Redirect(w, r, "/#/signin?error="+url.QueryEscape(code), http.StatusFound)
 }
 
 // safeReturn: a console page name such as "owner" or "databases" (never a URL).
@@ -168,25 +332,51 @@ func safeReturn(s string) bool {
 }
 
 func (h *Host) authCallback(w http.ResponseWriter, r *http.Request) {
-	fail := func(code string) {
-		http.SetCookie(w, &http.Cookie{Name: oidcCookie, Value: "", Path: "/v1/auth/callback", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
-		http.Redirect(w, r, "/#/signin?error="+url.QueryEscape(code), http.StatusFound)
-	}
 	if h.acctThrottle(w, r, "callback", 1, 20) {
 		return
 	}
 	q := r.URL.Query()
 	state := q.Get("state")
-	c, err := r.Cookie(oidcCookie)
-	if state == "" || err != nil || subtle.ConstantTimeCompare([]byte(c.Value), []byte(state)) != 1 {
-		h.Audit.Log(AuditEvent{Event: "account.signin.fail", Remote: remoteIP(r), Reason: "state missing or not from this browser"})
-		fail("state")
+	// No state at all: the sign-in did not arrive. Restart once, then show the existing error.
+	if state == "" {
+		h.restartLogin(w, r, "state")
 		return
 	}
-	p := h.accts.takePending(state)
-	if p == nil {
-		fail("expired")
+	name, nameOK := oidcStateCookieName(state)
+	var c *http.Cookie
+	if nameOK {
+		c, _ = r.Cookie(name)
+	}
+	cookieOK := nameOK && c != nil && stateMatches(c.Value, state)
+	if !cookieOK {
+		kind := "unknown"
+		if nameOK {
+			kind = h.accts.pendingKind(state)
+		}
+		mismatched := c != nil && !stateMatches(c.Value, state)
+		// A live sign-in without its cookie, an unknown state, or a cookie whose value
+		// does not match is forged or mismatched: fail, and never mint a session.
+		// Only an expired sign-in whose cookie has aged out is restarted.
+		if mismatched || kind == "live" || kind == "unknown" || !nameOK {
+			h.Audit.Log(AuditEvent{Event: "account.signin.fail", Remote: remoteIP(r), Reason: "state missing or not from this browser"})
+			if mismatched {
+				h.forgetLoginCookie(w, r, state)
+			}
+			h.failSignin(w, r, "state")
+			return
+		}
+		h.restartLogin(w, r, "state")
 		return
+	}
+	p, kind := h.accts.consumePending(state)
+	if kind != "live" {
+		h.forgetLoginCookie(w, r, state)
+		h.restartLogin(w, r, "expired")
+		return
+	}
+	fail := func(code string) {
+		h.forgetLoginCookie(w, r, state)
+		h.failSignin(w, r, code)
 	}
 	if e := q.Get("error"); e != "" {
 		h.Audit.Log(AuditEvent{Event: "account.signin.fail", Remote: remoteIP(r), Reason: "provider error: " + truncate(e, 64)})
@@ -250,7 +440,8 @@ func (h *Host) authCallback(w http.ResponseWriter, r *http.Request) {
 	default:
 		h.Audit.Log(AuditEvent{Event: "account.signin", KeyID: "acct:" + id.Sub, Remote: remoteIP(r)})
 	}
-	http.SetCookie(w, &http.Cookie{Name: oidcCookie, Value: "", Path: "/v1/auth/callback", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+	h.forgetLoginCookie(w, r, state)
+	h.clearAuthCookie(w, r, oidcRetryCookie, oidcCookiePath)
 	dest := "/#/signin?handoff=" + url.QueryEscape(handoff)
 	if p.ret != "" {
 		dest += "&return=" + url.QueryEscape(p.ret)

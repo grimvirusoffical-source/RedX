@@ -40,7 +40,8 @@ export async function api(method, path, opts = {}) {
     res = await fetch(path, { method, headers, body, cache: 'no-store', signal: opts.signal });
   } catch (e) {
     if (e.name === 'AbortError') throw e;
-    throw new ApiError(0, 'Cannot reach the RedX host. Is redxd still running?');
+    // A failed fetch does not say why: the network, a VPN, or the host. Do not claim redxd is down.
+    throw new ApiError(0, 'Cannot reach the RedX host.');
   }
   if (opts.timing) opts.timing.ms = performance.now() - t0;
   if (opts.raw) return res;
