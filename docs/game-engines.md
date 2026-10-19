@@ -54,7 +54,7 @@ Godot's .NET build can use the C# SDK directly (net8.0).
 
 ## Unreal Engine (C++)
 
-Option 1: the C ABI. Build `libredx` with `go build -buildmode=c-shared -o libredx.so ./cabi` in `sdk/go` (`.dylib` on macOS, `redx.dll` on Windows), add it and `include/redx.h` to a plugin as a third-party library, and call it off the game thread:
+Option 1: the C ABI. Build `libredx` with `go build -buildmode=c-shared -o libredx.so ./cabi` in `sdk/go` (`.dylib` on macOS, then `install_name_tool -id @rpath/libredx.dylib libredx.dylib`; `redx.dll` on Windows), add it and `include/redx.h` to a plugin as a third-party library, and call it off the game thread:
 
 ```cpp
 char* err = nullptr;

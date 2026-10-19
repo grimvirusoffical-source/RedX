@@ -33,6 +33,10 @@ func TestCABI(t *testing.T) {
 		lib = filepath.Join(dir, "libredx.dylib")
 	}
 	run(t, "", "go", "build", "-buildmode=c-shared", "-o", lib, ".")
+	if runtime.GOOS == "darwin" {
+		// Go records the bare file name as the install name; make it rpath-relative so the program finds it
+		run(t, "", "install_name_tool", "-id", "@rpath/libredx.dylib", lib)
+	}
 	exe := filepath.Join(dir, "redx_test")
 	run(t, "", cc, "-Wall", "-Werror", "-Iinclude", "-o", exe, "testdata/redx_test.c", "-L"+dir, "-lredx", "-Wl,-rpath,"+dir)
 
