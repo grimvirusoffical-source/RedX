@@ -480,3 +480,61 @@ func TestParseRangeTable(t *testing.T) {
 		}
 	}
 }
+
+// GET /v1/dbs: a database-scoped key lists only the databases in its scope, never the
+// master accounts database; host admins still see everything (QA finding 4, 0.4.4).
+func TestListDatabasesScopedToKey(t *testing.T) {
+	n := startNode(t, t.TempDir(), nil)
+	for _, db := range []string{"alpha", "beta", host.MasterAccountsDB} {
+		if st, b, _ := do(t, "POST", n.URL+"/v1/dbs", n.Key, `{"name":"`+db+`"}`, "Content-Type", "application/json"); st != 201 {
+			t.Fatalf("create %s: %d %s", db, st, b)
+		}
+	}
+	list := func(key string) (int, []string) {
+		st, b, _ := do(t, "GET", n.URL+"/v1/dbs", key, "")
+		if st != 200 {
+			return st, nil
+		}
+		var out []string
+		for _, v := range jsonOf(t, b)["dbs"].([]interface{}) {
+			out = append(out, v.(string))
+		}
+		return st, out
+	}
+	has := func(l []string, s string) bool {
+		for _, x := range l {
+			if x == s {
+				return true
+			}
+		}
+		return false
+	}
+	_, all := list(n.Key)
+	for _, db := range []string{"alpha", "beta", host.MasterAccountsDB} {
+		if !has(all, db) {
+			t.Fatalf("host admin must see %s: %v", db, all)
+		}
+	}
+	for _, scope := range []string{"read", "write", "admin"} {
+		k, _ := mkKey(t, n, map[string]interface{}{"scope": scope, "db": "alpha"})
+		st, l := list(k)
+		if st != 200 || len(l) != 1 || l[0] != "alpha" {
+			t.Fatalf("%s key on alpha: %d %v (want exactly [alpha])", scope, st, l)
+		}
+	}
+	pk, _ := mkKey(t, n, map[string]interface{}{"scope": "read", "db": "beta", "prefix": "p:P"})
+	if st, l := list(pk); st != 200 || len(l) != 1 || l[0] != "beta" {
+		t.Fatalf("prefix key on beta: %d %v", st, l)
+	}
+	mk, _ := mkKey(t, n, map[string]interface{}{"scope": "read", "db": host.MasterAccountsDB})
+	if st, l := list(mk); st != 200 || len(l) != 0 {
+		t.Fatalf("a non-owner key must never list the master accounts db: %d %v", st, l)
+	}
+	ak, _ := mkKey(t, n, map[string]interface{}{"scope": "read", "db": "*"})
+	if st, l := list(ak); st != 200 || !has(l, "alpha") || !has(l, "beta") || has(l, host.MasterAccountsDB) {
+		t.Fatalf("all-db read key: %d %v", st, l)
+	}
+	if st, _, _ := do(t, "GET", n.URL+"/v1/dbs", "", ""); st != 401 {
+		t.Fatalf("no key = %d", st)
+	}
+}

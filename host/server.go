@@ -456,13 +456,24 @@ func (h *Host) statsHandler(w http.ResponseWriter, r *http.Request, db string) {
 func (h *Host) dbsRoute(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
-		pr, ok := h.authz(w, r, ScopeRead, AllDBs, "", false)
-		_ = pr
-		if !ok {
-			// A db-scoped key may list only its own database.
+		pr, wait, err := h.Auth.Authenticate(r)
+		switch {
+		case errors.Is(err, ErrThrottled):
+			w.Header().Set("Retry-After", strconv.Itoa(int(wait/time.Second)+1))
+			writeErr(w, http.StatusTooManyRequests, "rate limit exceeded")
+			return
+		case err != nil:
+			h.authBad.Add(1)
+			w.Header().Set("WWW-Authenticate", `Bearer realm="redx"`)
+			writeErr(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
-		writeJSON(w, 200, map[string]interface{}{"dbs": h.Reg.List()})
+		if scopeRank[pr.Key.Scope] < scopeRank[ScopeRead] {
+			h.Audit.Log(AuditEvent{Event: "auth.denied", KeyID: pr.Key.ID, DB: AllDBs, Remote: remoteIP(r), Method: r.Method, Route: routeOf(r), Reason: "scope"})
+			writeErr(w, http.StatusForbidden, "forbidden")
+			return
+		}
+		writeJSON(w, 200, map[string]interface{}{"dbs": visibleDBs(&pr.Key, h.Reg.List())})
 	case "POST":
 		if _, ok := h.authz(w, r, ScopeAdmin, AllDBs, "", true); !ok {
 			return
@@ -490,6 +501,29 @@ func (h *Host) dbsRoute(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeErr(w, 405, "method not allowed")
 	}
+}
+
+// MasterAccountsDB is the Red-XAI accounts master database. Only host-admin keys
+// (the owner role) ever see it in a listing.
+const MasterAccountsDB = "redxai_accounts"
+
+// visibleDBs: the databases a key may see in GET /v1/dbs. Host admins see every
+// database; any other key sees only databases inside its own scope (its bound
+// database, or all for a "*" key) and never the master accounts database.
+func visibleDBs(k *KeyRecord, all []string) []string {
+	if k.IsHostAdmin() {
+		return all
+	}
+	out := []string{}
+	for _, n := range all {
+		if n == MasterAccountsDB {
+			continue
+		}
+		if k.DB == AllDBs || k.DB == n {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // ---- keys API ----
