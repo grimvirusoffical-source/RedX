@@ -158,6 +158,8 @@ func TestTLSPromoteRepointOneLeaderAndFence(t *testing.T) {
 		t.Fatalf("after promote b must be leader with no stale last error: role=%s last_error=%q", cs.Role, cs.LastError)
 	}
 	// the old leader is told over the pinned channel and refuses writes: no split brain
+	sa, sb := tlsStatus(t, a, k), tlsStatus(t, b, k)
+	t.Logf("before fence: a replid=%s parent=%s; b replid=%s parent=%s", sa.ReplID, sa.ParentID, sb.ReplID, sb.ParentID)
 	eventually(t, "a fenced", 15*time.Second, func() bool { return tlsStatus(t, a, k).Fenced != nil })
 	if st, out := doTLS(t, "PUT", a.URL+P+"t:B.Split", k, "2"); st != 503 || !strings.Contains(out, "repoint") {
 		t.Fatalf("fenced old leader must refuse writes with 503, got %d %s", st, out)

@@ -460,9 +460,10 @@ func (c *Cluster) notifyFormerLeader(f formerLeader) bool {
 		c.noteFenceNotify("could not reach the former leader " + f.URL + " to fence it: " + err.Error())
 		return false
 	}
+	rb, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
 	resp.Body.Close()
 	if resp.StatusCode != 200 {
-		c.noteFenceNotify(fmt.Sprintf("former leader %s answered %d to the fence notice", f.URL, resp.StatusCode))
+		c.noteFenceNotify(fmt.Sprintf("former leader %s answered %d to the fence notice: %s", f.URL, resp.StatusCode, strings.TrimSpace(string(rb))))
 	}
 	// 200: fenced or already a follower. 401: the old leader no longer knows us (wiped/rejoined): nothing more to do.
 	// 409: the old leader's history moved on (it was already repointed and promoted again): stop too.
@@ -491,7 +492,7 @@ func (c *Cluster) handleSuperseded(w http.ResponseWriter, r *http.Request) {
 	// Only a node promoted out of THIS leader's history may fence it (a member cannot fence on a whim).
 	if b.ParentID == "" || b.ParentID != c.meta.ReplID || b.ReplID == c.meta.ReplID {
 		c.mu.Unlock()
-		writeErr(w, 409, "not promoted from this leader's replication history")
+		writeErr(w, 409, fmt.Sprintf("not promoted from this leader's replication history (this leader %s, sender %s from %s)", c.meta.ReplID, b.ReplID, b.ParentID))
 		return
 	}
 	c.st.Fenced = &Fence{By: id, LeaderURL: strings.TrimRight(b.LeaderURL, "/"), Pin: b.Pin, At: time.Now().UTC().Format(time.RFC3339)}
