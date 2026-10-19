@@ -117,7 +117,12 @@ type Server struct {
 	// ResumeIncludesTOTP attaches totp to a resumed sign-up so tests can prove the proxy drops it.
 	ResumeIncludesTOTP bool
 	Resumes            int
-	pendingAccts       []pendingAcct
+	SignupCalls        int
+	// SignupStatus, when non-zero, makes POST /v1/signup return that status instead of creating an account.
+	SignupStatus  int
+	SignupCode    string
+	SignupMessage string
+	pendingAccts  []pendingAcct
 }
 
 // pendingAcct is one unverified sign-up. v1.2.1 does not reserve the email: another sign-up with the
@@ -162,6 +167,13 @@ func (s *Server) SetEmailResendAfter(after string) {
 func (s *Server) SetResumeIncludesTOTP(on bool) {
 	s.mu.Lock()
 	s.ResumeIncludesTOTP = on
+	s.mu.Unlock()
+}
+
+// SetSignupError makes the next sign-ups return this status and error (status 0 clears it).
+func (s *Server) SetSignupError(status int, code, message string) {
+	s.mu.Lock()
+	s.SignupStatus, s.SignupCode, s.SignupMessage = status, code, message
 	s.mu.Unlock()
 }
 
@@ -246,6 +258,19 @@ func (s *Server) Handler() http.Handler {
 		s.mu.Lock()
 		delete(s.sessions, strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
 		s.mu.Unlock()
+		j(w, 200, map[string]bool{"ok": true})
+	})
+	m.HandleFunc("/fake/signup-error", func(w http.ResponseWriter, r *http.Request) {
+		var b struct {
+			Status  int    `json:"status"`
+			Error   string `json:"error"`
+			Message string `json:"message"`
+		}
+		if r.Method != "POST" || json.NewDecoder(r.Body).Decode(&b) != nil {
+			e(w, 400, "bad_request", "POST a sign-up error")
+			return
+		}
+		s.SetSignupError(b.Status, b.Error, b.Message)
 		j(w, 200, map[string]bool{"ok": true})
 	})
 	m.HandleFunc("/fake/next-login", func(w http.ResponseWriter, r *http.Request) {
@@ -593,6 +618,11 @@ func (s *Server) signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	em := strings.ToLower(strings.TrimSpace(b.Email))
+	s.SignupCalls++
+	if s.SignupStatus != 0 {
+		j(w, s.SignupStatus, map[string]string{"error": s.SignupCode, "message": s.SignupMessage, "detail": s.SignupMessage})
+		return
+	}
 	if !s.LegacySignup {
 		for _, p := range s.pendingAccts {
 			if p.email == em && p.password == b.Password {

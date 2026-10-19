@@ -44,8 +44,10 @@ const OWNER = 'owner@example.com'; // placeholder; real owner addresses live in 
     p.on('console', (m) => { if ((m.type() === 'error' || m.type() === 'warning') && !/Failed to load resource: the server responded with a status of 4\d\d/.test(m.text())) fail(`[${where}] console ${m.type()}: ${m.text()}`); });
     p.on('pageerror', (e) => fail(`[${where}] uncaught exception: ${e.message}`));
     const resendLogins = [];
+    let signupPosts = 0;
     p.on('request', (r) => {
       const u = r.url();
+      if (r.method() === 'POST' && u === url + '/v1/auth/signup') signupPosts++;
       if (r.method() === 'POST' && u.startsWith(url + '/v1/auth/email/resend')) {
         try { resendLogins.push(JSON.parse(r.postData() || '{}').login); } catch { resendLogins.push(''); }
       }
@@ -174,10 +176,84 @@ const OWNER = 'owner@example.com'; // placeholder; real owner addresses live in 
     await p.waitForSelector('#su-signin');
     ok('account created; sign-in is offered only after the email link');
 
+    // Same email and password resumes the sign-up. The authenticator key is not shown again.
+    where = 'signup-resume';
+    await p.goto(url + '/#/signup');
+    await p.reload({ waitUntil: 'networkidle' });
+    await p.waitForSelector('#tos-box');
+    await p.$eval('#tos-box', (e) => { e.scrollTop = e.scrollHeight; e.dispatchEvent(new Event('scroll')); });
+    await p.click('#tos-read');
+    await p.waitForFunction(() => !document.querySelector('#tos-agree').disabled);
+    await p.click('#tos-agree');
+    await p.waitForSelector('#su-username');
+    await p.fill('#su-first', 'Josh');
+    await p.fill('#su-last', 'Franklinn');
+    await p.fill('#su-username', 'grim_player2');
+    await p.fill('#su-email', 'new.player@example.com');
+    await p.fill('#su-email2', 'new.player@example.com');
+    await p.fill('#su-password', 'Abcdefgh123!');
+    await p.fill('#su-password2', 'Abcdefgh123!');
+    await p.fill('#su-dob', '07/04/2001');
+    await p.check('#su-2fa-app');
+    await p.check('#su-ack-false');
+    await p.waitForFunction(() => !document.querySelector('#su-submit').disabled, { timeout: 10000 });
+    await p.click('#su-submit');
+    await p.waitForSelector('#su-2fa-reenroll-note', { timeout: 10000 });
+    expect(/re-enrol two-factor authentication/.test(await p.textContent('#su-2fa-reenroll-note')), 'a resumed sign-up says how to re-enrol two-factor authentication');
+    expect(/no longer have it/.test(await p.textContent('#su-2fa-reenroll-note')), 're-enrol is only for a key the user no longer has');
+    expect(await p.$('#su-totp-secret') === null, 'a resumed sign-up does not show the authenticator key again');
+    expect((await p.$eval('#su-2fa-reenroll', (e) => e.getAttribute('href') || '')).includes('/account'), 'the note links to the Red-XAI Account page');
+    ok('resumed sign-up points at re-enrolling two-factor authentication');
+
+    // v1.2.2: email_taken (also an owner address) and too_many_pending.
+    where = 'signup-v122';
+    const setSignupError = (status, error, message) => fetch(issuer + '/fake/signup-error', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status, error, message }),
+    });
+    await setSignupError(409, 'email_taken', 'Refused: this is an owner email');
+    await p.goto(url + '/#/signup');
+    await p.reload({ waitUntil: 'networkidle' });
+    await p.waitForSelector('#tos-box');
+    await p.$eval('#tos-box', (e) => { e.scrollTop = e.scrollHeight; e.dispatchEvent(new Event('scroll')); });
+    await p.click('#tos-read');
+    await p.waitForFunction(() => !document.querySelector('#tos-agree').disabled);
+    await p.click('#tos-agree');
+    await p.waitForSelector('#su-username');
+    await p.fill('#su-first', 'Josh');
+    await p.fill('#su-last', 'Franklinn');
+    await p.fill('#su-username', 'grim_player3');
+    await p.fill('#su-email', 'ownerish@example.com');
+    await p.fill('#su-email2', 'ownerish@example.com');
+    await p.fill('#su-password', 'Abcdefgh123!');
+    await p.fill('#su-password2', 'Abcdefgh123!');
+    await p.fill('#su-dob', '07/04/2001');
+    await p.check('#su-2fa-app');
+    await p.check('#su-ack-false');
+    await p.waitForFunction(() => !document.querySelector('#su-submit').disabled, { timeout: 10000 });
+    const beforeTaken = signupPosts;
+    await p.click('#su-submit');
+    await p.waitForSelector('#su-err:not([hidden])', { timeout: 10000 });
+    const takenText = await p.textContent('#su-err');
+    expect(/already in use/i.test(takenText) && !/owner/i.test(takenText), 'an owner email_taken says the email is already in use');
+    expect(signupPosts === beforeTaken + 1, 'email_taken was sent once');
+    await setSignupError(429, 'too_many_pending', 'please retry immediately');
+    await p.waitForFunction(() => !document.querySelector('#su-submit').disabled);
+    const beforeMany = signupPosts;
+    await p.click('#su-submit');
+    await p.waitForFunction(() => /pending sign-ups/i.test(document.querySelector('#su-err').textContent), { timeout: 10000 });
+    const manyText = await p.textContent('#su-err');
+    expect(/Verify one/.test(manyText) && !/retry immediately/i.test(manyText), 'too_many_pending tells the user to verify one or try later');
+    await sleep(600);
+    expect(signupPosts === beforeMany + 1, 'too_many_pending is not sent again');
+    await setSignupError(0, '', '');
+    ok('sign-up shows email_taken and too_many_pending without a retry');
+    await p.click('text=Back to sign in');
+    await p.waitForSelector('#acct-signin');
+
     // ---- sign in as a regular account ----
     where = 'signin-regular';
     await setNext({ sub: 'rxa_REG1', email: 'new.player@example.com', email_verified: true, username: 'grim_player1', amr: ['pwd', 'otp'] });
-    await p.click('#su-signin');
+    await p.click('#acct-signin');
     await p.waitForSelector('.shell', { timeout: 15000 });
     expect(/grim_player1/.test(await p.textContent('.who')), 'signed in: the account name is shown');
     expect(await p.$('.nav-item[data-id="owner"]') === null, 'a regular account has no Owner page');

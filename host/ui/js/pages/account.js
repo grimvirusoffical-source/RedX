@@ -91,6 +91,18 @@ export function pendingUntilText(ms) {
   if (!Number.isFinite(n) || n <= 0) return '';
   return 'This sign-up is held until ' + new Date(n).toLocaleString() + '. If the email is not confirmed by then, the username and email can be used again.';
 }
+/** Sign-up failures. email_taken covers an address already in use, including an owner
+ * address, and the wording stays the same either way. too_many_pending is final:
+ * the form shows it and does not send the sign-up again. */
+export function signupErrorText(err) {
+  const body = (err && err.body) || {};
+  const code = body.error || '';
+  if (code === 'email_taken') return 'That email is already in use.';
+  if (code === 'too_many_pending') return 'Too many pending sign-ups for this email. Verify one, or try again later.';
+  if (body.message) return body.message;
+  if (err && err.message && err.message !== code) return err.message;
+  return 'The account could not be created. Try again.';
+}
 /** Rate-limit and other failures from POST /v1/auth/email/resend. */
 export function resendErrorText(err) {
   const body = (err && err.body) || {};
@@ -400,7 +412,8 @@ function formStep(card, back, tos, rules, accepted) {
       else twoFAStep(card, r);
     } catch (e) {
       const b = e.body || {};
-      err.textContent = b.message || e.message;
+      // One attempt. too_many_pending and email_taken are answers, not transient failures.
+      err.textContent = signupErrorText(e);
       err.hidden = false;
       if (b.error === 'tos_grant_invalid' || b.error === 'tos_changed') { toast('Please read and agree to the terms again.', 'warn'); tosStep(card, h('span'), tos, rules); return; }
       update();
@@ -476,7 +489,7 @@ function checkEmailStep(card, r, back) {
     const link = h('a', { id: 'su-2fa-reenroll', rel: 'noopener' }, 'Red-XAI Account');
     if (cfgCache && cfgCache.hosted_account) link.href = cfgCache.hosted_account;
     parts.push(h('p', { id: 'su-2fa-reenroll-note' },
-      'The authenticator key was shown once, when this sign-up was created. If you do not have it, open the email link and then turn two-factor authentication on again from your ', link, ' page.'));
+      'That key was shown only once, on the first sign-up. After you open the email link and sign in, re-enrol two-factor authentication from your ', link, ' page if you no longer have it.'));
     if (!cfgCache || !cfgCache.hosted_account) {
       accountsConfig().then((cfg) => { if (cfg && cfg.hosted_account) link.href = cfg.hosted_account; }).catch(() => {});
     }

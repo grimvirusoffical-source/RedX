@@ -126,6 +126,7 @@ func (h *Host) redirectURI(r *http.Request) string {
 // (path /v1/auth, so /v1/auth/login can see it) remembers the order and the oldest is expired past the cap.
 const (
 	oidcCookiePrefix    = "redx_oidc_"
+	oidcLegacyCookie    = "redx_oidc"       // the single cookie from before per-state names; cleared, and one in-flight sign-in may still finish
 	oidcRetryCookie     = "redx_oidc_retry" // set when a missing/expired sign-in is restarted; blocks a loop
 	oidcIndexCookie     = "redx_oidc_idx"
 	oidcStatePrefixN    = 16
@@ -143,6 +144,7 @@ func (h *Host) authLogin(w http.ResponseWriter, r *http.Request) {
 	d, err := h.oidc.discovery(r.Context())
 	if err != nil {
 		h.Logf("accounts: discovery: %v", err)
+		h.clearLegacyOIDC(w, r)
 		http.Redirect(w, r, "/#/signin?error=unavailable", http.StatusFound)
 		return
 	}
@@ -151,8 +153,9 @@ func (h *Host) authLogin(w http.ResponseWriter, r *http.Request) {
 	if !safeReturn(ret) {
 		ret = ""
 	}
-	p := &acctPending{verifier: verifier, nonce: nonce, redirect: h.redirectURI(r), ret: ret}
+	p := &acctPending{verifier: verifier, nonce: nonce, redirect: h.redirectURI(r), ret: ret, clientIP: remoteIP(r)}
 	if err := h.accts.addPending(state, p); err != nil {
+		h.clearLegacyOIDC(w, r)
 		http.Redirect(w, r, "/#/signin?error=busy", http.StatusFound)
 		return
 	}
@@ -268,11 +271,20 @@ func (h *Host) rememberLoginCookie(w http.ResponseWriter, r *http.Request, state
 		old := order[0]
 		order = order[1:]
 		h.clearAuthCookie(w, r, oidcCookiePrefix+old, oidcCookiePath)
-		h.accts.dropByPrefix(old)
+		// Delete the server record only when this request also carries that sign-in's cookie.
+		// redx_oidc_idx is chosen by the client and must not be able to drop someone else's sign-in.
+		if c, err := r.Cookie(oidcCookiePrefix + old); err == nil && c != nil {
+			h.accts.dropIfPresented(old, c.Value)
+		}
 	}
 	// The state cookie is set first so a client that only reads the first Set-Cookie still sees it.
 	h.setAuthCookie(w, r, name, state, oidcCookiePath, int(acctLoginTTL/time.Second))
 	h.writeOIDCIndex(w, r, order)
+	h.clearLegacyOIDC(w, r)
+}
+
+func (h *Host) clearLegacyOIDC(w http.ResponseWriter, r *http.Request) {
+	h.clearAuthCookie(w, r, oidcLegacyCookie, oidcCookiePath)
 }
 
 // forgetLoginCookie clears this sign-in's cookie and drops it from the index. Other tabs are left alone.
@@ -361,6 +373,7 @@ func (h *Host) authCallback(w http.ResponseWriter, r *http.Request) {
 	if h.acctThrottle(w, r, "callback", 1, 20) {
 		return
 	}
+	h.clearLegacyOIDC(w, r)
 	q := r.URL.Query()
 	state := q.Get("state")
 	// No state at all: the sign-in did not arrive. Restart once, then show the existing error.
@@ -374,7 +387,19 @@ func (h *Host) authCallback(w http.ResponseWriter, r *http.Request) {
 		c, _ = r.Cookie(name)
 	}
 	cookieOK := nameOK && c != nil && stateMatches(c.Value, state)
-	if !cookieOK {
+	// A browser that started sign-in before per-state cookies still holds redx_oidc.
+	// Accept that one in-flight sign-in when the cookie value is this callback's state
+	// and the record is still known. A mismatched per-state cookie is not rescued by it.
+	legacyOK := false
+	if !cookieOK && c == nil {
+		if leg, err := r.Cookie(oidcLegacyCookie); err == nil && stateMatches(leg.Value, state) {
+			switch h.accts.pendingKind(state) {
+			case "live", "expired":
+				legacyOK = true
+			}
+		}
+	}
+	if !cookieOK && !legacyOK {
 		kind := "unknown"
 		if nameOK {
 			kind = h.accts.pendingKind(state)
@@ -410,6 +435,8 @@ func (h *Host) authCallback(w http.ResponseWriter, r *http.Request) {
 		case "access_denied":
 			fail("access_denied")
 		case "email_unverified":
+			// Accounts v1.2.2 keeps an unverified person on its own check-email page and
+			// does not redirect here. A provider that does send this error still opens ours.
 			fail("email_unverified")
 		default:
 			fail("provider")
@@ -570,6 +597,45 @@ func (h *Host) proxyPOST(w http.ResponseWriter, r *http.Request, path string, bo
 	h.relay(w, st, b, err)
 }
 
+// signupErrorMessage is the copy the console shows for sign-up conflicts.
+// email_taken is also how Accounts refuses an owner address, so the message
+// stays the ordinary "already in use" line and never says why.
+func signupErrorMessage(code string) (string, bool) {
+	switch code {
+	case "email_taken":
+		return "That email is already in use.", true
+	case "too_many_pending":
+		return "Too many pending sign-ups for this email. Verify one, or try again later.", true
+	default:
+		return "", false
+	}
+}
+
+// relaySignup is relay, except email_taken and too_many_pending are rewritten
+// to fixed copy. Anything else in the body (a reason, a detail) is dropped so
+// an owner address cannot be told apart from any other address already in use.
+func (h *Host) relaySignup(w http.ResponseWriter, st int, b []byte, err error) {
+	if err != nil {
+		acctErr(w, 503, "unavailable", errAccountsUnavailable.Error())
+		return
+	}
+	var m map[string]interface{}
+	if json.Unmarshal(b, &m) != nil {
+		acctErr(w, 502, "bad_gateway", "Red-XAI Accounts sent an answer RedX could not read.")
+		return
+	}
+	code, _ := m["error"].(string)
+	if msg, ok := signupErrorMessage(code); ok {
+		out := map[string]interface{}{"error": code, "message": msg}
+		if f, _ := m["field"].(string); f == "email" || f == "username" {
+			out["field"] = f
+		}
+		writeJSON(w, st, out)
+		return
+	}
+	writeJSON(w, st, m)
+}
+
 // relay passes a Red-XAI Accounts JSON answer through (only JSON objects; anything else becomes a 502).
 func (h *Host) relay(w http.ResponseWriter, st int, b []byte, err error) {
 	if err != nil {
@@ -675,7 +741,7 @@ func (h *Host) authSignup(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	st, b, err := h.oidc.call(ctx, "POST", "/v1/signup", req, "", remoteIP(r))
 	if err != nil || st != 201 {
-		h.relay(w, st, b, err)
+		h.relaySignup(w, st, b, err)
 		return
 	}
 	var res struct {

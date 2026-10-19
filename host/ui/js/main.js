@@ -55,6 +55,8 @@ async function boot() {
     const { SIGNIN_ERRORS, renderUnverified } = await import('./pages/account.js');
     if (dl.query.error) {
       const code = dl.query.error;
+      // Accounts v1.2.2 leaves unverified people on its check-email page. This still
+      // opens ours when a sign-in comes back with error=email_unverified.
       if (code === 'email_unverified') {
         clear(app);
         app.className = 'plain';

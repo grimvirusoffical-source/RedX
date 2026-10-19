@@ -35,14 +35,15 @@ const DefaultAccountsMasterDB = "redxai_accounts"
 
 // Console session lifetimes.
 const (
-	acctSessionTTL  = 12 * time.Hour
-	acctSessionIdle = 2 * time.Hour
-	acctLoginTTL    = 30 * time.Minute // PKCE sign-in; long enough to finish a slow sign-up
-	acctLoginGrace  = time.Hour        // keep an expired sign-in recognisable so it is not mistaken for a forged state
-	acctHandoffTTL  = 2 * time.Minute
-	acctSignupTTL   = 30 * time.Minute
-	acctMaxPending  = 10000
-	acctTokenPrefix = "rxs_"
+	acctSessionTTL      = 12 * time.Hour
+	acctSessionIdle     = 2 * time.Hour
+	acctLoginTTL        = 30 * time.Minute // PKCE sign-in and its cookie
+	acctLoginGrace      = time.Hour        // after the TTL, keep the record so a late callback is expired rather than a forged state
+	acctHandoffTTL      = 2 * time.Minute
+	acctSignupTTL       = 30 * time.Minute
+	acctMaxPending      = 10000
+	acctMaxPendingPerIP = 20 // live sign-ins per client address; expired and used records do not count
+	acctTokenPrefix     = "rxs_"
 )
 
 func (c *Config) validateAccounts() error {
@@ -226,9 +227,16 @@ type acctTokens struct {
 }
 
 type acctPending struct {
-	verifier, nonce, redirect, ret, prefix string
-	created                                time.Time
-	consumed                               bool
+	verifier, nonce, redirect, ret, prefix, clientIP string
+	created                                          time.Time
+	consumed                                         bool
+}
+
+// occupiesCap is a sign-in that still blocks a new one. The grace window keeps an
+// expired or used record so a late callback can be told apart from a forged state,
+// and those records do not take a slot. The live window is the cookie TTL.
+func (p *acctPending) occupiesCap(now time.Time) bool {
+	return p != nil && !p.consumed && now.Sub(p.created) <= acctLoginTTL
 }
 
 type acctHandoff struct {
@@ -302,10 +310,21 @@ func (s *accountStore) addPending(state string, p *acctPending) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.gcLocked()
-	if len(s.pending) >= acctMaxPending {
+	now := s.now()
+	live, fromIP := 0, 0
+	for _, v := range s.pending {
+		if !v.occupiesCap(now) {
+			continue
+		}
+		live++
+		if v.clientIP == p.clientIP {
+			fromIP++
+		}
+	}
+	if live >= acctMaxPending || fromIP >= acctMaxPendingPerIP {
 		return errTooMany
 	}
-	p.created = s.now()
+	p.created = now
 	p.prefix = oidcStatePrefix(state)
 	s.pending[tokHash(state)] = p
 	return nil
@@ -357,17 +376,17 @@ func (s *accountStore) pendingReturn(state string) string {
 	return p.ret
 }
 
-// dropByPrefix forgets in-flight sign-ins whose cookie was expired to make room.
-func (s *accountStore) dropByPrefix(prefix string) {
-	if prefix == "" {
+// dropIfPresented forgets the sign-in whose own state cookie this request presented.
+// The index cookie is client-controlled, so a prefix listed there is not enough.
+func (s *accountStore) dropIfPresented(prefix, cookieValue string) {
+	if prefix == "" || cookieValue == "" || oidcStatePrefix(cookieValue) != prefix {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for k, v := range s.pending {
-		if v.prefix == prefix {
-			delete(s.pending, k)
-		}
+	k := tokHash(cookieValue)
+	if p := s.pending[k]; p != nil && p.prefix == prefix {
+		delete(s.pending, k)
 	}
 }
 

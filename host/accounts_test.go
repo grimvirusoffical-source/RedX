@@ -3,6 +3,7 @@ package host_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -596,6 +597,27 @@ func TestAccountsSignupProxy(t *testing.T) {
 	if st != 409 || m["error"] != "username_taken" || m["field"] != "username" {
 		t.Fatalf("dup: %d %v", st, m)
 	}
+	// v1.2.2: email_taken is also what an owner address returns. The message stays ordinary.
+	f.SetSignupError(409, "email_taken", "Refused: this is an owner email")
+	calls := f.SignupCalls
+	st, m = postJSON(t, A+"/signup", body(map[string]interface{}{"tosGrant": grant(), "username": "ownerish1", "email": "ownerish@example.com", "emailConfirm": "ownerish@example.com"}))
+	takenRaw, _ := json.Marshal(m)
+	if st != 409 || m["error"] != "email_taken" || m["message"] != "That email is already in use." || strings.Contains(strings.ToLower(string(takenRaw)), "owner") || m["detail"] != nil {
+		t.Fatalf("email_taken: %d %s", st, takenRaw)
+	}
+	if f.SignupCalls != calls+1 {
+		t.Fatalf("email_taken reached Accounts %d times", f.SignupCalls-calls)
+	}
+	f.SetSignupError(429, "too_many_pending", "please retry immediately")
+	calls = f.SignupCalls
+	st, m = postJSON(t, A+"/signup", body(map[string]interface{}{"tosGrant": grant(), "username": "pending1", "email": "pending@example.com", "emailConfirm": "pending@example.com"}))
+	if st != 429 || m["error"] != "too_many_pending" || m["message"] != "Too many pending sign-ups for this email. Verify one, or try again later." {
+		t.Fatalf("too_many_pending: %d %v", st, m)
+	}
+	if f.SignupCalls != calls+1 {
+		t.Fatalf("too_many_pending reached Accounts %d times", f.SignupCalls-calls)
+	}
+	f.SetSignupError(0, "", "")
 	if st, _, _ := do(t, "POST", A+"/signup", "", body(nil), "Content-Type", "text/plain"); st != 415 {
 		t.Fatal("non-JSON POST must be refused")
 	}
@@ -1105,5 +1127,224 @@ func TestAccountsLoginCookieSecureOnHTTPS(t *testing.T) {
 	idx := cookieByName(res, "redx_oidc_idx")
 	if idx == nil || !idx.HttpOnly || !idx.Secure || idx.SameSite != http.SameSiteLaxMode || idx.Path != "/v1/auth" || idx.Value == "" {
 		t.Fatalf("index cookie: %+v", idx)
+	}
+}
+
+func loginFrom(t *testing.T, n *node, ip string, cookies ...*http.Cookie) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, n.URL+"/v1/auth/login", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ip != "" {
+		req.Header.Set("X-Forwarded-For", ip)
+	}
+	for _, c := range cookies {
+		if c != nil {
+			req.AddCookie(c)
+		}
+	}
+	res, err := noRedirectClient(nil).Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	return res
+}
+
+// loginPastLimit repeats a sign-in until the per-IP login limiter allows it, then returns that response.
+func loginPastLimit(t *testing.T, n *node, ip string) *http.Response {
+	t.Helper()
+	var res *http.Response
+	for i := 0; i < 4; i++ {
+		res = loginFrom(t, n, ip)
+		if res.StatusCode != http.StatusTooManyRequests {
+			return res
+		}
+		time.Sleep(1100 * time.Millisecond)
+	}
+	t.Fatalf("%s stayed rate limited: %s", ip, res.Header.Get("Retry-After"))
+	return res
+}
+
+func TestAccountsTwoIPsCannotStarvePendingCap(t *testing.T) {
+	_, iss := startFake(t)
+	n := startNode(t, t.TempDir(), func(c *host.Config, _ string) {
+		c.AccountsIssuer = iss
+		c.AccountsClientSecret = "test-client-secret"
+		c.AccountsEventsPoll = 3600
+		c.TrustedProxies = []string{"127.0.0.1", "::1"}
+	})
+	advance := freezeAccounts(t, n)
+	const a, b, third = "203.0.113.1", "203.0.113.2", "203.0.113.3"
+	okLogin := func(ip string) {
+		t.Helper()
+		res := loginFrom(t, n, ip)
+		loc := res.Header.Get("Location")
+		if res.StatusCode != http.StatusFound || strings.Contains(loc, "error=") {
+			t.Fatalf("%s login: %d %s", ip, res.StatusCode, loc)
+		}
+	}
+	for i := 0; i < 20; i++ {
+		okLogin(a)
+		okLogin(b)
+	}
+	okLogin(third)
+	for _, ip := range []string{a, b} {
+		res := loginPastLimit(t, n, ip)
+		loc := res.Header.Get("Location")
+		if res.StatusCode != http.StatusFound || !strings.Contains(loc, "error=busy") {
+			t.Fatalf("%s should stop at its own pending cap: %d %s", ip, res.StatusCode, loc)
+		}
+	}
+	okLogin(third)
+	// At 89 minutes those sign-ins are inside the grace window and must not still fill the cap.
+	advance(89 * time.Minute)
+	for _, ip := range []string{a, b, third} {
+		res := loginPastLimit(t, n, ip)
+		loc := res.Header.Get("Location")
+		if res.StatusCode != http.StatusFound || strings.Contains(loc, "error=") {
+			t.Fatalf("%s at 89 minutes: %d %s", ip, res.StatusCode, loc)
+		}
+	}
+}
+
+func TestAccountsPendingCapIgnoresSpoofedForwarding(t *testing.T) {
+	_, iss := startFake(t)
+	n := startAcctNode(t, iss)
+	for i := 0; i < 20; i++ {
+		res := loginFrom(t, n, fmt.Sprintf("203.0.113.%d", i+1))
+		loc := res.Header.Get("Location")
+		if res.StatusCode != http.StatusFound || strings.Contains(loc, "error=") {
+			t.Fatalf("login %d: %d %s", i, res.StatusCode, loc)
+		}
+	}
+	res := loginPastLimit(t, n, "198.51.100.9")
+	loc := res.Header.Get("Location")
+	if res.StatusCode != http.StatusFound || !strings.Contains(loc, "error=busy") {
+		t.Fatalf("a spoofed X-Forwarded-For must share the socket address cap: %d %s", res.StatusCode, loc)
+	}
+}
+
+func TestAccountsIndexCookieCannotDropAnotherSignIn(t *testing.T) {
+	f, iss := startFake(t)
+	n := startAcctNode(t, iss)
+	f.SetNext(regular)
+	victim := noRedirectClient(newJar(t))
+	auth, ck := beginLogin(t, victim, n.URL+"/v1/auth/login?return=owner")
+	idx := strings.TrimPrefix(ck.Name, "redx_oidc_")
+	for i := 0; i < 7; i++ {
+		idx += "," + fmt.Sprintf("pad%013d", i)
+	}
+	res := loginFrom(t, n, "", &http.Cookie{Name: "redx_oidc_idx", Value: idx})
+	if loc := res.Header.Get("Location"); res.StatusCode != http.StatusFound || strings.Contains(loc, "error=") {
+		t.Fatalf("login with a forged index: %d %s", res.StatusCode, loc)
+	}
+	f.SetNext(regular)
+	if tok, loc := finishLogin(t, n, victim, auth); tok == "" || strings.Contains(loc, "error=") {
+		t.Fatalf("forged index dropped the other sign-in: %s", loc)
+	}
+
+	// The same index does drop the sign-in when the request also presents that sign-in's cookie.
+	f.SetNext(regular)
+	auth2, ck2 := beginLogin(t, victim, n.URL+"/v1/auth/login?return=owner")
+	idx = strings.TrimPrefix(ck2.Name, "redx_oidc_")
+	for i := 0; i < 7; i++ {
+		idx += "," + fmt.Sprintf("pad%013d", i)
+	}
+	before := f.Tokens
+	cb := authorizeLocation(t, victim, auth2)
+	res = loginFrom(t, n, "", &http.Cookie{Name: "redx_oidc_idx", Value: idx}, ck2)
+	if loc := res.Header.Get("Location"); res.StatusCode != http.StatusFound || strings.Contains(loc, "error=") {
+		t.Fatalf("login presenting the old cookie: %d %s", res.StatusCode, loc)
+	}
+	fin, err := victim.Get(cb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fin.Body.Close()
+	if loc := fin.Header.Get("Location"); strings.Contains(loc, "handoff=") || f.Tokens != before {
+		t.Fatalf("presenting the state cookie should drop that sign-in: %s tokens %d", loc, f.Tokens)
+	}
+}
+
+func TestAccountsLegacyOIDCCookie(t *testing.T) {
+	f, iss := startFake(t)
+	n := startAcctNode(t, iss)
+	f.SetNext(regular)
+	c := noRedirectClient(newJar(t))
+	auth, ck := beginLogin(t, c, n.URL+"/v1/auth/login?return=owner")
+	res := loginFrom(t, n, "", &http.Cookie{Name: "redx_oidc", Value: "stale-legacy-value"})
+	cleared := cookieByName(res, "redx_oidc")
+	if cleared == nil || cleared.MaxAge >= 0 || cleared.Path != "/v1/auth/callback" || !cleared.HttpOnly {
+		t.Fatalf("legacy cookie not cleared on login: %+v", cleared)
+	}
+	if got := stateSetCookies(res); len(got) != 1 {
+		t.Fatalf("login still needs its per-state cookie: %v", res.Cookies())
+	}
+	if res.Header.Get("Set-Cookie") == "" || !strings.Contains(res.Header.Get("Set-Cookie"), "redx_oidc_") || strings.HasPrefix(res.Header.Get("Set-Cookie"), "redx_oidc=") {
+		t.Fatalf("the per-state cookie must stay the first Set-Cookie: %s", res.Header.Get("Set-Cookie"))
+	}
+
+	cb := authorizeLocation(t, c, auth)
+	before := f.Tokens
+	finishLegacy := func(state string, extra ...*http.Cookie) *http.Response {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodGet, cb, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.AddCookie(&http.Cookie{Name: "redx_oidc", Value: state})
+		for _, ck := range extra {
+			req.AddCookie(ck)
+		}
+		out, err := noRedirectClient(nil).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out.Body.Close()
+		return out
+	}
+	fin := finishLegacy(ck.Value)
+	loc := fin.Header.Get("Location")
+	if !strings.Contains(loc, "handoff=") || strings.Contains(loc, "error=") {
+		t.Fatalf("in-flight legacy sign-in: %s", loc)
+	}
+	if tok := handoffToken(t, n, loc); !strings.HasPrefix(tok, "rxs_") || f.Tokens != before+1 {
+		t.Fatalf("legacy sign-in did not mint one session: %s tokens %d", loc, f.Tokens)
+	}
+	cleared = cookieByName(fin, "redx_oidc")
+	if cleared == nil || cleared.MaxAge >= 0 {
+		t.Fatalf("legacy cookie not cleared on callback: %+v", cleared)
+	}
+	fin = finishLegacy(ck.Value)
+	if loc = fin.Header.Get("Location"); strings.Contains(loc, "handoff=") || f.Tokens != before+1 {
+		t.Fatalf("legacy cookie must not sign in twice: %s tokens %d", loc, f.Tokens)
+	}
+
+	// A forged state that only matches a legacy cookie the attacker set is still refused.
+	bogus := callbackReq(t, n, "code=abc&state=forgedstatevalue1", &http.Cookie{Name: "redx_oidc", Value: "forgedstatevalue1"})
+	if loc = bogus.Header.Get("Location"); !strings.Contains(loc, "error=state") || strings.Contains(loc, "handoff=") || strings.Contains(loc, "/v1/auth/login") || f.Tokens != before+1 {
+		t.Fatalf("forged legacy cookie: %s", loc)
+	}
+
+	f.SetNext(regular)
+	auth3, ck3 := beginLogin(t, c, n.URL+"/v1/auth/login")
+	cb3 := authorizeLocation(t, c, auth3)
+	bad := *ck3
+	bad.Value = strings.Repeat("y", len(ck3.Value))
+	req, err := http.NewRequest(http.MethodGet, cb3, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.AddCookie(&bad)
+	req.AddCookie(&http.Cookie{Name: "redx_oidc", Value: ck3.Value})
+	out, err := noRedirectClient(nil).Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out.Body.Close()
+	if loc = out.Header.Get("Location"); !strings.Contains(loc, "error=state") || strings.Contains(loc, "handoff=") || f.Tokens != before+1 {
+		t.Fatalf("legacy cookie rescued a mismatched per-state cookie: %s tokens %d", loc, f.Tokens)
 	}
 }
