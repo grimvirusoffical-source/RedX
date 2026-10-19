@@ -339,6 +339,33 @@ func TestSubscribeArmedBeforeHandshakeReturns(t *testing.T) {
 	}
 }
 
+// Deterministic version of the above: arming the subscription is made slow (200 ms). If the
+// subscription were armed after the 101 (the 0.4.3 order), the PUT below would always land
+// before it and never be delivered; armed before the 101, the dial itself waits and the
+// write is always seen.
+func TestSubscribeArmedBeforeHandshakeSlowSubscribe(t *testing.T) {
+	n := startNode(t, t.TempDir(), nil)
+	n.mu.Lock()
+	n.SubscribeDelay = 200 * time.Millisecond
+	n.mu.Unlock()
+	hdr := map[string][]string{"Authorization": {"Bearer " + n.Key}}
+	for i := 0; i < 3; i++ {
+		ws := "ws" + strings.TrimPrefix(n.URL, "http") + fmt.Sprintf("/v1/subscribe?path=slow%d:", i)
+		c, _, err := websocket.DefaultDialer.Dial(ws, hdr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		do(t, "PUT", n.URL+P+fmt.Sprintf("slow%d:Box.K", i), n.Key, "1")
+		c.SetReadDeadline(time.Now().Add(3 * time.Second))
+		var ev host.Event
+		if err := c.ReadJSON(&ev); err != nil {
+			c.Close()
+			t.Fatalf("round %d: write right after the handshake was missed (subscription armed after the 101): %v", i, err)
+		}
+		c.Close()
+	}
+}
+
 func TestFollowerNeverLocalExpiryAndConfig(t *testing.T) {
 	var c host.Config
 	_ = c

@@ -25,6 +25,9 @@ type node struct {
 
 	mu      sync.Mutex
 	setOpts []host.SetOpts
+	// SubscribeDelay (tests only) makes every backend Subscribe slow, to widen the window
+	// between the WebSocket handshake and arming the subscription.
+	SubscribeDelay time.Duration
 }
 
 type recStore struct {
@@ -37,6 +40,16 @@ func (r *recStore) Set(p, v string, o host.SetOpts) error {
 	r.n.setOpts = append(r.n.setOpts, o)
 	r.n.mu.Unlock()
 	return r.Backend.Set(p, v, o)
+}
+
+func (r *recStore) Subscribe(p string) (<-chan host.Event, func()) {
+	r.n.mu.Lock()
+	d := r.n.SubscribeDelay
+	r.n.mu.Unlock()
+	if d > 0 {
+		time.Sleep(d)
+	}
+	return r.Backend.Subscribe(p)
 }
 
 func baseCfg(dir string) host.Config {

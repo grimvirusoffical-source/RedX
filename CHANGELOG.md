@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.5 (unreleased)
+
+* Cluster: installing a full snapshot now swaps the databases directory atomically. A read racing the install could reopen the pre-snapshot databases and keep serving them, so a write discarded by the resync stayed readable (seen on Windows CI). Reads also wait while a snapshot is being swapped in.
+* C# and Swift SDKs: a stream reconnecting while the host restarts no longer gives up. A dial that failed while the host was starting, followed by a probe that reached the restarted host, was misread as a refusal (400) and ended the stream.
+* Tests: deterministic regressions for both, and for subscriptions armed before the WebSocket handshake.
+
 ## 0.4.4
 
 * The LICENSE copyright holder is now Red-XAI LLC; the Windows installer's LegalCopyright says the same.
