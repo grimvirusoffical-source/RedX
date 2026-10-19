@@ -19,6 +19,7 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/kardianos/service"
 	"redx/host"
@@ -40,6 +41,16 @@ func main() {
 	switch {
 	case cmd == "version":
 		fmt.Printf("redxd %s (%s/%s, %s, engine: %s)\n", host.Version, runtime.GOOS, runtime.GOARCH, runtime.Version(), engineName)
+	case cmd == "join":
+		if err := runJoin(args); err != nil {
+			fmt.Fprintln(os.Stderr, "redxd:", err)
+			os.Exit(1)
+		}
+	case cmd == "open":
+		if err := runOpen(args); err != nil {
+			fmt.Fprintln(os.Stderr, "redxd:", err)
+			os.Exit(1)
+		}
 	case cmd == "keygen":
 		if err := runKeygen(args); err != nil {
 			fmt.Fprintln(os.Stderr, "redxd:", err)
@@ -70,11 +81,16 @@ usage: redxd [run] [--config FILE] [--data-dir DIR] [--listen ADDR] [--role lead
              [--peers URL,...] [--node-id ID] [--advertise URL] [--tls off|auto|files] ...
        redxd install [--user] [run flags...]   install as a service (needs admin/root)
        redxd uninstall | start | stop | restart | status
+       redxd join <link | URL CODE> [--data-dir DIR] [--advertise URL] [--no-run]
+                                               join another RedX host as a follower (link from its "Add a device" page)
+       redxd open [--config FILE] [--data-dir DIR]   open the web console of the host on this machine in your browser
+       redxd run --open | --no-open            open (or never open) the console when the host starts
+       redxd run --preset NAME                 start with a bundled settings profile (redx preset ls)
        redxd keygen [--out FILE] [--id ID]     create a .red-xai-sec master key file (mode 0600)
        redxd version
 
 Environment: REDX_CONFIG REDX_DATA_DIR REDX_LISTEN REDX_NODE_ID REDX_ROLE REDX_PEERS REDX_ADVERTISE
-             REDX_TLS REDX_CLUSTER_SECRET REDX_KEYSTORE_PASSPHRASE REDX_NO_BOOTSTRAP
+             REDX_TLS REDX_CLUSTER_SECRET REDX_KEYSTORE_PASSPHRASE REDX_NO_BOOTSTRAP REDX_BOOTSTRAP REDX_PRESET REDX_JOIN REDX_NO_OPEN
              REDX_MASTER_KEY_FILE (a path: the master key itself is never read from env or flags) ...
 Precedence: defaults < config file < environment < flags. See docs/hosting.md.
 `)
@@ -94,11 +110,13 @@ func runForeground(args []string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	autoOpen = true // only a foreground run in a terminal may open a browser
 	return runDaemon(ctx, args, func(s string) { log.Print(s) })
 }
 
 // runDaemon loads config, opens the host and serves until ctx is done.
 func runDaemon(ctx context.Context, args []string, sink func(string)) error {
+	args, openFlag := stripOpenFlags(args)
 	cfg, err := host.LoadConfig(args, os.Getenv, nil)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -111,17 +129,51 @@ func runDaemon(ctx context.Context, args []string, sink func(string)) error {
 	if err != nil {
 		return err
 	}
+	if cfg.Join != "" && !host.HasJoined(cfg.DataDir) {
+		sp, err := host.ParseJoin(cfg.Join)
+		if err != nil {
+			return fmt.Errorf("join: %w", err)
+		}
+		jctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		id, err := host.RedeemJoin(jctx, cfg.DataDir, sp, cfg.Advertise)
+		cancel()
+		if err != nil {
+			return fmt.Errorf("join %s: %w%s", sp.Leader, err, host.JoinErrorHint(err))
+		}
+		logf("joined %s as node %s; replicating from it", sp.Leader, id)
+	}
 	h, err := host.New(cfg, op, logf)
 	if err != nil {
 		return err
 	}
+	url := consoleURL(cfg)
 	if h.BootstrapKey != "" {
 		printBootstrap(h.BootstrapKey, cfg)
+	}
+	if h.WebSetupPending() {
+		fmt.Println("==============================================================================")
+		fmt.Println(" FIRST RUN: open the RedX console to create your admin key (no terminal needed):")
+		fmt.Println()
+		fmt.Println("   " + url)
+		fmt.Println()
+		fmt.Println(" The admin key is shown once in the browser. Terminal path: restart with")
+		fmt.Println(" --bootstrap console, or run:  redx key create --offline --scope admin --db '*'")
+		fmt.Println("==============================================================================")
+	} else if openFlag != "never" {
+		logf("console: %s", url)
 	}
 	ln, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
 		h.Close()
 		return err
+	}
+	if shouldOpen(cfg, openFlag, h.WebSetupPending()) {
+		go func() {
+			time.Sleep(300 * time.Millisecond)
+			if err := openBrowser(url); err != nil {
+				logf("could not open a browser (%v); open %s yourself", err, url)
+			}
+		}()
 	}
 	return h.Serve(ctx, ln)
 }

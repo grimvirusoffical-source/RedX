@@ -13,9 +13,12 @@ Related documents: [Getting started](getting-started.md) · [Configuration](conf
 | REST API | `GET/PUT/DELETE /v1/path/...`, `POST /v1/query`, `/v1/stats`, `/healthz`, multiple databases (`/v1/db/{name}/...`) |
 | WebSocket | `/v1/subscribe?path=` change events |
 | API keys | argon2id salted hashes, shown once, scopes (read/write/admin), per-database, path-prefix ACL, expiry, revoke, rotate with grace period, per-key rate limit, audit log, optional encryption at rest, brute-force throttle |
-| First run | one-time admin key printed on first start |
+| Web console | built-in management UI on the same port (`/`), see [the console guide](console.md) |
+| First run | the console offers *Create admin key* to a visitor on this machine, or the key is printed once on first start (`bootstrap` setting) |
+| Presets | ten settings profiles (`--preset`, `redx preset`, console *Presets*) |
+| App connect | apps get their own workspace and a scoped key after the owner approves, see [Connecting apps](connect.md) |
 | TLS | off, automatic self-signed (fingerprint pinning), or your own certificate files |
-| Cluster | node identity, join tokens, leader/follower, asynchronous replication with replication id and offset resume, full-snapshot fallback, leader-forwarded writes, heartbeat and membership, manual promote and repoint |
+| Cluster | node identity, join tokens and pairing codes, leader/follower, asynchronous replication with replication id and offset resume, full-snapshot fallback, leader-forwarded writes, heartbeat and membership, manual promote with fencing of the old leader, repoint |
 | TTL expiry | leader-driven; followers never expire entries themselves |
 | Backup and restore | online snapshot, offline copy |
 | Service install | `redxd install/uninstall/start/stop` (Windows service, systemd, launchd), unit files, `install.sh`, `install.ps1`, Dockerfile, three-node compose file |
@@ -32,6 +35,8 @@ Related documents: [Getting started](getting-started.md) · [Configuration](conf
 
 Download the archive for your platform from the [releases page](https://github.com/grimvirusoffical-source/RedX/releases), or build from source (any machine with Go 1.22 or newer): `scripts/build.sh` (or `make dist`) writes `dist/redx-<ver>-<os>-<arch>/` and the matching archives.
 Targets: linux amd64 / arm64 / armv7, darwin amd64 / arm64, windows amd64 / arm64. Verify a download with `sha256sum -c SHA256SUMS`.
+
+Desktop installers (Windows setup `.exe`, macOS `.dmg` / `.pkg`, Debian `.deb`) start the host and open the console with one click; they are **unsigned**. See [Installers](installers.md).
 
 ### Linux (systemd), including Raspberry Pi OS (arm64 / armv7)
 ```sh
@@ -80,8 +85,12 @@ The first admin key and application keys are described in [Getting started](gett
 
 ## Troubleshooting
 
-`redx doctor [--config FILE]` checks: platform, config validity, data dir writability and free space, keystore permissions/readability, TLS certificate expiry,
-whether the daemon answers, whether your key works, cluster health, and "non-loopback listen without TLS". Common issues:
+`redx doctor [--config FILE] [--data-dir DIR]` checks: platform, config validity (the `redx.toml` in the data dir, or `--config`), data dir writability and free space,
+keystore permissions/readability, TLS certificate validity, whether the daemon answers, whether your key works, cluster health, and "non-loopback listen without TLS".
+The certificate is checked whenever the configuration names one, also before the data dir exists; if you pass the certificate to `redxd` as flags,
+repeat them for doctor (`redx doctor --tls files --tls-cert FILE`), and with `--key` doctor also reports the certificate the running daemon serves.
+A certificate that has expired, is not valid yet or expires within 14 days is reported as `warn` or `FAIL`; the host still starts and logs a `WARNING:` line.
+Secrets are never printed: `-h` shows `--key` as "(currently set from $REDX_KEY)", never its value, and the same holds for join links and other secrets. Common issues:
 * `data dir … is in use by another redxd process` — a second instance (or a stale service) holds `redxd.lock`.
 * Follower log shows `leader answered 401` — wrong token/secret, or the node id given to `redx node join --node-id` differs from the daemon's (the CLI writes `node.id` for you; don't override `node_id` in the config afterwards).
 * `429` while testing wrong keys — you tripped the per-IP failed-auth throttle; wait a minute.
@@ -93,7 +102,8 @@ whether the daemon answers, whether your key works, cluster health, and "non-loo
 go vet ./... && go test -race -count=1 ./...        # whole module
 scripts/build.sh                # all 7 targets -> dist/ (tar.gz, zip for Windows, SHA256SUMS); VERSION=1.2.3 scripts/build.sh
 scripts/build.sh --only linux/amd64      # one target;   --tags redx_stub  builds the in-memory stub store (not for production)
-scripts/smoke.sh bin            # curl-based smoke test of a native build (keys, set/get, idx, pack+range, BoxQL, media range, sec, encrypted pack, code, 404, subscribe); scripts/cluster-smoke.sh bin  for 3 local nodes
+scripts/smoke.sh bin            # curl-based smoke test of a native build (console, security headers, keys, set/get, idx, pack+range, BoxQL, media range, sec, encrypted pack, code, 404, subscribe); scripts/cluster-smoke.sh bin  for 3 local nodes plus a self-signed TLS promote and repoint
 ```
 `deploy/release.yml.example` is an example GitHub Actions workflow. It is kept outside `.github/` so that it does not run automatically; copy it to `.github/workflows/release.yml` to enable tagged releases.
-The `Makefile` wraps the same commands (`make dist`, `make test`).
+The `Makefile` wraps the same commands (`make dist`, `make test`). Installers: `scripts/package.sh deb|windows VERSION` (needs NSIS for Windows); the macOS `.dmg`/`.pkg` are built on macOS by `.github/workflows/release-build.yml`, which also runs `scripts/verify-windows.ps1` and `scripts/verify-macos.sh`.
+`.github/workflows/ci.yml` builds and tests on Linux, Windows and macOS (Apple silicon and Intel) for every pull request.

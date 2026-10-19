@@ -11,14 +11,14 @@ tar xzf redx-<ver>-<os>-<arch>.tar.gz && cd redx-<ver>-<os>-<arch>
 ./redxd run --data-dir ./data
 ```
 
-On first start `redxd` prints a one-time admin API key. Copy it; it is stored only as a hash and is not shown again. The host listens on `http://127.0.0.1:7777` by default. Stop it with Ctrl+C.
+On first start, open `http://127.0.0.1:7777` in a browser on the same machine: the console offers *Create admin key* and shows the key once (see [the console guide](console.md)). If the host listens on a non-loopback address, or you start it with `--bootstrap console`, it prints the one-time admin key in the terminal instead. Copy it; it is stored only as a hash and is not shown again. The host listens on `http://127.0.0.1:7777` by default. Stop it with Ctrl+C.
 
 ## 2. Check the installation
 
 In a second terminal, from the same folder:
 
 ```sh
-export REDX_KEY=rx_live_...        # the admin key printed on first start
+export REDX_KEY=rx_live_...        # the first admin key
 ./redx doctor
 curl -s http://127.0.0.1:7777/healthz
 ```

@@ -223,7 +223,11 @@ func (r *run) doAdd(a *Add, explain bool) (*Result, error) {
 			fmt.Sprintf("  max writes: %d", r.lim.MaxWrites),
 		}), nil
 	}
+	r.arithErr = nil
 	ent := box.NewEntry(a.Target.Box, id, r.evalRec(rl))
+	if r.arithErr != nil {
+		return nil, r.writeArithErr()
+	}
 	applyTTL(ent, a.TTL)
 	addr := link.EntryAddr(file, ent)
 	if r.db.cfg.OwnerOf != nil {
@@ -352,8 +356,12 @@ func (r *run) doSet(s *Set, explain bool) (*Result, error) {
 	for _, c := range cands {
 		t := tuple{c}
 		vals := make([]box.Value, len(s.Assigns))
+		r.arithErr = nil
 		for i, as := range s.Assigns {
 			vals[i] = r.eval(as.Value, t)
+		}
+		if r.arithErr != nil {
+			return nil, r.writeArithErr()
 		}
 		ne := c.ent.Clone()
 		for i, as := range s.Assigns {
@@ -412,7 +420,11 @@ func (r *run) doReplace(s *Set, explain bool) (*Result, error) {
 			return nil, err
 		}
 	}
+	r.arithErr = nil
 	ent := box.NewEntry(s.Target.Box, id, r.evalRec(rl))
+	if r.arithErr != nil {
+		return nil, r.writeArithErr()
+	}
 	applyTTL(ent, s.TTL)
 	addr := link.EntryAddr(file, ent)
 	old, exists, err := r.db.cfg.Store.Get(addr)
@@ -719,4 +731,11 @@ func (r *run) deleteField(d *Delete, cands []*rec, acc access) (*Result, error) 
 		res.Affected++
 	}
 	return res, nil
+}
+
+// writeArithErr is returned when evaluating a value to store hit division by zero or overflow: reads
+// still give NELL, but a write must not silently replace data with NELL, so the command fails and
+// nothing is changed.
+func (r *run) writeArithErr() error {
+	return fmt.Errorf("%w (nothing was changed)", r.arithErr)
 }

@@ -101,6 +101,10 @@ func do(t *testing.T, method, url, key, body string, hdr ...string) (int, string
 		req.Header.Set("Authorization", "Bearer "+key)
 	}
 	for i := 0; i+1 < len(hdr); i += 2 {
+		if strings.EqualFold(hdr[i], "Host") {
+			req.Host = hdr[i+1] // net/http ignores a Host entry in Header
+			continue
+		}
 		req.Header.Set(hdr[i], hdr[i+1])
 	}
 	resp, err := http.DefaultClient.Do(req)

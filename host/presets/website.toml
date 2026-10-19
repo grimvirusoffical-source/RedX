@@ -1,0 +1,48 @@
+name = "website"
+title = "Website"
+order = 3
+summary = "Sessions, caches and counters for a web site or API that reads far more than it writes."
+audience = "Web back end on the same machine or private network"
+guidance = [
+  "Keep the host on 127.0.0.1 and let your web server call it locally, or put it on a private network address.",
+  "Create one write key for the web app and one read-only key for anything that only reads.",
+]
+warnings = []
+
+[settings]
+listen = "127.0.0.1:7777"
+tls = "off"
+engine_durability = "group"
+engine_default_ttl = 3600
+rate_limit_rps = 500
+rate_limit_burst = 1000
+audit_success = false
+log_level = "info"
+role = "leader"
+
+[why]
+listen = "Stays on loopback because the web server on the same machine is the only client. Change it to a private address if the web server is elsewhere."
+tls = "Traffic never leaves the machine, so TLS is off. Turn it on (auto) if the web server runs on another host."
+engine_durability = "group flushes to disk before acknowledging while sharing one flush across concurrent requests, which suits many simultaneous web requests (docs/benchmarks.md: 248k/s with 64 concurrent writers on one test disk)."
+engine_default_ttl = "Session and cache records written without an expiry get a 1 hour lifetime instead of being rejected. Records that set their own TTL are not affected."
+rate_limit_rps = "Per key, 500 requests per second: higher than the default 100 because one web-app key serves many visitors."
+rate_limit_burst = "Allows bursts up to 1000 requests, for traffic spikes."
+audit_success = "Off, so a busy site does not write a log line for every request."
+log_level = "info is the normal level: start-up, replication and error messages. Today the only other value that changes anything is quiet, which turns logging off."
+role = "leader means this host accepts writes. Other hosts can follow it later; nothing changes until you add a follower."
+
+[[files]]
+name = "sessions.red-xai-db-qs"
+box = "Session"
+ttl_seconds = 3600
+note = "Login sessions. A qs file is kept in memory and every record must expire."
+[[files]]
+name = "cache.red-xai-db-qs"
+box = "Entry"
+ttl_seconds = 300
+note = "Short-lived cache entries."
+[[files]]
+name = "counters.red-xai-db-qs-ls"
+box = "Counter"
+ttl_seconds = 86400
+note = "Page-view style counters that are journaled so they survive a restart."

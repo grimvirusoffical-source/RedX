@@ -34,6 +34,7 @@ $conf = Join-Path $root "redx.toml"
 New-Item -ItemType Directory -Force -Path $bin, $data | Out-Null
 if (Get-Service redxd -ErrorAction SilentlyContinue) { Stop-Service redxd -ErrorAction SilentlyContinue }
 Copy-Item (Join-Path $From "redxd.exe"), (Join-Path $From "redx.exe") -Destination $bin -Force
+foreach ($f in "redx.ico", "redx.svg") { if (Test-Path (Join-Path $From $f)) { Copy-Item (Join-Path $From $f) -Destination $bin -Force } }
 
 # Restrict the data directory (keystore!) to SYSTEM and Administrators.
 icacls $root /inheritance:r /grant:r "SYSTEM:(OI)(CI)F" "Administrators:(OI)(CI)F" | Out-Null
@@ -64,6 +65,27 @@ if (-not $NoService) {
     Write-Host "Opened the Windows firewall for the Private profile on that port."
   }
 }
+# URL of the web console for a browser on this machine
+$scheme = if ($Tls -eq "off") { "http" } else { "https" }
+$port = $Listen.Split(':')[-1]
+$consoleUrl = "${scheme}://127.0.0.1:$port/"
+
+# Start Menu shortcut "RedX Console" (uses redx.ico). Best effort: never fatal.
+try {
+  $ico = Join-Path $bin "redx.ico"
+  $lnkDir = Join-Path $env:ProgramData "Microsoft\Windows\Start Menu\Programs"
+  $sh = New-Object -ComObject WScript.Shell
+  $lnk = $sh.CreateShortcut((Join-Path $lnkDir "RedX Console.lnk"))
+  $lnk.TargetPath = Join-Path $env:SystemRoot "explorer.exe"
+  $lnk.Arguments = $consoleUrl
+  if (Test-Path $ico) { $lnk.IconLocation = $ico }
+  $lnk.Description = "Open the RedX web console"
+  $lnk.Save()
+  Write-Host "Added a 'RedX Console' shortcut to the Start Menu."
+} catch { Write-Host "(could not create the Start Menu shortcut: $($_.Exception.Message))" }
+
 $machinePath = [Environment]::GetEnvironmentVariable("Path","Machine")
 if ($machinePath -notlike "*$bin*") { [Environment]::SetEnvironmentVariable("Path", "$machinePath;$bin", "Machine") }
+Write-Host "`nOpen the web console in your browser:  $consoleUrl"
+Write-Host "  (everything can be done there; the terminal is optional. Paste the admin key above to sign in.)"
 Write-Host "Done. Open a NEW terminal, then:  `$env:REDX_KEY='<your admin key>'; redx doctor"

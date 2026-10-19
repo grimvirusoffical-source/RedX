@@ -263,8 +263,8 @@ func (t *table) get(segs []box.Seg) (box.Value, error) {
 		}
 		chain = append(chain, e)
 		if i == len(segs)-1 {
-			res = e.Value.Clone()
-			found = true
+			res = e.Value.CloneFiltered(func(c *box.Entry) bool { return expired(c, now) })
+			found = !emptiedStructural(e, res)
 		} else if e.Value.Kind == box.KindBox {
 			cur = e.Value.Box
 		} else {
@@ -305,11 +305,17 @@ func (t *table) query(segs []box.Seg) []box.Value {
 	now := t.now()
 	follower := t.db.isFollower()
 	t.mu.RLock()
-	chains := box.MatchChains(t.root, segs, func(e *box.Entry) bool { return expired(e, now) })
+	skipExpired := func(c *box.Entry) bool { return expired(c, now) } // lazy expiry for nested children too
+	chains := box.MatchChains(t.root, segs, skipExpired)
 	out := make([]box.Value, 0, len(chains))
 	var touches []touchRec
 	for _, ch := range chains {
-		out = append(out, ch[len(ch)-1].Value.Clone())
+		last := ch[len(ch)-1]
+		v := last.Value.CloneFiltered(skipExpired)
+		if emptiedStructural(last, v) {
+			continue
+		}
+		out = append(out, v)
 		if !follower {
 			slide(ch, now, &touches)
 		}
@@ -597,4 +603,10 @@ func (t *table) installSnapshot(root *box.Box, lsn uint64) error {
 		return t.checkpoint()
 	}
 	return nil
+}
+
+// emptiedStructural is true when lazy expiry removed every child of the box e (and e has no TTL of
+// its own): the structural parent is logically gone, exactly as after the sweeper purges its last child.
+func emptiedStructural(e *box.Entry, cp box.Value) bool {
+	return box.EmptiedByFilter(e, &box.Entry{Value: cp})
 }

@@ -322,15 +322,34 @@ func (b *Box) Each(fn func(*Entry) bool) {
 }
 
 // Clone deep-copies the box.
-func (b *Box) Clone() *Box {
+func (b *Box) Clone() *Box { return b.CloneFiltered(nil) }
+
+// CloneFiltered deep-copies the box, leaving out every entry (and so its whole subtree) for which skip
+// returns true, at any depth. Engines use it to hide entries whose TTL has passed but that the sweeper
+// has not purged yet. A nil skip copies everything.
+func (b *Box) CloneFiltered(skip func(*Entry) bool) *Box {
 	if b == nil {
 		return nil
 	}
 	c := &Box{HasFlag: b.HasFlag, Flag: b.Flag, Meta: cloneAttrs(b.Meta)}
 	for _, e := range b.Entries() {
-		c.Put(e.Clone())
+		if skip != nil && skip(e) {
+			continue
+		}
+		ce := e.cloneFiltered(skip)
+		if skip != nil && EmptiedByFilter(e, ce) {
+			continue // a structural parent vanishes when its last child does
+		}
+		c.Put(ce)
 	}
 	return c
+}
+
+// EmptiedByFilter reports whether filtering removed every child of the box entry orig (so the copy cp
+// is an empty box although orig was not) and orig carries no TTL of its own: such a structural parent
+// is treated as gone, like the sweeper does once the last child is purged.
+func EmptiedByFilter(orig, cp *Entry) bool {
+	return orig.Value.Kind == KindBox && cp.Value.Kind == KindBox && orig.Value.Box.Len() > 0 && cp.Value.Box.Len() == 0 && !orig.TTL.Expiring()
 }
 
 func cloneAttrs(a []Attr) []Attr {
@@ -345,8 +364,13 @@ func cloneAttrs(a []Attr) []Attr {
 }
 
 // Clone deep-copies the entry.
-func (e *Entry) Clone() *Entry {
-	c := &Entry{Key: e.Key, Attrs: cloneAttrs(e.Attrs), Value: e.Value.Clone(),
+func (e *Entry) Clone() *Entry { return e.cloneFiltered(nil) }
+
+// CloneFiltered deep-copies the entry without descendants for which skip returns true.
+func (e *Entry) CloneFiltered(skip func(*Entry) bool) *Entry { return e.cloneFiltered(skip) }
+
+func (e *Entry) cloneFiltered(skip func(*Entry) bool) *Entry {
+	c := &Entry{Key: e.Key, Attrs: cloneAttrs(e.Attrs), Value: e.Value.CloneFiltered(skip),
 		Ver: e.Ver, Line: e.Line, Col: e.Col}
 	c.TTL = TTL{Kind: e.TTL.Kind, Seconds: e.TTL.Seconds}
 	c.TTL.SetExpiresAt(e.TTL.ExpiresAt())
@@ -357,18 +381,21 @@ func (e *Entry) Clone() *Entry {
 }
 
 // Clone deep-copies the value.
-func (v Value) Clone() Value {
+func (v Value) Clone() Value { return v.CloneFiltered(nil) }
+
+// CloneFiltered is Clone that leaves out entries for which skip returns true (see Box.CloneFiltered).
+func (v Value) CloneFiltered(skip func(*Entry) bool) Value {
 	switch v.Kind {
 	case KindArray:
 		if v.Arr != nil {
 			a := make([]Value, len(v.Arr))
 			for i, x := range v.Arr {
-				a[i] = x.Clone()
+				a[i] = x.CloneFiltered(skip)
 			}
 			v.Arr = a
 		}
 	case KindBox:
-		v.Box = v.Box.Clone()
+		v.Box = v.Box.CloneFiltered(skip)
 	case KindLink:
 		if v.Link != nil {
 			l := *v.Link

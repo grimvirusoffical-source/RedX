@@ -32,6 +32,19 @@ type Host struct {
 	// BootstrapKey is set only when this start created the first admin key.
 	BootstrapKey string
 
+	pair        pairStore     // one-time sign-in pairing codes (pairing.go)
+	connect     *connectStore // app connect handshake (connect.go)
+	webSetup    bool          // an empty keystore may be set up from the browser (loopback only)
+	bootMu      sync.Mutex    // serialises the web bootstrap
+	runMu       sync.Mutex
+	listenAt    string // actual listen address, set by Serve
+	scheme      string // http | https, set by Serve
+	tlsFP       string // certificate fingerprint (https)
+	tlsCertFile string // certificate file being served (https)
+	diskMu      sync.Mutex
+	diskAt      time.Time
+	diskBytes   int64
+
 	started time.Time
 	lock    *flock.Flock
 	pause   sync.RWMutex // writes hold RLock; backup/snapshot hold Lock
@@ -93,6 +106,7 @@ func New(cfg Config, opener Opener, logf func(string, ...interface{})) (*Host, e
 		return fail(err)
 	}
 	h.Auth = NewAuthenticator(h.KS, h.Audit, cfg.RateRPS, cfg.RateBurst, cfg.AuditOK)
+	h.connect = openConnectStore(cfg.DataDir)
 	h.Tracker = NewTTLTracker(filepath.Join(cfg.DataDir, "cluster", "ttl.json"))
 	if h.Cluster, err = newCluster(h); err != nil {
 		return fail(err)
@@ -122,12 +136,17 @@ func New(cfg Config, opener Opener, logf func(string, ...interface{})) (*Host, e
 			}
 		}
 		if h.KS.Count() == 0 && os.Getenv("REDX_NO_BOOTSTRAP") == "" {
-			key, rec, err := h.KS.Create(CreateSpec{DB: AllDBs, Scope: ScopeAdmin, Label: "bootstrap-admin"})
-			if err != nil {
-				return fail(err)
+			switch ResolveBootstrap(cfg) {
+			case "web":
+				h.webSetup = true
+			case "console":
+				key, rec, err := h.KS.Create(CreateSpec{DB: AllDBs, Scope: ScopeAdmin, Label: "bootstrap-admin"})
+				if err != nil {
+					return fail(err)
+				}
+				h.BootstrapKey = key
+				h.Audit.Log(AuditEvent{Event: "bootstrap", KeyID: rec.ID, Detail: "first-run admin key created"})
 			}
-			h.BootstrapKey = key
-			h.Audit.Log(AuditEvent{Event: "bootstrap", KeyID: rec.ID, Detail: "first-run admin key created"})
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -248,6 +267,9 @@ func (h *Host) WriteSet(db, path, value string, o SetOpts) (uint64, error) {
 	if !h.Cluster.IsLeader() {
 		return 0, ErrReadOnly
 	}
+	if err := h.Cluster.WritableErr(); err != nil {
+		return 0, err
+	}
 	if err := ValidPath(path); err != nil {
 		return 0, err
 	}
@@ -280,6 +302,9 @@ func (h *Host) WriteDel(db, path string) (uint64, error) {
 	if !h.Cluster.IsLeader() {
 		return 0, ErrReadOnly
 	}
+	if err := h.Cluster.WritableErr(); err != nil {
+		return 0, err
+	}
 	if err := ValidPath(path); err != nil {
 		return 0, err
 	}
@@ -309,6 +334,9 @@ func (h *Host) WriteCreateDB(name string) (uint64, error) {
 	if !h.Cluster.IsLeader() {
 		return 0, ErrReadOnly
 	}
+	if err := h.Cluster.WritableErr(); err != nil {
+		return 0, err
+	}
 	h.pause.RLock()
 	defer h.pause.RUnlock()
 	h.opMu.Lock()
@@ -317,6 +345,27 @@ func (h *Host) WriteCreateDB(name string) (uint64, error) {
 		return 0, err
 	}
 	return h.Cluster.Replicate(LogEntry{DB: name, Op: "createdb"})
+}
+
+// WriteDropDB deletes a database on the leader and replicates the deletion.
+func (h *Host) WriteDropDB(name string) (uint64, error) {
+	if !h.Cluster.IsLeader() {
+		return 0, ErrReadOnly
+	}
+	if err := h.Cluster.WritableErr(); err != nil {
+		return 0, err
+	}
+	if name == h.Cfg.DefaultDB {
+		return 0, errWrap("the default database cannot be deleted")
+	}
+	h.pause.RLock()
+	defer h.pause.RUnlock()
+	h.opMu.Lock()
+	defer h.opMu.Unlock()
+	if err := h.Reg.Drop(name); err != nil {
+		return 0, err
+	}
+	return h.Cluster.Replicate(LogEntry{DB: name, Op: "dropdb"})
 }
 
 // ReadGet reads a value; on the leader a sliding TTL is extended.

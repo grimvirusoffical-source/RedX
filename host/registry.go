@@ -151,3 +151,23 @@ func (r *Registry) CloseAll() error {
 	}
 	return first
 }
+
+// Drop closes and permanently deletes a database directory.
+func (r *Registry) Drop(name string) error {
+	if !ValidDBName(name) {
+		return ErrNoDB
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	d := filepath.Join(r.root, name)
+	if st, err := os.Stat(d); err != nil || !st.IsDir() {
+		return ErrNoDB
+	}
+	if b := r.open[name]; b != nil {
+		if err := b.Close(); err != nil {
+			return err
+		}
+		delete(r.open, name)
+	}
+	return os.RemoveAll(d)
+}

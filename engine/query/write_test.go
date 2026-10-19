@@ -284,3 +284,32 @@ func TestContextCancelled(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// a write that divides by zero (or overflows) fails and leaves the stored value unchanged;
+// the same arithmetic in a read still gives NELL.
+func TestSetArithmeticFailureLeavesValueUnchanged(t *testing.T) {
+	f := newFixture(t, fixOpt{})
+	before := col(f.q(t, `{Get[]} = players:Player[ID=1] -> Level`), "Level")
+	for _, q := range []string{
+		`{Set[]} = players:Player[ID=1].Level = Level / 0`,
+		`{Set[]} = players:Player[ID=1].Level = Level / (Level - Level)`,
+		`{Set[]} = players:Player[ID=1].Level = 1e308 * 1e308`,
+	} {
+		err := f.qerr(t, q)
+		if !errors.Is(err, ErrType) {
+			t.Fatalf("%s: want ErrType, got %v", q, err)
+		}
+		if got := col(f.q(t, `{Get[]} = players:Player[ID=1] -> Level`), "Level"); len(got) != len(before) || got[0] != before[0] {
+			t.Fatalf("%s changed the value: %v -> %v", q, before, got)
+		}
+	}
+	if err := f.qerr(t, `{Add[]} = players:Player[ID=40] = [ {Name[]} = "z", {Level[]} = 1 / 0 ]`); !errors.Is(err, ErrType) {
+		t.Fatalf("Add with division by zero: %v", err)
+	}
+	r := f.q(t, `{Get[]} = players:Player[ID=1] -> [x = Level / 0]`)
+	if r.Rows[0][0].String() != "NELL" {
+		t.Fatalf("read arithmetic must still give NELL, got %v", r.Rows[0][0])
+	}
+	// non-numeric operands stay NELL in a write (documented)
+	f.q(t, `{Set[]} = players:Player[ID=1].Note = Missing + 1`)
+}

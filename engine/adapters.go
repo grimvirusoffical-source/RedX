@@ -58,7 +58,62 @@ func (r *RecordStore) Get(a link.Addr) (*box.Entry, bool, error) {
 	if e == nil || expired(e, now) {
 		return nil, false, nil
 	}
-	return e.Clone(), true, nil
+	c := e.CloneFiltered(func(x *box.Entry) bool { return expired(x, now) })
+	if box.EmptiedByFilter(e, c) {
+		return nil, false, nil
+	}
+	return c, true, nil
+}
+
+// Touch is the read-side of sliding TTLs for callers that read through this adapter (BoxQL Get): it
+// pushes out the deadline of every live sliding entry inside each given record, exactly like a REST
+// read of that record does, and journals/replicates the move as a "touch" op. It does nothing on a
+// follower (followers never slide) and ignores records that are absent or expired.
+func (r *RecordStore) Touch(addrs []link.Addr) {
+	if r.db.closed.Load() || r.db.isFollower() {
+		return
+	}
+	byFile := map[string][]link.Addr{}
+	for _, a := range addrs {
+		byFile[a.File] = append(byFile[a.File], a)
+	}
+	for file, list := range byFile {
+		t := r.table(file)
+		if t == nil {
+			continue
+		}
+		now := t.now()
+		var touches []touchRec
+		t.mu.RLock()
+		for _, a := range list {
+			seg := addrSeg(a)
+			e := t.root.Lookup(seg)
+			if e == nil || expired(e, now) {
+				continue
+			}
+			touchTree([]*box.Entry{e}, now, &touches)
+		}
+		t.mu.RUnlock()
+		if len(touches) > 0 {
+			t.logTouches(touches)
+		}
+	}
+}
+
+// touchTree slides every sliding entry at or below the last entry of chain (the chain is the path
+// from the record down).
+func touchTree(chain []*box.Entry, now int64, touches *[]touchRec) {
+	last := chain[len(chain)-1]
+	slide(chain, now, touches)
+	if last.Value.Kind != box.KindBox || last.Value.Box == nil {
+		return
+	}
+	for _, c := range last.Value.Box.Entries() {
+		if expired(c, now) {
+			continue
+		}
+		touchTree(append(chain[:len(chain):len(chain)], c), now, touches)
+	}
 }
 
 func expired(e *box.Entry, now int64) bool {
@@ -130,7 +185,10 @@ func (r *RecordStore) Scan(file string, fn func(link.Addr, *box.Entry) bool) err
 	snap := make([]*box.Entry, 0, len(es))
 	for _, e := range es {
 		if !expired(e, now) {
-			snap = append(snap, e.Clone())
+			c := e.CloneFiltered(func(x *box.Entry) bool { return expired(x, now) })
+			if !box.EmptiedByFilter(e, c) {
+				snap = append(snap, c)
+			}
 		}
 	}
 	t.mu.RUnlock()

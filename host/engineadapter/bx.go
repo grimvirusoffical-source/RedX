@@ -165,6 +165,12 @@ func (s *store) queryDB() (*query.DB, error) {
 	return db, nil
 }
 
+// notFoundErr is a not-found (404) whose message is the BoxQL error itself.
+type notFoundErr struct{ err error }
+
+func (e notFoundErr) Error() string { return e.err.Error() }
+func (e notFoundErr) Unwrap() error { return host.ErrNotFound }
+
 func bxErr(err error) error {
 	var se *query.SyntaxError
 	switch {
@@ -177,7 +183,7 @@ func bxErr(err error) error {
 		errors.Is(err, query.ErrType), errors.Is(err, query.ErrNoLinks):
 		return fmt.Errorf("%w: %v", host.ErrInvalid, err)
 	case errors.Is(err, query.ErrNoFile):
-		return fmt.Errorf("%w: %v", host.ErrNotFound, err)
+		return notFoundErr{err} // keep the documented text: query: unknown file: "name"
 	case errors.Is(err, query.ErrExists), errors.Is(err, query.ErrConflict):
 		return fmt.Errorf("%w: %v", host.ErrConflict, err)
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
@@ -218,7 +224,32 @@ func (s *store) BX(ctx context.Context, p host.SecPrincipal, q string, params ma
 	if err != nil {
 		return host.BXResult{}, bxErr(err)
 	}
+	if !explain {
+		s.slideRead(res)
+	}
 	return toBXResult(res), nil
+}
+
+// slideRead makes a BoxQL Get refresh sliding TTLs like a REST read does: every record a Get row came
+// from has the live sliding entries inside it pushed out (and the move is replicated as a touch op).
+func (s *store) slideRead(res *query.Result) {
+	var addrs []link.Addr
+	var walk func(r *query.Result)
+	walk = func(r *query.Result) {
+		if r == nil {
+			return
+		}
+		if r.Kind == "get" {
+			addrs = append(addrs, r.Addrs...)
+		}
+		for _, c := range r.Results {
+			walk(c)
+		}
+	}
+	walk(res)
+	if len(addrs) > 0 {
+		s.db.Records().Touch(addrs)
+	}
 }
 
 func toBXResult(res *query.Result) host.BXResult {

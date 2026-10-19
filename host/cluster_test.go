@@ -324,15 +324,16 @@ func TestDivergedOldLeaderGetsSnapshotAndLosesUnreplicatedWrites(t *testing.T) {
 	f1.Key = leader.Key
 	do(t, "PUT", leader.URL+P+"v:B.Shared", leader.Key, "1")
 	eventually(t, "shared on f1", 5*time.Second, func() bool { st, _, _ := do(t, "GET", f1.URL+P+"v:B.Shared", leader.Key, ""); return st == 200 })
-	// Partition-ish: f1 is promoted while the old leader is still alive and accepts an "acked" write
-	// that f1 can never see.
+	// Partition: f1 is promoted while the old leader is alive but cannot be told (0.4.3 fences a reachable
+	// old leader; see TestTLSPromoteRepointOneLeaderAndFence). It accepts an "acked" write f1 never sees.
+	host.PartitionFenceNotify(t)
 	if st, _, _ := do(t, "POST", f1.URL+"/v1/cluster/promote", f1.Key, ""); st != 200 {
 		t.Fatal("promote")
 	}
 	f1.H.Cluster.IsLeader() // keep import used
 	lostSt, _, _ := do(t, "PUT", leader.URL+P+"v:B.Lost", leader.Key, "x")
 	if lostSt != 200 {
-		t.Fatal("old leader still acks writes (split brain) -- this is the documented hazard")
+		t.Fatal("an unreachable old leader still acks writes (split brain) -- this is the documented hazard window")
 	}
 	tok := joinToken(t, f1)
 	body := fmt.Sprintf(`{"url":%q,"join_token":%q}`, f1.URL, tok)

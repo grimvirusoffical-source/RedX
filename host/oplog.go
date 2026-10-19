@@ -17,7 +17,7 @@ import (
 type LogEntry struct {
 	Seq    uint64     `json:"seq"`
 	DB     string     `json:"db,omitempty"`
-	Op     string     `json:"op"` // set | del | createdb | key | engine | aux (index / pulse definitions)
+	Op     string     `json:"op"` // set | del | createdb | dropdb | key | engine | aux (index / pulse definitions)
 	Path   string     `json:"path,omitempty"`
 	Value  string     `json:"value,omitempty"`
 	Opts   SetOpts    `json:"opts,omitempty"`

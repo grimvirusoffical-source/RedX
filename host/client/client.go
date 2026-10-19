@@ -168,14 +168,16 @@ func (c *Client) Query(ctx context.Context, db, q string) ([]string, error) {
 
 // KeyViewAlias mirrors the key view returned by the API.
 type KeyViewAlias struct {
-	ID      string     `json:"id"`
-	Scope   string     `json:"scope"`
-	DB      string     `json:"db"`
-	Prefix  string     `json:"prefix,omitempty"`
-	Label   string     `json:"label,omitempty"`
-	Roles   []string   `json:"roles,omitempty"`
-	Created time.Time  `json:"created"`
-	Expires *time.Time `json:"expires,omitempty"`
-	Revoked *time.Time `json:"revoked,omitempty"`
-	Status  string     `json:"status"`
+	ID        string     `json:"id"`
+	Scope     string     `json:"scope"`
+	DB        string     `json:"db"`
+	Prefix    string     `json:"prefix,omitempty"`
+	Label     string     `json:"label,omitempty"`
+	Roles     []string   `json:"roles,omitempty"`
+	Created   time.Time  `json:"created"`
+	Expires   *time.Time `json:"expires,omitempty"`
+	Revoked   *time.Time `json:"revoked,omitempty"`
+	RateRPS   float64    `json:"rate_rps,omitempty"`
+	RateBurst int        `json:"rate_burst,omitempty"`
+	Status    string     `json:"status"`
 }

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Cross-compile redxd + redx for every supported platform (static, CGO off).
 # usage: scripts/build.sh [--tags "redx_stub"] [--only linux/amd64,...] [--version X] [--no-archive]
-# output: dist/redx-<version>-<os>-<arch>/{redxd,redx}[.exe] + dist/*.tar.gz|zip + dist/SHA256SUMS
+# output: dist/redx-<version>-<os>-<arch>/{redxd,redx,redx-launcher}[.exe], docs, redx.{ico,icns,svg} + dist/*.tar.gz|zip + dist/SHA256SUMS
+# (the web console is embedded in redxd itself; scripts/sync-ui-docs.sh is run first so its Help docs match docs/)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -25,6 +26,7 @@ if [ -n "$ONLY" ]; then
   IFS=',' read -r -a TARGETS <<< "$ONLY"
 fi
 
+[ -x scripts/sync-ui-docs.sh ] && scripts/sync-ui-docs.sh >/dev/null
 rm -rf dist; mkdir -p dist; FAILED=""
 LDFLAGS="-s -w -X redx/host.Version=${VERSION}"
 for t in "${TARGETS[@]}"; do
@@ -34,14 +36,17 @@ for t in "${TARGETS[@]}"; do
   ext=""; [ "$os" = "windows" ] && ext=".exe"
   mkdir -p "$out"
   ok=1
-  for cmd in redxd redx; do
+  for cmd in redxd redx redx-launcher; do
     echo "build $cmd $os/$name"
+    ld="$LDFLAGS"; [ "$os" = windows ] && [ "$cmd" = redx-launcher ] && ld="$LDFLAGS -H=windowsgui"  # no console window
     GOOS=$os GOARCH=$arch GOARM=${arm:-} CGO_ENABLED=0 \
-      go build -trimpath -tags "$TAGS" -ldflags "$LDFLAGS" -o "$out/$cmd$ext" "./cmd/$cmd" || ok=0
+      go build -trimpath -tags "$TAGS" -ldflags "$ld" -o "$out/$cmd$ext" "./cmd/$cmd" || ok=0
   done
   if [ "$ok" = 0 ]; then echo "FAILED target $os/$name (skipped)" >&2; FAILED="$FAILED $os/$name"; rm -rf "$out"; continue; fi
   cp -r deploy/systemd deploy/launchd deploy/windows "$out/" 2>/dev/null || true
-  cp docs/hosting.md docs/getting-started.md docs/boxql.md docs/box-grammar.md deploy/install.sh deploy/install.ps1 "$out/" 2>/dev/null || true
+  cp docs/hosting.md docs/getting-started.md docs/boxql.md docs/box-grammar.md docs/console.md docs/installers.md docs/connect.md deploy/install.sh deploy/install.ps1 "$out/" 2>/dev/null || true
+  # icons: ship the source files so the installers can make menu entries / shortcuts
+  cp assets/icons/redx.ico assets/icons/redx.icns assets/icons/redx.svg "$out/" 2>/dev/null || true
   cp deploy/redx.example.toml "$out/redx.example.toml" 2>/dev/null || true
   if [ "$ARCHIVE" = 1 ]; then
     base="$(basename "$out")"

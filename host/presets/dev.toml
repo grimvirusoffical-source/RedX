@@ -1,0 +1,36 @@
+name = "dev"
+title = "Dev / Laptop"
+order = 7
+summary = "Try things on your own computer. Only you can reach it, logs are chatty, data is disposable."
+audience = "Local development and testing"
+guidance = [
+  "Only programs on this computer can connect. To test from a phone, switch to the Server preset.",
+  "Delete the data folder any time to start fresh: it is a throwaway database.",
+]
+warnings = []
+
+[settings]
+listen = "127.0.0.1:7777"
+tls = "off"
+engine_durability = "sync"
+rate_limit_rps = 1000
+rate_limit_burst = 2000
+audit_success = true
+log_level = "debug"
+role = "leader"
+bootstrap = "auto"
+
+[why]
+listen = "Loopback only: nothing on the network can see it."
+tls = "Off because traffic never leaves this computer, and it keeps curl and browser tests simple."
+engine_durability = "sync flushes every write before answering. It is the slowest and simplest, and makes crash tests behave predictably (docs/benchmarks.md: about 13.7k durable writes/s for one writer on one test disk)."
+rate_limit_rps = "A high limit so tests and loops are never throttled."
+rate_limit_burst = "Large bursts are allowed so your own scripts and tests are never slowed down on your own machine."
+audit_success = "Logs every successful call so you can see exactly what your code did."
+log_level = "debug is accepted for future use. Today redxd logs the same at debug as at info (only quiet is different), so this costs nothing and is ready if more detail is added."
+role = "leader means this host accepts writes. Other hosts can follow it later; nothing changes until you add a follower."
+bootstrap = "auto shows the admin-key setup screen in the browser only when the host listens on this computer alone; if it listens on the network the key is printed once to the console instead."
+
+[[files]]
+name = "scratch.red-xai.db"
+note = "Throwaway test data."

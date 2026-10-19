@@ -1,0 +1,45 @@
+name = "app"
+title = "App back end"
+order = 4
+summary = "Back end for a mobile or desktop app: every user gets their own limited key."
+audience = "App with many users and per-user data"
+guidance = [
+  "Create one key per user (or per device) with a path prefix such as players.red-xai.db:Player[ID=42], read or write scope and a label. A leaked key then exposes only that user's records.",
+  "Use links (@>) to connect a user to their items, and pulse rules or {Watch[]} to push live changes to the app.",
+  "Give your own server the admin key and never ship it inside the app.",
+]
+warnings = [
+  "Prefix-restricted keys cannot run BoxQL (see docs/boxql.md section 17): they use the path API. Use unrestricted scoped keys for BoxQL.",
+]
+
+[settings]
+listen = "0.0.0.0:7777"
+tls = "auto"
+engine_durability = "group"
+rate_limit_rps = 50
+rate_limit_burst = 100
+audit_success = false
+log_level = "info"
+role = "leader"
+
+[why]
+listen = "Phones and desktops connect over the network, so it listens on all interfaces. Put it behind a firewall or VPN if you can."
+tls = "Apps send keys over the network, so TLS is on. The app must pin the fingerprint, or use a real certificate through a reverse proxy."
+engine_durability = "group acknowledges writes after they are on disk, so saved user data survives a crash."
+rate_limit_rps = "Because each user has their own key, this is a per-user limit: 50 requests per second stops one misbehaving client from affecting the rest."
+rate_limit_burst = "Lets an app send a short burst (for example on start-up) before it is throttled."
+audit_success = "Off to keep the log small. Turn it on if you need a record of every successful call."
+log_level = "info is the normal level: start-up, replication and error messages. Today the only other value that changes anything is quiet, which turns logging off."
+role = "leader means this host accepts writes. Other hosts can follow it later; nothing changes until you add a follower."
+
+[[files]]
+name = "users.red-xai.db"
+box = "User"
+note = "One record per user."
+[[files]]
+name = "items.red-xai.db"
+box = "Item"
+note = "Things users own, linked to the user with @>."
+[[files]]
+name = "events.red-xai-db-pulse"
+note = "Optional live rules and timers. Edit in the Raw editor."

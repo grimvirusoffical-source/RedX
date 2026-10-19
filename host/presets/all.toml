@@ -1,0 +1,43 @@
+name = "all"
+title = "Any and all"
+order = 10
+summary = "Balanced all-rounder: every feature available, safe defaults, nothing exposed to the network."
+audience = "Not sure yet? Start here"
+guidance = [
+  "Only this computer can connect until you change the listen address. Use the Server preset when other devices need access.",
+  "Everything works: databases, BoxQL, watch, indexes, packs, media, rules, code, keys, backups and nodes.",
+]
+warnings = []
+
+[settings]
+listen = "127.0.0.1:7777"
+tls = "off"
+engine_durability = "group"
+engine_default_ttl = 86400
+rate_limit_rps = 100
+rate_limit_burst = 200
+audit_success = true
+log_level = "info"
+role = "leader"
+bootstrap = "auto"
+
+[why]
+listen = "Loopback only is the safest start. You can open it to other devices later in one step."
+tls = "Off on loopback so the console opens without a certificate warning. Turn it on when you listen on the network."
+engine_durability = "group acknowledges writes after they are on disk, with concurrent writes sharing one flush. It is the engine's default and the best all-round choice (docs/benchmarks.md)."
+engine_default_ttl = "Expiring (qs) files accept writes without a TTL and give them 24 hours, so a forgotten TTL does not cause an error."
+rate_limit_rps = "The built-in default: 100 requests per second per key."
+rate_limit_burst = "Lets a client briefly go above the steady rate (here twice it) before it is slowed down."
+audit_success = "Records successful as well as failed logins, so you can see what is happening while you learn the system."
+log_level = "info is the normal level: start-up, replication and error messages. Today the only other value that changes anything is quiet, which turns logging off."
+role = "leader means this host accepts writes. Other hosts can follow it later; nothing changes until you add a follower."
+bootstrap = "auto shows the admin-key setup screen in the browser only when the host listens on this computer alone; if it listens on the network the key is printed once to the console instead."
+
+[[files]]
+name = "default.red-xai.db"
+note = "General data."
+[[files]]
+name = "sessions.red-xai-db-qs"
+box = "Session"
+ttl_seconds = 3600
+note = "Expiring data."

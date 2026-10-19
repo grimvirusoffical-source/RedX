@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -71,14 +72,35 @@ type ClusterStatus struct {
 	LastError   string   `json:"last_error,omitempty"`
 	LastSync    string   `json:"last_sync,omitempty"`
 	Snapshots   int      `json:"snapshots_installed"`
+	// Fenced is set on a leader that learned another node was promoted in its place: it refuses writes (no split brain).
+	Fenced *Fence `json:"fenced,omitempty"`
+}
+
+// Fence records who superseded this leader. A fenced leader serves reads but refuses writes until it is repointed
+// (`redx node repoint`) or deliberately promoted again (`redx node promote`).
+type Fence struct {
+	By        string `json:"by_node"`
+	LeaderURL string `json:"new_leader_url,omitempty"`
+	Pin       string `json:"new_leader_pin_sha256,omitempty"` // learned over the authenticated node channel; used by repoint
+	At        string `json:"at"`
+}
+
+// formerLeader is remembered by a promoted node so it can tell the old leader, once it is reachable again, to stop
+// taking writes. It holds the node secret the old leader issued to us, so the notice is authenticated.
+type formerLeader struct {
+	URL        string `json:"url"`
+	Pin        string `json:"pin_sha256,omitempty"`
+	NodeSecret string `json:"node_secret,omitempty"`
 }
 
 type nodeState struct {
-	Role       string `json:"role"` // leader | follower
-	LeaderURL  string `json:"leader_url,omitempty"`
-	NodeSecret string `json:"node_secret,omitempty"`
-	Pin        string `json:"pin_sha256,omitempty"`
-	Advertise  string `json:"advertise,omitempty"`
+	Role       string        `json:"role"` // leader | follower
+	LeaderURL  string        `json:"leader_url,omitempty"`
+	NodeSecret string        `json:"node_secret,omitempty"`
+	Pin        string        `json:"pin_sha256,omitempty"`
+	Advertise  string        `json:"advertise,omitempty"`
+	Fenced     *Fence        `json:"fenced,omitempty"`
+	Former     *formerLeader `json:"former_leader,omitempty"`
 }
 
 type replMeta struct {
@@ -275,7 +297,7 @@ func (c *Cluster) Status() ClusterStatus {
 	last := c.log.Last()
 	st := ClusterStatus{NodeID: c.h.NodeID, Role: c.st.Role, LeaderURL: c.st.LeaderURL, ReplID: c.meta.ReplID,
 		Offset: last, FirstOffset: c.log.First(), ParentID: c.meta.ParentID, ParentOff: c.meta.ParentOff,
-		TTLTracked: c.h.Tracker.Len(), Snapshots: c.snaps, LastError: c.lastErr, Members: []Member{}}
+		TTLTracked: c.h.Tracker.Len(), Snapshots: c.snaps, LastError: c.lastErr, Members: []Member{}, Fenced: c.st.Fenced}
 	if !c.lastSync.IsZero() {
 		st.LastSync = c.lastSync.UTC().Format(time.RFC3339)
 	}
@@ -314,9 +336,155 @@ func (c *Cluster) start(ctx context.Context) {
 		from = es[len(es)-1].Seq + 1
 	}
 	if c.IsLeader() {
+		c.startFenceNotifier()
 		return
 	}
 	c.startFollower()
+}
+
+// ---- fencing ----
+
+// FenceErr is returned for writes on a leader that has been superseded.
+type FenceErr struct{ F Fence }
+
+func (e FenceErr) Error() string {
+	m := "this node was the leader, but node " + e.F.By + " was promoted in its place"
+	if e.F.LeaderURL != "" {
+		m += " (" + e.F.LeaderURL + ")"
+	}
+	return m + "; it refuses writes so the cluster does not split. Repoint it: redx node repoint " + nonEmpty(e.F.LeaderURL, "NEW_LEADER") +
+		" --token T   (the new leader's certificate pin is already known), or run `redx node promote` on it to take over again"
+}
+
+func nonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+// WritableErr is nil when this node may accept writes as the leader.
+func (c *Cluster) WritableErr() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.st.Role == "leader" && c.st.Fenced != nil {
+		return FenceErr{*c.st.Fenced}
+	}
+	return nil
+}
+
+// startFenceNotifier keeps telling the old leader (after a promote) that it has been superseded, until it confirms.
+func (c *Cluster) startFenceNotifier() {
+	c.mu.Lock()
+	f := c.st.Former
+	c.mu.Unlock()
+	if f == nil || f.URL == "" || c.ctx == nil {
+		return
+	}
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		every := time.Duration(c.h.Cfg.Heartbeat) * time.Second
+		if every <= 0 {
+			every = 3 * time.Second
+		}
+		for {
+			if c.notifyFormerLeader(*f) {
+				c.mu.Lock()
+				if c.st.Former != nil && c.st.Former.URL == f.URL {
+					c.st.Former = nil
+					_ = c.saveState()
+				}
+				c.mu.Unlock()
+				c.h.Logf("former leader %s acknowledged that this node is now the leader", f.URL)
+				return
+			}
+			select {
+			case <-c.ctx.Done():
+				return
+			case <-time.After(every):
+			}
+			if !c.IsLeader() {
+				return
+			}
+		}
+	}()
+}
+
+// fenceNotifyOff simulates, in tests only, a promoted node that cannot reach the old leader.
+var fenceNotifyOff atomic.Bool
+
+func (c *Cluster) notifyFormerLeader(f formerLeader) bool {
+	if fenceNotifyOff.Load() {
+		return false
+	}
+	tr := &http.Transport{TLSHandshakeTimeout: 5 * time.Second}
+	if pin := strings.TrimPrefix(f.Pin, "sha256:"); pin != "" {
+		tr.TLSClientConfig = pinnedTLS(pin)
+	}
+	cl := &http.Client{Transport: tr, Timeout: 5 * time.Second}
+	defer tr.CloseIdleConnections()
+	c.mu.Lock()
+	adv := c.st.Advertise
+	rid, parent := c.meta.ReplID, c.meta.ParentID
+	c.mu.Unlock()
+	c.h.runMu.Lock()
+	fp := c.h.tlsFP
+	c.h.runMu.Unlock()
+	b, _ := json.Marshal(map[string]string{"leader_url": adv, "pin_sha256": fp, "replication_id": rid, "parent_id": parent})
+	req, err := http.NewRequestWithContext(c.ctx, "POST", strings.TrimRight(f.URL, "/")+"/v1/cluster/superseded", bytes.NewReader(b))
+	if err != nil {
+		return false
+	}
+	secret := f.NodeSecret
+	if secret == "" {
+		secret = c.h.Cfg.ClusterKey
+	}
+	req.Header.Set("Authorization", "Bearer "+secret)
+	req.Header.Set("X-Redx-Node", c.h.NodeID)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := cl.Do(req)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	// 200: fenced or already a follower. 401: the old leader no longer knows us (wiped/rejoined): nothing more to do.
+	// 409: the old leader's history moved on (it was already repointed and promoted again): stop too.
+	return resp.StatusCode == 200 || resp.StatusCode == 401 || resp.StatusCode == 404 || resp.StatusCode == 409
+}
+
+// handleSuperseded: a member node tells this leader it was promoted. Authenticated with the member's node secret.
+func (c *Cluster) handleSuperseded(w http.ResponseWriter, r *http.Request) {
+	id, ok := c.nodeAuth(w, r)
+	if !ok {
+		return
+	}
+	var b struct {
+		LeaderURL string `json:"leader_url"`
+		Pin       string `json:"pin_sha256"`
+		ReplID    string `json:"replication_id"`
+		ParentID  string `json:"parent_id"`
+	}
+	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<14)).Decode(&b)
+	c.mu.Lock()
+	if c.st.Role != "leader" {
+		c.mu.Unlock()
+		writeJSON(w, 200, map[string]interface{}{"ok": true, "role": c.st.Role})
+		return
+	}
+	// Only a node promoted out of THIS leader's history may fence it (a member cannot fence on a whim).
+	if b.ParentID == "" || b.ParentID != c.meta.ReplID || b.ReplID == c.meta.ReplID {
+		c.mu.Unlock()
+		writeErr(w, 409, "not promoted from this leader's replication history")
+		return
+	}
+	c.st.Fenced = &Fence{By: id, LeaderURL: strings.TrimRight(b.LeaderURL, "/"), Pin: b.Pin, At: time.Now().UTC().Format(time.RFC3339)}
+	_ = c.saveState()
+	f := *c.st.Fenced
+	c.mu.Unlock()
+	c.h.Logf("WARNING: %s", FenceErr{f}.Error())
+	c.h.Audit.Log(AuditEvent{Event: "node.fenced", Remote: remoteIP(r), Detail: "superseded by " + id})
+	writeJSON(w, 200, map[string]interface{}{"ok": true, "fenced": true})
 }
 
 func (c *Cluster) startFollower() {
@@ -380,6 +548,9 @@ type logResp struct {
 }
 
 func (c *Cluster) setErr(err error) {
+	if err != nil && errors.Is(err, context.Canceled) {
+		return // the follower loop was stopped on purpose (promote, repoint, shutdown): not a failure worth showing
+	}
 	c.mu.Lock()
 	if err == nil {
 		c.lastErr = ""
@@ -490,6 +661,10 @@ func (c *Cluster) applyEntry(e LogEntry) error {
 	switch e.Op {
 	case "createdb":
 		if err := h.Reg.Ensure(e.DB); err != nil {
+			return err
+		}
+	case "dropdb":
+		if err := h.Reg.Drop(e.DB); err != nil && !errors.Is(err, ErrNoDB) {
 			return err
 		}
 	case "engine":
@@ -681,23 +856,75 @@ func (c *Cluster) memberList() []Member {
 	return st.Members
 }
 
+// pairAlphabet has no look-alike characters (no 0/O, 1/I/L).
+const pairAlphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+
+// newPairCode makes a short human pairing code: RX-XXXXX-XXXXX (10 symbols, about 49 bits).
+func newPairCode() string {
+	b := make([]byte, 10)
+	for i := range b {
+		b[i] = pairAlphabet[randInt(len(pairAlphabet))]
+	}
+	return "RX-" + string(b[:5]) + "-" + string(b[5:])
+}
+
+func randInt(n int) int {
+	var b [1]byte
+	for {
+		_, _ = rand.Read(b[:])
+		// rejection sampling keeps the distribution uniform
+		if int(b[0]) < 256-256%n {
+			return int(b[0]) % n
+		}
+	}
+}
+
+// NormalizeJoinSecret canonicalises what a person typed: pairing codes are case-insensitive and
+// may be written with or without dashes and spaces. rxj_ tokens are returned unchanged.
+func NormalizeJoinSecret(s string) string {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "rxj_") {
+		return s
+	}
+	u := strings.ToUpper(strings.NewReplacer("-", "", " ", "", "_", "").Replace(s))
+	if len(u) == 12 && strings.HasPrefix(u, "RX") {
+		return "RX-" + u[2:7] + "-" + u[7:12]
+	}
+	return s
+}
+
 func (c *Cluster) handleJoinToken(w http.ResponseWriter, r *http.Request, p *Principal) {
 	if !c.IsLeader() {
 		writeErr(w, 409, "join tokens are issued by the leader")
 		return
 	}
 	var body struct {
-		TTLSeconds int `json:"ttl_seconds"`
+		TTLSeconds int    `json:"ttl_seconds"`
+		Kind       string `json:"kind"` // "" or "token": rxj_ token (default 15 min, max 24 h); "code": short pairing code (default 10 min, max 1 h)
 	}
 	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<10)).Decode(&body)
+	if body.Kind != "" && body.Kind != "token" && body.Kind != "code" {
+		writeErr(w, 400, `kind must be "token" or "code"`)
+		return
+	}
 	ttl := time.Duration(body.TTLSeconds) * time.Second
+	max := 24 * time.Hour
+	if body.Kind == "code" {
+		max = time.Hour
+		if ttl <= 0 {
+			ttl = 10 * time.Minute
+		}
+	}
 	if ttl <= 0 {
 		ttl = 15 * time.Minute
 	}
-	if ttl > 24*time.Hour {
-		ttl = 24 * time.Hour
+	if ttl > max {
+		ttl = max
 	}
 	tok := "rxj_" + randBase62(43)
+	if body.Kind == "code" {
+		tok = newPairCode()
+	}
 	sum := sha256.Sum256([]byte(tok))
 	exp := time.Now().Add(ttl)
 	c.mu.Lock()
@@ -708,8 +935,12 @@ func (c *Cluster) handleJoinToken(w http.ResponseWriter, r *http.Request, p *Pri
 	}
 	c.tokens[sum] = exp
 	c.mu.Unlock()
-	c.h.Audit.Log(AuditEvent{Event: "join.token.create", KeyID: p.Key.ID, Remote: remoteIP(r)})
-	writeJSON(w, 200, map[string]interface{}{"token": tok, "expires": exp.UTC().Format(time.RFC3339), "single_use": true})
+	c.h.Audit.Log(AuditEvent{Event: "join.token.create", KeyID: p.Key.ID, Remote: remoteIP(r), Detail: "kind " + map[bool]string{true: "code", false: "token"}[body.Kind == "code"]})
+	resp := map[string]interface{}{"token": tok, "expires": exp.UTC().Format(time.RFC3339), "expires_in_seconds": int(ttl / time.Second), "single_use": true, "scope": "join"}
+	if body.Kind == "code" {
+		resp["code"] = tok
+	}
+	writeJSON(w, 200, resp)
 }
 
 type joinReq struct {
@@ -739,7 +970,7 @@ func (c *Cluster) handleJoin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "token and node_id required")
 		return
 	}
-	sum := sha256.Sum256([]byte(jr.Token))
+	sum := sha256.Sum256([]byte(NormalizeJoinSecret(jr.Token)))
 	c.mu.Lock()
 	exp, ok := c.tokens[sum]
 	if ok {
@@ -772,20 +1003,34 @@ func (c *Cluster) handleJoin(w http.ResponseWriter, r *http.Request) {
 func (c *Cluster) handlePromote(w http.ResponseWriter, r *http.Request, p *Principal) {
 	c.mu.Lock()
 	if c.st.Role == "leader" {
+		if c.st.Fenced != nil { // deliberate take-over by an operator
+			c.st.Fenced = nil
+			_ = c.saveState()
+			c.mu.Unlock()
+			c.h.Audit.Log(AuditEvent{Event: "node.unfence", KeyID: p.Key.ID, Remote: remoteIP(r)})
+			writeJSON(w, 200, map[string]interface{}{"role": "leader", "note": "fence cleared: this node accepts writes again. Repoint or stop the other leader now."})
+			return
+		}
 		c.mu.Unlock()
 		writeErr(w, 409, "already the leader")
 		return
+	}
+	former := &formerLeader{URL: c.st.LeaderURL, Pin: c.st.Pin, NodeSecret: c.st.NodeSecret}
+	if former.URL == "" {
+		former = nil
 	}
 	c.stopFollowerLocked()
 	off := c.log.Last()
 	c.meta.ParentID, c.meta.ParentOff = c.meta.ReplID, off
 	c.meta.ReplID = randHex(20)
-	c.st.Role, c.st.LeaderURL = "leader", ""
+	c.st.Role, c.st.LeaderURL, c.st.Former, c.st.Fenced = "leader", "", former, nil
+	c.lastErr = "" // follower-era errors no longer apply
 	_ = c.saveMeta()
 	_ = c.saveState()
 	c.members = map[string]*Member{}
 	nr := c.meta.ReplID
 	c.mu.Unlock()
+	c.startFenceNotifier()
 	c.h.setFollowerMode(false) // re-arms engine expiry
 	c.h.Tracker.ResetSliding(time.Now())
 	c.h.Audit.Log(AuditEvent{Event: "node.promote", KeyID: p.Key.ID, Remote: remoteIP(r), Detail: fmt.Sprintf("offset %d", off)})
@@ -807,8 +1052,19 @@ func (c *Cluster) Repoint(ctx context.Context, leaderURL, joinToken, pin string)
 		return errors.New("leader url must start with http:// or https://")
 	}
 	c.mu.Lock()
-	c.stopFollowerLocked()
+	if pin == "" && c.st.Fenced != nil && c.st.Fenced.Pin != "" && strings.TrimRight(c.st.Fenced.LeaderURL, "/") == leaderURL {
+		pin = c.st.Fenced.Pin // learned from the new leader over the authenticated node channel
+	}
 	adv := c.st.Advertise
+	c.mu.Unlock()
+	if strings.HasPrefix(leaderURL, "https://") && pin == "" && joinToken != "" {
+		// Probe first so a self-signed leader gives a clear message instead of a bare x509 error.
+		if err := probeTLS(ctx, leaderURL); err != nil {
+			return fmt.Errorf("cannot verify %s's TLS certificate (%v): pass its fingerprint with --leader-pin (shown at its startup and on its Settings page), or use its join link", leaderURL, err)
+		}
+	}
+	c.mu.Lock()
+	c.stopFollowerLocked()
 	c.mu.Unlock()
 	st := nodeState{Role: "follower", LeaderURL: leaderURL, Pin: pin, Advertise: adv, NodeSecret: ""}
 	if joinToken != "" {
@@ -828,7 +1084,8 @@ func (c *Cluster) Repoint(ctx context.Context, leaderURL, joinToken, pin string)
 	}
 	c.mu.Lock()
 	wasLeader := c.st.Role == "leader"
-	c.st = st
+	c.st = st // also clears Fenced / Former
+	c.lastErr = ""
 	_ = c.saveState()
 	c.client = c.newClient()
 	c.members = map[string]*Member{}
@@ -893,4 +1150,34 @@ func (c *Cluster) proxy() *httputil.ReverseProxy {
 		writeErr(w, http.StatusBadGateway, "leader unreachable")
 	}
 	return p
+}
+
+// JoinErrorHint explains a failed join: the "codes last 10 minutes and work once" advice only fits when the code itself
+// was the problem, not a certificate/pin mismatch or an unreachable leader.
+func JoinErrorHint(err error) string {
+	m := strings.ToLower(err.Error())
+	for _, w := range []string{"pin", "fingerprint", "certificate", "x509", "tls", "connection refused", "no such host", "timeout", "unreachable"} {
+		if strings.Contains(m, w) {
+			return ""
+		}
+	}
+	return " (join codes are valid for about 10 minutes and work once: create a new one on the leader's Add a device page)"
+}
+
+func probeTLS(ctx context.Context, u string) error {
+	cl := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, "GET", strings.TrimRight(u, "/")+"/healthz", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := cl.Do(req)
+	if err != nil {
+		var ue *url.Error
+		if errors.As(err, &ue) && strings.Contains(strings.ToLower(ue.Err.Error()), "certificate") {
+			return ue.Err
+		}
+		return nil // not a certificate problem: let the real join report it
+	}
+	resp.Body.Close()
+	return nil
 }

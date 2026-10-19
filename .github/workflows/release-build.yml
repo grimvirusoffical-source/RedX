@@ -1,0 +1,104 @@
+# Manual: build the 0.4.x archives and installers and upload them as WORKFLOW ARTIFACTS (not a GitHub Release).
+# Releases are created by hand after testing. All installers are UNSIGNED.
+name: release-build
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to stamp (e.g. 0.4.3)"
+        required: true
+        default: "0.4.3"
+
+permissions:
+  contents: read
+
+env:
+  VERSION: ${{ inputs.version }}
+
+jobs:
+  linux-build:
+    name: archives + deb + Windows installer (built on Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install NSIS (makensis)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq nsis
+      - name: Archives for every platform
+        run: scripts/build.sh --version "$VERSION"
+      - name: Debian packages
+        run: scripts/package.sh deb "$VERSION"
+      - name: Windows installers (.exe, NSIS)
+        run: scripts/package.sh windows "$VERSION"
+      - name: Checksums
+        run: cd dist && ls *.tar.gz *.zip *.deb *.exe 2>/dev/null | xargs sha256sum > SHA256SUMS && cat SHA256SUMS
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-built
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.deb
+            dist/*-setup.exe
+            dist/SHA256SUMS
+          if-no-files-found: error
+
+  windows-verify:
+    name: verify Windows installer on windows-latest
+    needs: linux-build
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - run: git config --global core.autocrlf false
+        shell: bash
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: linux-built
+          path: dist
+      - name: Silent install, launch, console, uninstall
+        shell: pwsh
+        run: scripts/verify-windows.ps1 -Setup (Get-ChildItem dist/redx-*-windows-amd64-setup.exe).FullName
+
+  macos-build:
+    name: macOS .app, .dmg and .pkg (arm64, amd64, universal)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build
+        run: scripts/package.sh macos "$VERSION"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: macos-built
+          path: |
+            dist/*.dmg
+            dist/*.pkg
+          if-no-files-found: error
+
+  macos-verify:
+    name: verify macOS installers on ${{ matrix.os }}
+    needs: macos-build
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, macos-15-intel]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: macos-built
+          path: dist
+      - name: Mount dmg, run the app, install the pkg
+        run: scripts/verify-macos.sh dist "$VERSION"

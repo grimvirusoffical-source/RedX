@@ -1,0 +1,47 @@
+name = "vps"
+title = "VPS / public cloud"
+order = 2
+summary = "A rented cloud machine with a public IP address. Strict, encrypted and heavily logged."
+audience = "Internet-reachable server"
+needs = ["REDX_KEYSTORE_PASSPHRASE"]
+guidance = [
+  "Best practice: bind to a private or VPN address (for example a WireGuard or Tailscale IP) instead of 0.0.0.0, or keep 127.0.0.1 and put a reverse proxy with a real certificate in front.",
+  "Firewall: allow only the port you listen on (7777), and only from the addresses that need it. Block everything else inbound.",
+  "Set REDX_KEYSTORE_PASSPHRASE in the service environment before the first start. If you lose it, the keystore cannot be read.",
+  "Fingerprint pinning: copy the certificate fingerprint from Settings and give it to every client.",
+]
+warnings = [
+  "A public IP is scanned constantly. Do not run this host with tls = off or with a weak or shared API key.",
+  "Back up the data folder and keep the passphrase somewhere separate from the server.",
+]
+
+[settings]
+listen = "0.0.0.0:7777"
+tls = "auto"
+engine_durability = "group"
+rate_limit_rps = 20
+rate_limit_burst = 40
+keystore_encrypt = true
+audit_success = true
+log_level = "info"
+role = "leader"
+bootstrap = "console"
+
+[why]
+listen = "Public clients must reach it, so it listens on all interfaces. Prefer a private or VPN address if you can, and always firewall the port."
+tls = "A self-signed certificate stops passive eavesdropping, but clients must pin the fingerprint or you are open to impersonation. Use tls = files with a real certificate if you have one."
+engine_durability = "group acknowledges a write only after it is flushed to disk, so a crash does not lose acknowledged data. See docs/benchmarks.md for measured numbers on one disk."
+rate_limit_rps = "20 requests per second per key slows down a leaked key and brute-force attempts. Raise it for keys that legitimately need more."
+rate_limit_burst = "Short bursts up to 40 are allowed, then requests are throttled."
+keystore_encrypt = "Encrypts the API key file at rest with your passphrase, so a copied disk or backup does not reveal key hashes. It needs REDX_KEYSTORE_PASSPHRASE on every start."
+audit_success = "Records every successful authentication as well as failures, giving you a full trail of who used which key from where."
+log_level = "info is the normal level: start-up, replication and error messages. Today the only other value that changes anything is quiet, which turns logging off."
+role = "leader means this host accepts writes. Other hosts can follow it later; nothing changes until you add a follower."
+bootstrap = "console never offers key creation in the browser. The first admin key is printed once to the terminal (or created with redx key create), so nobody on the network can race you to it."
+
+[[files]]
+name = "default.red-xai.db"
+note = "General data."
+[[files]]
+name = "policy.red-xai-sec"
+note = "Recommended: add an access policy before opening the host to the internet. The Raw editor can edit it."

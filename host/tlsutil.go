@@ -102,5 +102,64 @@ func (h *Host) TLSConfig() (*tls.Config, string, error) {
 		return nil, "", err
 	}
 	fp, _ := Fingerprint(cert)
+	h.runMu.Lock()
+	h.tlsCertFile = cert
+	h.runMu.Unlock()
 	return &tls.Config{Certificates: []tls.Certificate{kp}, MinVersion: tls.VersionTLS12}, fp, nil
+}
+
+// CertWarnDays is how close to expiry a certificate must be before it is flagged.
+const CertWarnDays = 14
+
+// CertInfo describes the validity of the certificate the host serves.
+type CertInfo struct {
+	NotBefore time.Time `json:"not_before"`
+	NotAfter  time.Time `json:"not_after"`
+	DaysLeft  int       `json:"days_left"`
+	State     string    `json:"state"`   // ok | expiring | expired | not_yet_valid | unreadable
+	Message   string    `json:"message"` // empty when state is ok
+}
+
+// Healthy reports whether the certificate needs no attention.
+func (c CertInfo) Healthy() bool { return c.State == "ok" }
+
+// CertStatus reads the first certificate in certFile and judges it at time now: expired, not valid yet, or
+// expiring within CertWarnDays days all produce a clear message.
+func CertStatus(certFile string, now time.Time) CertInfo {
+	b, err := os.ReadFile(certFile)
+	if err != nil {
+		return CertInfo{State: "unreadable", Message: "cannot read the TLS certificate: " + err.Error()}
+	}
+	for {
+		var blk *pem.Block
+		blk, b = pem.Decode(b)
+		if blk == nil {
+			return CertInfo{State: "unreadable", Message: "no certificate found in " + certFile}
+		}
+		if blk.Type != "CERTIFICATE" {
+			continue
+		}
+		c, err := x509.ParseCertificate(blk.Bytes)
+		if err != nil {
+			return CertInfo{State: "unreadable", Message: "cannot parse the TLS certificate: " + err.Error()}
+		}
+		return judgeCert(c.NotBefore, c.NotAfter, now)
+	}
+}
+
+func judgeCert(nb, na, now time.Time) CertInfo {
+	ci := CertInfo{NotBefore: nb, NotAfter: na, DaysLeft: int(na.Sub(now).Hours() / 24), State: "ok"}
+	switch {
+	case now.Before(nb):
+		ci.State = "not_yet_valid"
+		ci.Message = fmt.Sprintf("TLS certificate is NOT VALID YET (valid from %s): clients will refuse it. Check this computer's clock or replace tls_cert/tls_key.", nb.UTC().Format("2006-01-02 15:04 MST"))
+	case !now.Before(na):
+		ci.State = "expired"
+		ci.DaysLeft = -int(now.Sub(na).Hours() / 24)
+		ci.Message = fmt.Sprintf("TLS certificate EXPIRED on %s (%d days ago): browsers and clients will refuse it. Replace tls_cert/tls_key and restart.", na.UTC().Format("2006-01-02"), -ci.DaysLeft)
+	case na.Sub(now) < CertWarnDays*24*time.Hour:
+		ci.State = "expiring"
+		ci.Message = fmt.Sprintf("TLS certificate expires on %s (in %d days): renew it before then and restart.", na.UTC().Format("2006-01-02"), ci.DaysLeft)
+	}
+	return ci
 }

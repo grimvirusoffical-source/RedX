@@ -1,0 +1,19 @@
+{
+  "name": "RedX Console",
+  "short_name": "RedX",
+  "description": "Manage your RedX database from any device.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0f0809",
+  "theme_color": "#0f0809",
+  "icons": [
+    { "src": "/ui/icons/redx-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/ui/icons/redx-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/ui/icons/redx-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/ui/icons/redx-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/ui/icons/redx.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

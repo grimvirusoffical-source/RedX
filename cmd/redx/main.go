@@ -25,7 +25,8 @@ type globals struct {
 
 func (g *globals) bind(fs *flag.FlagSet) {
 	fs.StringVar(&g.addr, "addr", envOr("REDX_ADDR", "http://127.0.0.1:7777"), "redxd address (env REDX_ADDR)")
-	fs.StringVar(&g.key, "key", os.Getenv("REDX_KEY"), "API key (prefer env REDX_KEY: flags are visible in process lists)")
+	g.key = os.Getenv("REDX_KEY") // never shown by -h
+	host.SecretVar(fs, &g.key, "key", "API key (prefer env REDX_KEY: flags are visible in process lists)", "$REDX_KEY")
 	fs.StringVar(&g.pin, "pin", os.Getenv("REDX_PIN"), "sha256 fingerprint of the server's TLS certificate (for self-signed certs)")
 	fs.BoolVar(&g.insecure, "insecure", false, "skip TLS verification (NOT recommended; use --pin)")
 	fs.StringVar(&g.db, "db", envOr("REDX_DB", ""), "database name (default: the server's default db)")
@@ -99,6 +100,8 @@ func main() {
 		cmdSec(args)
 	case "node":
 		cmdNode(args)
+	case "preset":
+		cmdPreset(args)
 	case "backup":
 		cmdBackup(args)
 	case "restore":
@@ -134,6 +137,8 @@ func usage() {
   redx sec show | put FILE|- | rm                                        .red-xai-sec access policy
   redx pulse put FILE | get | rm | subscribe [--topic P] [--changes]
   redx node token | join ADDR --token T | status | promote | repoint ADDR --token T
+  redx preset ls | show NAME [--diff] | apply NAME [--dry-run] [--set key=value] [--join LINK]
+                                           settings profiles (Server, VPS, Website, App, Game, Edge, Dev, Cluster, Backup, All)
   redx backup --out FILE [--offline]      redx restore FILE [--force]
   redx doctor [--config FILE]
   redx version | --version
@@ -215,7 +220,7 @@ func cmdKey(args []string) {
 		if g.offline {
 			ks := openOfflineKS(&g)
 			for _, r := range ks.List() {
-				views = append(views, client.KeyViewAlias{ID: r.ID, Scope: r.Scope, DB: r.DB, Prefix: r.Prefix, Label: r.Label, Created: r.Created, Expires: r.Expires, Revoked: r.Revoked, Status: statusOf(r)})
+				views = append(views, client.KeyViewAlias{ID: r.ID, Scope: r.Scope, DB: r.DB, Prefix: r.Prefix, Label: r.Label, Created: r.Created, Expires: r.Expires, Revoked: r.Revoked, RateRPS: r.RateRPS, RateBurst: r.RateBurst, Status: statusOf(r)})
 			}
 		} else {
 			var out struct {
@@ -284,6 +289,10 @@ func cmdKey(args []string) {
 				die("%v", err)
 			}
 			key, id = out.Key, out.ID
+		}
+		if g.asJSON {
+			json.NewEncoder(os.Stdout).Encode(map[string]string{"key": key, "id": id, "replaces": pos[0]})
+			return
 		}
 		fmt.Printf("%s\n\nnew key id: %s (replaces %s). Shown ONCE.\n", key, id, pos[0])
 	default:
@@ -437,7 +446,21 @@ func cmdNode(args []string) {
 	nodeID := fs.String("node-id", "", "node id (default: persisted id in the data dir)")
 	ttl := fs.Int("ttl", 900, "token: lifetime in seconds")
 	local := fs.String("local", "", "join: instead of editing the data dir, tell the running local redxd (use with --key of the local node)")
+	leaderPin := fs.String("leader-pin", "", "repoint / join --local: SHA-256 fingerprint of the NEW leader's TLS certificate (self-signed); --pin is for --addr")
+	fs.StringVar(leaderPin, "fingerprint", "", "alias of --leader-pin")
 	pos := parse(fs, args)
+	// A join link (https://host:7777/#/join?c=CODE&pin=FP) carries the leader, a code and its pin: accept it anywhere.
+	if (sub == "repoint" || sub == "join") && len(pos) == 1 && strings.Contains(pos[0], "#/join") {
+		if sp, err := host.ParseJoin(pos[0]); err == nil {
+			pos[0] = sp.Leader
+			if *token == "" {
+				*token = sp.Secret
+			}
+			if *leaderPin == "" {
+				*leaderPin = sp.Pin
+			}
+		}
+	}
 	switch sub {
 	case "token":
 		var out struct {
@@ -449,7 +472,11 @@ func cmdNode(args []string) {
 		if err := g.client().JSON(c, "POST", "/v1/cluster/join-token", map[string]int{"ttl_seconds": *ttl}, &out); err != nil {
 			die("%v", err)
 		}
-		fmt.Printf("%s\n\nsingle-use join token, expires %s.\nOn the new node:  redx node join %s --token <token> --advertise http://<this-node-ip>:7777\n", out.Token, out.Expires, g.addr)
+		hint := fmt.Sprintf("redx node join %s --token <token> --advertise http://<this-node-ip>:7777", g.addr)
+		if strings.HasPrefix(g.addr, "https://") {
+			hint = fmt.Sprintf("redx node join %s --token <token> --pin <this host's fingerprint> --advertise https://<this-node-ip>:7777", g.addr)
+		}
+		fmt.Printf("%s\n\nsingle-use join token, expires %s.\nOn the new node:  %s\n", out.Token, out.Expires, hint)
 	case "join":
 		if len(pos) != 1 || *token == "" {
 			die("usage: redx node join LEADER_ADDR --token T [--advertise URL] [--data-dir DIR] [--pin SHA256]")
@@ -462,7 +489,7 @@ func cmdNode(args []string) {
 			c, cancel := ctx()
 			defer cancel()
 			loc := client.New(*local, g.key, g.pin, g.insecure)
-			body := map[string]string{"url": leader, "join_token": *token, "pin_sha256": g.pin}
+			body := map[string]string{"url": leader, "join_token": *token, "pin_sha256": *leaderPin}
 			if err := loc.JSON(c, "POST", "/v1/cluster/leader", body, nil); err != nil {
 				die("%v", err)
 			}
@@ -507,6 +534,9 @@ func cmdNode(args []string) {
 		if cs.LastError != "" {
 			fmt.Println("last error:", cs.LastError)
 		}
+		if cs.Fenced != nil {
+			fmt.Printf("FENCED: node %s was promoted in this node's place (%s); writes are refused. Repoint: redx node repoint %s --token T\n", cs.Fenced.By, cs.Fenced.At, cs.Fenced.LeaderURL)
+		}
 		tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 		fmt.Fprintln(tw, "NODE\tROLE\tADDR\tHEALTHY\tACKED\tLAG\tLAST SEEN")
 		for _, m := range cs.Members {
@@ -520,10 +550,19 @@ func cmdNode(args []string) {
 		if err := g.client().JSON(c, "POST", "/v1/cluster/promote", nil, &out); err != nil {
 			die("%v", err)
 		}
-		fmt.Printf("promoted: %v\nWARNING: acknowledged writes the old leader had not replicated are lost. Now repoint the other nodes: redx node repoint <this-addr> --token <token from `redx node token`>\n", out)
+		if g.asJSON {
+			json.NewEncoder(os.Stdout).Encode(out)
+			return
+		}
+		fmt.Printf("promoted: this node is now the leader (replication id %v, offset %v).\n", out["replication_id"], out["offset"])
+		if n, _ := out["note"].(string); n != "" {
+			fmt.Println("note:", n)
+		}
+		fmt.Println("WARNING: acknowledged writes the old leader had not replicated are lost. The old leader is told to stop taking writes as soon")
+		fmt.Println("as it is reachable. Repoint the other nodes: redx node repoint <this-addr> --token <token from `redx node token`> [--leader-pin <this node's fingerprint>]")
 	case "repoint":
 		if len(pos) != 1 {
-			die("usage: redx node repoint NEW_LEADER_ADDR --token T   (run against the node to be repointed via --addr/--key)")
+			die("usage: redx node repoint NEW_LEADER_ADDR --token T [--leader-pin SHA256]   (or a join link; run against the node to be repointed via --addr/--key/--pin)")
 		}
 		nl := pos[0]
 		if !strings.Contains(nl, "://") {
@@ -531,7 +570,7 @@ func cmdNode(args []string) {
 		}
 		c, cancel := ctx()
 		defer cancel()
-		if err := g.client().JSON(c, "POST", "/v1/cluster/leader", map[string]string{"url": nl, "join_token": *token}, nil); err != nil {
+		if err := g.client().JSON(c, "POST", "/v1/cluster/leader", map[string]string{"url": nl, "join_token": *token, "pin_sha256": *leaderPin}, nil); err != nil {
 			die("%v", err)
 		}
 		fmt.Println("node now follows", nl)

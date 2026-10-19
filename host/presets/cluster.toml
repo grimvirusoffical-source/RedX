@@ -1,0 +1,36 @@
+name = "cluster"
+title = "Cluster node"
+order = 8
+summary = "Join an existing RedX host as a follower so your data is copied to this device."
+audience = "A second or third machine for a leader you already run"
+guidance = [
+  "On the leader, open Add a device and create a join code (valid 10 minutes, single use).",
+  "On this device run: redxd run --preset cluster --join <link from the leader>. The node redeems the code once, stores its own secret and starts replicating.",
+  "Static clusters (docker-compose) can share cluster_secret instead of a join code. Treat that secret like an admin key.",
+  "Clients may talk to any node: reads are answered locally, writes are forwarded to the leader.",
+]
+warnings = [
+  "Replication is asynchronous. If the leader fails and you promote a follower, writes it had acknowledged but not yet replicated are lost (docs/hosting.md).",
+]
+
+[settings]
+listen = "0.0.0.0:7777"
+tls = "auto"
+role = "follower"
+engine_durability = "group"
+heartbeat_seconds = 3
+rate_limit_rps = 100
+log_level = "info"
+
+[why]
+listen = "The leader and clients need to reach this node over the network."
+tls = "Node-to-node traffic carries data and key hashes, so it must be encrypted on anything but a fully trusted network. The leader pins this node by fingerprint."
+role = "Starts as a follower of the leader named in the join link. Promotion to leader is a deliberate manual step."
+engine_durability = "group flushes writes to disk with shared flushes, the same safe default as the leader."
+heartbeat_seconds = "How often this node reports to the leader. 3 seconds is the built-in default."
+rate_limit_rps = "The built-in per-key default of 100 requests per second."
+log_level = "info is the normal level: start-up, replication and error messages. Today the only other value that changes anything is quiet, which turns logging off."
+
+[[files]]
+name = "default.red-xai.db"
+note = "Copied from the leader. Do not write here directly: writes are forwarded."

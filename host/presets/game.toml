@@ -1,0 +1,50 @@
+name = "game"
+title = "Game"
+order = 5
+summary = "Game back end (Vocal Hero style): hot counters, many small writes and leaderboards."
+audience = "Online game with players, scores and live state"
+guidance = [
+  "Put counters and live state in .red-xai-db-qs-ls files and permanent player data in .red-xai.db files. Spread hot writes across several files: each file has one write lock.",
+  "Define an index on the score field to read leaderboards quickly instead of scanning every player.",
+]
+warnings = []
+
+[settings]
+listen = "0.0.0.0:7777"
+tls = "auto"
+engine_durability = "group"
+engine_default_ttl = 86400
+rate_limit_rps = 1000
+rate_limit_burst = 2000
+audit_success = false
+log_level = "info"
+role = "leader"
+
+[why]
+listen = "Game clients and game servers connect over the network."
+tls = "Keeps player keys and data private on the network. Game servers should pin the fingerprint."
+engine_durability = "group is the setting that scales with concurrent writers: docs/benchmarks.md measured group commit at 13.4k/s for one writer and 248k/s with 64 writers on one disk (qs-ls: 268k/s at 64). async measured 738k/s for one writer on the same disk, but loses up to 10 ms of acknowledged writes in a crash, so it is not the default here."
+engine_default_ttl = "Counter and session writes with no TTL expire after 24 hours rather than being rejected, so forgotten temporary data cleans itself up."
+rate_limit_rps = "1000 requests per second per key: a game server key makes many calls. Give game clients their own much lower-limited keys."
+rate_limit_burst = "Allows 2000-request bursts, for example when a match ends and every score is saved at once."
+audit_success = "Off: with this much traffic a success log would be huge."
+log_level = "info is the normal level: start-up, replication and error messages. Today the only other value that changes anything is quiet, which turns logging off."
+role = "leader means this host accepts writes. Other hosts can follow it later; nothing changes until you add a follower."
+
+[[files]]
+name = "players.red-xai.db"
+box = "Player"
+note = "Permanent player records."
+[[files]]
+name = "counters.red-xai-db-qs-ls"
+box = "Counter"
+ttl_seconds = 86400
+note = "Hot counters. Recorded in memory, journaled so they survive a restart."
+[[files]]
+name = "matches.red-xai-db-qs"
+box = "Match"
+ttl_seconds = 7200
+note = "Live match state that expires."
+[[files]]
+name = "scores.red-xai-db-idx"
+note = "A range index on Player.Score for the leaderboard (define it on the Security / Rules / Code page or with redx idx define)."

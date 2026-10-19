@@ -31,9 +31,18 @@ func (h *Host) Serve(ctx context.Context, ln net.Listener) error {
 	}
 	srv := &http.Server{Handler: h.mux, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, TLSConfig: tcfg}
 	scheme := "http"
+	h.runMu.Lock()
+	h.listenAt, h.scheme, h.tlsFP = ln.Addr().String(), "http", ""
+	if tcfg != nil {
+		h.scheme, h.tlsFP = "https", fp
+	}
+	h.runMu.Unlock()
 	if tcfg != nil {
 		scheme = "https"
 		h.Logf("TLS enabled (%s); certificate sha256 fingerprint: %s", h.Cfg.TLS, fp)
+		if ci := h.certInfo(); !ci.Healthy() {
+			h.Logf("WARNING: %s", ci.Message)
+		}
 	} else if !IsLoopbackAddr(ln.Addr().String()) {
 		h.Logf("WARNING: listening on %s WITHOUT TLS; API keys and data cross the network in clear text. Use tls=auto or a reverse proxy.", ln.Addr())
 	}
@@ -62,4 +71,15 @@ func (h *Host) Serve(ctx context.Context, ln net.Listener) error {
 		return serr
 	}
 	return nil
+}
+
+// certInfo judges the certificate being served right now ("ok" with no message when TLS is off).
+func (h *Host) certInfo() CertInfo {
+	h.runMu.Lock()
+	f := h.tlsCertFile
+	h.runMu.Unlock()
+	if f == "" {
+		return CertInfo{State: "ok"}
+	}
+	return CertStatus(f, time.Now())
 }

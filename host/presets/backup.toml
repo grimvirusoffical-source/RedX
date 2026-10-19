@@ -1,0 +1,44 @@
+name = "backup"
+title = "Backup / Archive"
+order = 9
+summary = "Keeps data safe for a long time: every write on disk first, optional encrypted large files (needs a master key you create), a full audit trail."
+audience = "Archive, long-term storage, backup target"
+needs = ["a master key file (redxd keygen) for encrypted packs"]
+guidance = [
+  "Create a master key once: redxd keygen --data-dir <data folder>. Back it up separately from the data. Without it encrypted packs cannot be read.",
+  "Add an {Encrypt[]} rule to a .red-xai-sec policy for the packs you want encrypted (the Raw editor and docs/box-grammar.md show the format).",
+  "Use Backups > Create backup regularly and copy the file to another machine.",
+]
+warnings = [
+  "Encrypted packs cannot be played or range-read as media. They are decrypted on the fly and are not seekable.",
+]
+
+[settings]
+listen = "127.0.0.1:7777"
+tls = "off"
+engine_durability = "sync"
+max_upload_mb = 4096
+rate_limit_rps = 50
+audit_success = true
+log_level = "info"
+role = "leader"
+
+[why]
+listen = "Loopback by default: archives are usually written by a local job. Use the Server preset's settings if other machines must upload."
+tls = "Off for loopback only. Turn tls on if you change listen to a network address."
+engine_durability = "sync flushes every write before acknowledging, the safest and slowest mode (docs/benchmarks.md: about 13.7k durable writes/s for one writer on one test disk)."
+max_upload_mb = "Allows single files up to 4 GB in a pack, for large archives."
+rate_limit_rps = "50 requests per second per key; archive jobs are few and large."
+audit_success = "Records every successful access so you can prove who read or wrote the archive."
+log_level = "info is the normal level: start-up, replication and error messages. Today the only other value that changes anything is quiet, which turns logging off."
+role = "leader means this host accepts writes. Other hosts can follow it later; nothing changes until you add a follower."
+
+[[files]]
+name = "archive.red-xai.db"
+note = "Metadata about archived items."
+[[files]]
+name = "vault.red-xai-pack"
+note = "Large files. Encrypt with a {Encrypt[]} rule (needs the master key)."
+[[files]]
+name = "policy.red-xai-sec"
+note = "Access and encryption policy."

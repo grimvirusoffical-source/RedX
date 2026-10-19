@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -57,9 +58,17 @@ func (h *Host) routes() http.Handler {
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, lim)
 		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Cache-Control", "no-store")
 		p := r.URL.Path
 		switch {
+		case isUIPath(p):
+			h.serveUI(w, r)
+		case strings.HasPrefix(p, "/v1/ui/"):
+			h.uiRoute(w, r)
+		case strings.HasPrefix(p, "/v1/admin/") && p != "/v1/admin/backup":
+			h.adminRoute(w, r)
 		case p == "/healthz":
 			writeJSON(w, 200, map[string]interface{}{"status": "ok", "node": h.NodeID, "role": roleName(h.Cluster), "version": Version})
 		case p == "/v1/query", p == "/v1/bx", p == "/v1/bx/watch", p == "/v1/stats", p == "/v1/subscribe", strings.HasPrefix(p, "/v1/path/"):
@@ -74,6 +83,10 @@ func (h *Host) routes() http.Handler {
 			h.dbRoute(w, r, name, sub)
 		case p == "/v1/dbs":
 			h.dbsRoute(w, r)
+		case p == "/v1/pair/exchange":
+			h.pairExchange(w, r)
+		case strings.HasPrefix(p, "/v1/connect/"):
+			h.connectRoute(w, r)
 		case p == "/v1/keys" || strings.HasPrefix(p, "/v1/keys/"):
 			h.keysRoute(w, r)
 		case p == "/v1/admin/backup" && r.Method == "GET":
@@ -127,6 +140,10 @@ func (h *Host) dbRoute(w http.ResponseWriter, r *http.Request, db, sub string) {
 		h.statsHandler(w, r, db)
 	case sub == "subscribe" && r.Method == "GET":
 		h.subscribeHandler(w, r, db)
+	case sub == "" && r.Method == "DELETE":
+		h.dropDBHandler(w, r, db)
+	case sub == "files" || strings.HasPrefix(sub, "files/"):
+		h.filesRoute(w, r, db, strings.TrimPrefix(strings.TrimPrefix(sub, "files"), "/"))
 	default:
 		if !h.extrasRoute(w, r, db, sub) {
 			writeErr(w, 404, "not found")
@@ -165,6 +182,10 @@ func readBody(r *http.Request) []byte {
 
 func (h *Host) maybeForward(w http.ResponseWriter, r *http.Request) bool {
 	if h.Cluster.IsLeader() {
+		if err := h.Cluster.WritableErr(); err != nil && r.Method != "GET" && r.Method != "HEAD" {
+			writeErr(w, 503, err.Error())
+			return true
+		}
 		return false
 	}
 	if h.Cluster.LeaderURL() == "" {
@@ -297,9 +318,18 @@ func (h *Host) writeAck(w http.ResponseWriter, r *http.Request, seq uint64) {
 func parsePut(r *http.Request) (string, SetOpts, error) {
 	var o SetOpts
 	q := r.URL.Query()
-	o.TTLSeconds, _ = strconv.Atoi(q.Get("ttl"))
+	var err error
+	if v := q.Get("ttl"); v != "" {
+		if o.TTLSeconds, err = strconv.Atoi(v); err != nil {
+			return "", o, errWrap(fmt.Sprintf("invalid ttl %q: use a whole number of seconds, for example ?ttl=60", v))
+		}
+	}
 	o.Sliding = q.Get("sliding") == "true" || q.Get("sliding") == "1"
-	o.CheckpointSeconds, _ = strconv.Atoi(q.Get("checkpoint"))
+	if v := q.Get("checkpoint"); v != "" {
+		if o.CheckpointSeconds, err = strconv.Atoi(v); err != nil {
+			return "", o, errWrap(fmt.Sprintf("invalid checkpoint %q: use a whole number of seconds", v))
+		}
+	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		return "", o, ErrInvalid
@@ -330,8 +360,11 @@ func parsePut(r *http.Request) (string, SetOpts, error) {
 	} else {
 		val = string(body)
 	}
-	if o.TTLSeconds < 0 || o.CheckpointSeconds < 0 || o.TTLSeconds > 10*365*86400 {
-		return "", o, errWrap("invalid ttl/checkpoint")
+	if o.TTLSeconds < 0 || o.TTLSeconds > 10*365*86400 {
+		return "", o, errWrap(fmt.Sprintf("invalid ttl %d: use a whole number of seconds from 1 up to 315360000 (ten years); omit it for no expiry", o.TTLSeconds))
+	}
+	if o.CheckpointSeconds < 0 {
+		return "", o, errWrap(fmt.Sprintf("invalid checkpoint %d: use a whole number of seconds, 0 or more", o.CheckpointSeconds))
 	}
 	if o.Sliding && o.TTLSeconds == 0 {
 		return "", o, errWrap("sliding requires ttl")
@@ -505,6 +538,8 @@ func (h *Host) keysRoute(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		writeJSON(w, 200, map[string]interface{}{"keys": out})
+	case rest == "pairing" && r.Method == "POST":
+		h.pairingIssue(w, r, pr)
 	case rest == "" && r.Method == "POST":
 		var req createKeyReq
 		if json.Unmarshal(readBody(r), &req) != nil {
@@ -620,6 +655,12 @@ func (h *Host) clusterRoute(w http.ResponseWriter, r *http.Request) {
 		if pr, ok := h.authz(w, r, ScopeAdmin, AllDBs, "", true); ok {
 			c.handlePromote(w, r, pr)
 		}
+	case "superseded":
+		if r.Method != "POST" {
+			writeErr(w, 405, "method not allowed")
+			return
+		}
+		c.handleSuperseded(w, r)
 	case "leader":
 		if r.Method != "POST" {
 			writeErr(w, 405, "method not allowed")

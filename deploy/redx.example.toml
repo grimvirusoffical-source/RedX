@@ -1,7 +1,11 @@
 # redxd configuration. Every key is optional; defaults shown.
-# Precedence: defaults < this file < REDX_* environment < command line flags.
+# Precedence: defaults < preset < this file < REDX_* environment < command line flags.
+# The web console (open the listen address in a browser) can create this file for you: Presets page.
 
-# data_dir = "/var/lib/redx"          # Windows: C:\ProgramData\RedX\data ; macOS: /usr/local/var/redx
+# preset = "server"                   # server | vps | website | app | game | edge | dev | cluster | backup | all   (redx preset show NAME)
+# bootstrap = "auto"                  # first admin key: auto | web (browser, loopback only) | console (printed once) | off
+
+# data_dir = "/var/lib/redx"          # Windows (user): %LOCALAPPDATA%\RedX\data ; macOS (user): ~/Library/Application Support/RedX/data
 listen = "127.0.0.1:7777"             # loopback by default. For other devices use 0.0.0.0:7777 AND tls = "auto"
 # tls = "off"                         # off | auto (self-signed, printed fingerprint) | files
 # tls_cert = "/etc/redx/cert.pem"

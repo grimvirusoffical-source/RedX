@@ -30,7 +30,7 @@ async function startHost() {
   const dataDir = path.join(tmp, 'data');
   // minimal environment: no inherited REDX_* settings or keys
   const env = { PATH: process.env.PATH, HOME: tmp };
-  const child = spawn(bin, ['run', '--data-dir', dataDir, '--listen', `127.0.0.1:${port}`], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(bin, ['run', '--no-open', '--bootstrap', 'console', '--data-dir', dataDir, '--listen', `127.0.0.1:${port}`], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
   let adminKey = null;
   child.stdout.on('data', (d) => {

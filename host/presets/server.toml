@@ -1,0 +1,38 @@
+name = "server"
+title = "Server"
+order = 1
+summary = "A dedicated machine, home server or office box that other devices on your network talk to."
+audience = "Always-on computer on a trusted LAN"
+guidance = [
+  "Open the port (7777) only on your private network. Do not forward it from your router to the internet.",
+  "Other devices reach it at https://<this-machine's-LAN-IP>:7777. The certificate is self-signed: the console shows its fingerprint so clients can pin it.",
+]
+warnings = [
+  "Binding to 0.0.0.0 means anything that can reach this machine can try to log in. API keys are the only gate, so keep the host off the public internet.",
+]
+
+[settings]
+listen = "0.0.0.0:7777"
+tls = "auto"
+engine_durability = "group"
+rate_limit_rps = 200
+rate_limit_burst = 400
+keystore_encrypt = false
+audit_success = false
+log_level = "info"
+role = "leader"
+
+[why]
+listen = "Listens on every network interface so phones, laptops and other nodes on your LAN can connect. The built-in default is loopback only."
+tls = "Turns on a self-signed certificate so API keys are not sent in clear text across your network. Clients pin its fingerprint."
+engine_durability = "group means a write is acknowledged only after it is flushed to disk, and concurrent writes share one flush. docs/benchmarks.md measured about 13.4k durable writes/s for one writer and 248k/s with 64 concurrent writers on one test disk; your disk will differ."
+rate_limit_rps = "Each key may make 200 requests per second by default (the built-in default is 100). Raise it if a single trusted app needs more; individual keys can override it."
+rate_limit_burst = "Allows short bursts up to twice the per-second rate before requests are slowed down."
+keystore_encrypt = "Left off because encrypting the key file needs a passphrase typed or stored in an environment variable on every start, which an unattended server cannot do safely. Turn it on if you can supply REDX_KEYSTORE_PASSPHRASE."
+audit_success = "Only failures and denials are written to the audit log, which keeps the log small. Turn it on to also record every successful login."
+log_level = "info is the normal level: start-up, replication and error messages. Today the only other value that changes anything is quiet, which turns logging off."
+role = "leader means this host accepts writes. Other hosts can follow it later; nothing changes until you add a follower."
+
+[[files]]
+name = "default.red-xai.db"
+note = "General data. Created automatically the first time you write a record."

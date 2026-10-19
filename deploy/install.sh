@@ -55,6 +55,59 @@ write_conf() { # $1=path $2=data_dir
   chmod 640 "$1" 2>/dev/null || true
 }
 
+# URL a browser on THIS machine uses for the web console (0.0.0.0 / empty host -> 127.0.0.1)
+console_url() {
+  SCHEME=http; [ "$TLS" = off ] || SCHEME=https
+  PORT="${LISTEN##*:}"; H="${LISTEN%:*}"
+  case "$H" in ""|0.0.0.0|"::"|"[::]") H=127.0.0.1;; esac
+  echo "$SCHEME://$H:$PORT/"
+}
+
+# Optional launcher so the console can be opened from the app menu / Launchpad. Best effort, never fatal.
+# $1 = "user" or "system". Needs redx.svg / redx.icns next to the binaries (the release archives ship them).
+install_launcher() {
+  URL=$(console_url)
+  if [ "$OS" = linux ]; then
+    if [ "$1" = user ]; then APPS="${HOME}/.local/share/applications"; ICONS="${HOME}/.local/share/icons/hicolor/scalable/apps"
+    else APPS=/usr/share/applications; ICONS=/usr/share/icons/hicolor/scalable/apps; fi
+    mkdir -p "$APPS" "$ICONS" 2>/dev/null || return 0
+    OPEN_CMD="xdg-open $URL"; [ -x "$BIN/redx-launcher" ] && OPEN_CMD="$BIN/redx-launcher"  # starts the host if it is not running
+    [ -f "$FROM/redx.svg" ] && cp "$FROM/redx.svg" "$ICONS/redx.svg" 2>/dev/null || true
+    cat > "$APPS/redx-console.desktop" <<EOF2 2>/dev/null || return 0
+[Desktop Entry]
+Type=Application
+Name=RedX Console
+Comment=Open the RedX web console in your browser
+Exec=$OPEN_CMD
+Icon=redx
+Terminal=false
+Categories=Development;Database;
+EOF2
+    echo "added a 'RedX Console' launcher to the application menu"
+  else
+    APPDIR=/Applications; [ "$1" = user ] && APPDIR="${HOME}/Applications"
+    APP="$APPDIR/RedX Console.app"
+    mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" 2>/dev/null || return 0
+    [ -f "$FROM/redx.icns" ] && cp "$FROM/redx.icns" "$APP/Contents/Resources/redx.icns" 2>/dev/null || true
+    cat > "$APP/Contents/Info.plist" <<EOF2
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleName</key><string>RedX Console</string>
+<key>CFBundleIdentifier</key><string>com.redx.console</string>
+<key>CFBundleExecutable</key><string>redx-console</string>
+<key>CFBundleIconFile</key><string>redx</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleShortVersionString</key><string>1.0</string>
+<key>LSUIElement</key><true/>
+</dict></plist>
+EOF2
+    printf '#!/bin/sh\nexec /usr/bin/open "%s"\n' "$URL" > "$APP/Contents/MacOS/redx-console"
+    chmod 755 "$APP/Contents/MacOS/redx-console"
+    echo "added '$APP' (opens the console in your browser)"
+  fi
+}
+
 make_admin_key() { # $1=data dir ; remaining: command prefix (e.g. runuser -u redx --)
   D="$1"; shift
   if [ "$ROLE" = follower ]; then echo "follower node: keys come from the leader; skipping admin key"; return; fi
@@ -69,10 +122,15 @@ if [ "$USERMODE" = 1 ]; then
   BIN="${HOME}/.local/bin"; DATA="${HOME}/.redx/data"; CONF="${HOME}/.redx/redx.toml"
   mkdir -p "$BIN" "$DATA"; chmod 700 "$DATA"
   cp "$FROM/redxd" "$FROM/redx" "$BIN/"
+  [ -f "$FROM/redx-launcher" ] && cp "$FROM/redx-launcher" "$BIN/"
   write_conf "$CONF" "$DATA"
   make_admin_key "$DATA"
+  install_launcher user || true
   echo "installed to $BIN. Start the host with:"
   echo "   $BIN/redxd run --config $CONF"
+  echo
+  echo "Then open the web console:  $(console_url)     (or run:  $BIN/redxd open --config $CONF)"
+  echo "Everything - databases, data, queries, keys, devices, backups - can be done there; the terminal is optional."
   case ":$PATH:" in *":$BIN:"*) ;; *) echo "(add $BIN to your PATH)";; esac
   exit 0
 fi
@@ -81,6 +139,7 @@ fi
 BIN="$PREFIX/bin"
 install -d "$BIN"
 install -m 0755 "$FROM/redxd" "$FROM/redx" "$BIN/"
+[ -f "$FROM/redx-launcher" ] && install -m 0755 "$FROM/redx-launcher" "$BIN/"
 
 if [ "$OS" = linux ]; then
   DATA=/var/lib/redx; CONF=/etc/redx/redx.toml
@@ -125,5 +184,9 @@ else
     fi
   fi
 fi
+install_launcher system || true
+echo
+echo "Open the web console in your browser:  $(console_url)"
+echo "  (everything can be done there; the terminal is optional. Paste the admin key above to sign in.)"
 echo
 echo "Done. Check:  REDX_KEY=<your admin key> redx doctor     and     curl http://127.0.0.1:7777/healthz"

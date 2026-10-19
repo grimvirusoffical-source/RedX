@@ -36,7 +36,7 @@ func startDaemon(t *testing.T, dir string, extraCfg string) (addr, key string, s
 	t.Helper()
 	addr = freeAddr(t)
 	cfgPath := filepath.Join(dir, "redx.toml")
-	writeFile(t, cfgPath, "data_dir = '"+filepath.ToSlash(dir)+"'\nlisten = '"+addr+"'\nlog_level = 'quiet'\nargon_memory_kib = 64\nargon_time = 1\n"+extraCfg)
+	writeFile(t, cfgPath, "data_dir = '"+filepath.ToSlash(dir)+"'\nlisten = '"+addr+"'\nlog_level = 'quiet'\nargon_memory_kib = 64\nargon_time = 1\nbootstrap = 'console'\n"+extraCfg)
 	rd, wr, _ := os.Pipe()
 	old := os.Stdout
 	os.Stdout = wr

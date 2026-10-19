@@ -1,0 +1,77 @@
+# CI: build, vet, test and smoke-test RedX on Linux, Windows, macOS (Apple silicon) and macOS (Intel).
+# Runs on pull requests to main and can be started from the Actions tab ("Run workflow").
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      race:
+        description: "Run go test with the race detector"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-amd64,   os: ubuntu-latest }
+          - { name: windows-amd64, os: windows-latest }
+          - { name: macos-arm64,   os: macos-latest }
+          - { name: macos-intel,   os: macos-15-intel }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # Windows checks out with CRLF by default, which breaks gofmt and embedded-file tests.
+      - name: Keep LF line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Go version
+        run: go version && go env GOOS GOARCH
+      - name: gofmt
+        run: |
+          out="$(gofmt -l . || true)"
+          if [ -n "$out" ]; then echo "gofmt needed:"; echo "$out"; exit 1; fi
+      - name: go vet
+        run: go vet ./...
+      - name: go test
+        run: |
+          if [ "${{ github.event_name != 'workflow_dispatch' || inputs.race }}" = "true" ]; then go test -race -count=1 -timeout 15m ./...; else go test -count=1 -timeout 15m ./...; fi
+      - name: Build binaries
+        run: |
+          mkdir -p bin
+          CGO_ENABLED=0 go build -trimpath -o bin/ ./cmd/redxd ./cmd/redx ./cmd/redx-launcher
+          ls -la bin
+      - name: SDK tests (JavaScript and Python, Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          export REDXD_BIN="$PWD/bin/redxd"
+          (cd sdk/js && npm test)
+          (cd sdk/python && python3 -m unittest discover -s tests -t .)
+      - name: Shell smoke tests and cluster smoke (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          scripts/smoke.sh bin
+          scripts/cluster-smoke.sh bin
+      - name: Console pages in headless Chrome, dark and light (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p /tmp/pw && (cd /tmp/pw && npm init -y >/dev/null && npm install --silent playwright-core)
+          PLAYWRIGHT_CORE=/tmp/pw/node_modules/playwright-core CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser)" \
+            node scripts/ui-pages-test.js "$PWD/bin/redxd" "$PWD/bin/redx"
+      - name: Smoke test (start redxd, admin key, set/get, TTL expiry, BoxQL, subscribe, hard kill, restart)
+        run: go run scripts/ci_smoke.go bin

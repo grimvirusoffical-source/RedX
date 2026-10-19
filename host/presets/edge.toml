@@ -1,0 +1,46 @@
+name = "edge"
+title = "Edge / Raspberry Pi / IoT"
+order = 6
+summary = "A small low-power device that keeps a nearby copy of the data. Runs as a follower."
+audience = "Raspberry Pi, mini PC, IoT gateway"
+guidance = [
+  "An edge node copies data from a leader. Use the leader's Add a device page to get a join code, then run: redxd run --preset edge --join <link>.",
+  "To run an edge device on its own (no leader), change role to leader in the file afterwards.",
+  "Use a good SD card or SSD: flash wear matters for databases.",
+]
+warnings = [
+  "async durability can lose up to 10 ms of acknowledged writes if the power is cut (docs/benchmarks.md). Do not use this for data you cannot re-send.",
+  "Lowering the key-hashing memory makes stolen key files cheaper to attack. Keep keys long (they are) and the device physically safe.",
+]
+
+[settings]
+listen = "0.0.0.0:7777"
+tls = "auto"
+role = "follower"
+engine_durability = "async"
+argon_memory_kib = 8192
+repl_log_max = 50000
+max_body_mb = 2
+max_upload_mb = 64
+heartbeat_seconds = 5
+rate_limit_rps = 50
+rate_limit_burst = 100
+log_level = "info"
+
+[why]
+listen = "Local devices on the same network read from this node."
+tls = "Encrypts traffic between devices on the network."
+role = "follower copies everything from the leader (asynchronously) and sends writes to the leader. If you want a standalone edge device, set role to leader afterwards."
+engine_durability = "async acknowledges before the disk flush, so a write does not wait for the disk (docs/benchmarks.md measured 738k/s for one writer on one test disk versus 13.7k/s with sync). The cost is losing up to 10 ms of acknowledged writes on a power cut (docs/benchmarks.md)."
+argon_memory_kib = "API key checks use 8 MiB instead of 19 MiB of memory while verifying a key, which helps on a 512 MB-1 GB board. It makes offline guessing of a stolen key file somewhat cheaper."
+repl_log_max = "Keeps 50,000 replication entries instead of 1,000,000, using less disk and memory. A node that is offline for longer than that catches up with a full snapshot instead."
+max_body_mb = "Requests larger than 2 MB are refused, so a single request cannot use up a small device's memory."
+max_upload_mb = "File uploads (packs) are limited to 64 MB each, for the same reason."
+heartbeat_seconds = "Checks in with the leader every 5 seconds instead of 3, to save a little power and bandwidth on a slow link."
+rate_limit_rps = "Per-key limit of 50 requests per second keeps a small CPU from being swamped."
+rate_limit_burst = "Lets a device send up to 100 requests at once, for example when it reconnects and flushes what it queued."
+log_level = "info is the normal level: start-up, replication and error messages. Today the only other value that changes anything is quiet, which turns logging off."
+
+[[files]]
+name = "default.red-xai.db"
+note = "Replicated from the leader."

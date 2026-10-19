@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/x509"
-	"encoding/pem"
 	"flag"
 	"fmt"
 	"net"
@@ -24,9 +22,42 @@ func cmdDoctor(args []string) {
 	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
 	g.bind(fs)
 	cfgFile := fs.String("config", os.Getenv("REDX_CONFIG"), "redxd config file to validate")
+	tlsMode := fs.String("tls", "", "the redxd --tls value, if you pass it as a flag (off|auto|files)")
+	tlsCert := fs.String("tls-cert", "", "the redxd --tls-cert file, if you pass it as a flag")
 	parse(fs, args)
 	var res []check
 	add := func(name, status, detail string) { res = append(res, check{name, status, detail}) }
+
+	// Which data directory? If --data-dir / REDX_DATA_DIR was not given and a daemon is answering, ask
+	// the daemon (needs --key) so we check the directory it really uses, not this machine's default.
+	explicitDD := os.Getenv("REDX_DATA_DIR") != ""
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "data-dir" {
+			explicitDD = true
+		}
+	})
+	daemonUp, ddFromDaemon, daemonStatus := false, false, false
+	var dstatus struct {
+		DataDir string        `json:"data_dir"`
+		TLS     string        `json:"tls"`
+		Cert    host.CertInfo `json:"tls_cert"`
+		Warning string        `json:"tls_warning"`
+	}
+	{
+		pc, pcancel := context.WithTimeout(context.Background(), 3*time.Second)
+		if st, _, _, err := client.New(g.addr, "", g.pin, g.insecure).Raw(pc, "GET", "/healthz", nil, nil); err == nil && st == http.StatusOK {
+			daemonUp = true
+			if g.key != "" {
+				if err := client.New(g.addr, g.key, g.pin, g.insecure).JSON(pc, "GET", "/v1/admin/status", nil, &dstatus); err == nil {
+					daemonStatus = true
+					if dstatus.DataDir != "" && !explicitDD {
+						g.dataDir, ddFromDaemon = dstatus.DataDir, true
+					}
+				}
+			}
+		}
+		pcancel()
+	}
 
 	add("platform", "ok", fmt.Sprintf("%s/%s go %s redx %s", runtime.GOOS, runtime.GOARCH, runtime.Version(), host.Version))
 
@@ -39,18 +70,33 @@ func cmdDoctor(args []string) {
 		} else {
 			add("config", "ok", *cfgFile)
 		}
-	} else if err := cfg.ApplyFile(filepath.Join(cfg.DataDir, "redx.toml"), false); err != nil {
-		add("config", "FAIL", err.Error())
-	} else {
-		add("config", "ok", "defaults (no redx.toml in data dir)")
+	} else if df := filepath.Join(cfg.DataDir, "redx.toml"); true {
+		if err := cfg.ApplyFile(df, false); err != nil {
+			add("config", "FAIL", err.Error())
+		} else if _, serr := os.Stat(df); serr == nil {
+			add("config", "ok", "loaded "+df)
+		} else {
+			add("config", "ok", "defaults (no redx.toml in the data dir "+cfg.DataDir+")")
+		}
 	}
 	_ = cfg.ApplyEnv(os.Getenv)
+	if *tlsMode != "" {
+		cfg.TLS = *tlsMode
+	}
+	if *tlsCert != "" {
+		cfg.TLSCert = *tlsCert
+		if *tlsMode == "" && cfg.TLS == "off" {
+			cfg.TLS = "files"
+		}
+	}
 	if err := cfg.Validate(); err != nil {
 		add("config valid", "FAIL", err.Error())
 	}
 
 	// data dir
-	if st, err := os.Stat(cfg.DataDir); err != nil {
+	if st, err := os.Stat(cfg.DataDir); err != nil && daemonUp && !ddFromDaemon && !explicitDD {
+		add("data dir", "info", fmt.Sprintf("a daemon is running at %s but its data directory is unknown (%s is only this machine's default); pass --key to ask the daemon, or --data-dir", g.addr, cfg.DataDir))
+	} else if err != nil {
 		add("data dir", "warn", fmt.Sprintf("%s does not exist yet (redxd creates it on first start)", cfg.DataDir))
 	} else if !st.IsDir() {
 		add("data dir", "FAIL", cfg.DataDir+" is not a directory")
@@ -60,7 +106,11 @@ func cmdDoctor(args []string) {
 			add("data dir", "FAIL", "not writable: "+err.Error())
 		} else {
 			os.Remove(tf)
-			add("data dir", "ok", cfg.DataDir+" (writable)")
+			src := " (writable)"
+			if ddFromDaemon {
+				src = " (the running daemon's directory, writable)"
+			}
+			add("data dir", "ok", cfg.DataDir+src)
 		}
 		if free, err := freeBytes(cfg.DataDir); err == nil {
 			s := "ok"
@@ -91,19 +141,38 @@ func cmdDoctor(args []string) {
 		} else {
 			add("keystore", "warn", "no keystore yet (created with the first admin key on first start)")
 		}
-		if cert := filepath.Join(cfg.DataDir, "tls", "cert.pem"); fileExists(cert) {
-			if b, _ := os.ReadFile(cert); b != nil {
-				if blk, _ := pem.Decode(b); blk != nil {
-					if c, err := x509.ParseCertificate(blk.Bytes); err == nil {
-						d := time.Until(c.NotAfter)
-						s := "ok"
-						if d < 30*24*time.Hour {
-							s = "warn"
-						}
-						add("tls cert", s, fmt.Sprintf("expires %s (%d days)", c.NotAfter.Format("2006-01-02"), int(d.Hours()/24)))
-					}
-				}
-			}
+	}
+
+	// TLS certificate: checked whenever the config names one, even before the data dir exists,
+	// and whatever way it was given (redx.toml, --config, env, or the redxd flags repeated here).
+	cert := filepath.Join(cfg.DataDir, "tls", "cert.pem")
+	if cfg.TLS == "files" && cfg.TLSCert != "" {
+		cert = cfg.TLSCert
+	}
+	if fileExists(cert) {
+		ci := host.CertStatus(cert, time.Now())
+		switch ci.State {
+		case "ok":
+			add("tls cert", "ok", fmt.Sprintf("%s expires %s (%d days)", cert, ci.NotAfter.Format("2006-01-02"), ci.DaysLeft))
+		case "expiring":
+			add("tls cert", "warn", ci.Message)
+		default:
+			add("tls cert", "FAIL", ci.Message)
+		}
+	} else if cfg.TLS == "files" {
+		add("tls cert", "FAIL", "tls=files but the certificate file "+cert+" does not exist")
+	}
+	// The running daemon knows the certificate it really serves (e.g. one passed as a redxd flag that
+	// doctor cannot see): report its own judgement too.
+	if daemonStatus && dstatus.TLS != "" && dstatus.TLS != "off" {
+		switch dstatus.Cert.State {
+		case "ok":
+			add("served tls cert", "ok", fmt.Sprintf("the daemon's certificate expires %s (%d days)", dstatus.Cert.NotAfter.Format("2006-01-02"), dstatus.Cert.DaysLeft))
+		case "expiring":
+			add("served tls cert", "warn", "the daemon reports: "+dstatus.Warning)
+		case "":
+		default:
+			add("served tls cert", "FAIL", "the daemon reports: "+dstatus.Warning)
 		}
 	}
 

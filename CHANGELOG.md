@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.4.3
+
+* Security: `redx` and `redxd` help output (`-h`) no longer prints secrets taken from the environment or `redx.toml` as flag defaults. `--key` shows "(currently set from $REDX_KEY)" and `--join` "(currently set from $REDX_JOIN or redx.toml)".
+* Clustering: a promoted node now fences the old leader. When the old leader is reachable it stops accepting writes (`503`, `FENCED` in `redx node status`) until it is repointed; the fence survives restarts. See [Clustering](docs/clustering.md#failover-promote-fencing-and-repoint).
+* `redx node repoint` and `redx node join --local` accept `--leader-pin` (alias `--fingerprint`) or a join link, so a node can follow a new leader that uses a self-signed certificate. A fenced old leader reuses the fingerprint it learned from the fence.
+* `redx doctor` checks the TLS certificate also before the data directory exists, accepts `--tls` / `--tls-cert`, and reports the certificate the running daemon serves.
+* `redx node status` no longer shows a stale "last error" after a successful promote.
+* Added the app connect handshake (`/v1/connect/*`): an app asks for its own workspace, the owner approves on a consent page in the console, and the app exchanges a one-time code plus its PKCE verifier for a key limited to that workspace. Apps can revoke their own key, and the console lists them under *Connected apps*. See [Connecting apps](docs/connect.md).
+
+## 0.4.2
+
+* Configuration precedence is now flags > environment > `redx.toml` > preset > defaults everywhere, and `<data dir>/redx.toml` is read when the data directory is given as a flag. Invalid `listen` / `advertise` values are refused before they are written.
+* An expired, not yet valid or soon-to-expire TLS certificate is reported at startup, in the admin status, in the console and by `redx doctor`.
+* The console's pages are tested in a headless browser in both themes.
+
+## 0.4.1
+
+* `redx doctor` checks the running daemon's data directory.
+* BoxQL `Get` refreshes sliding TTLs like REST reads; BoxQL on an unknown file returns a clear message.
+* Non-numeric or negative `ttl` values return a clear 400.
+* `redx key list --json` includes rate limits; `redx key rotate --json` prints JSON.
+* Failed BoxQL arithmetic in a write leaves the stored value unchanged.
+
+## 0.4.0
+
+* Added the web console served by `redxd` on its own port: dashboard, data browser, BoxQL editor, keys, devices, cluster, settings, help, light and dark themes, installable as an app (PWA).
+* First admin key from the console for a visitor on the same machine (`bootstrap` setting).
+* Added presets (`--preset`, `redx preset`) and sign-in and join pairing codes with QR codes; `redxd join` adds a node from a link.
+* Desktop installers: Windows setup, macOS `.dmg` / `.pkg`, Debian `.deb` (unsigned), and a launcher that starts the host and opens the console.
+
 ## 0.3.0
 
 * Added **BoxQL**, the RedX query and command language, written in the Box grammar: `Get`, `Add`, `Set`, `Delete`, `Require`, `Tx`, `Explain` and `Watch`, with `$name` parameters. Served at `POST /v1/bx` and `/v1/db/{db}/bx`, with a WebSocket watch at `bx/watch`. Available as `redx bx` and as `bx()` and `watch()` in the JavaScript and Python SDKs.

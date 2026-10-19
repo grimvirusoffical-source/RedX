@@ -130,14 +130,15 @@ func infoOf(st Stmt, names []string) Info {
 }
 
 type run struct {
-	db      *DB
-	ctx     context.Context
-	az      *authz
-	lim     Limits
-	params  []box.Value
-	scanned int
-	ticks   int
-	jr      *journal
+	db       *DB
+	ctx      context.Context
+	az       *authz
+	lim      Limits
+	params   []box.Value
+	scanned  int
+	ticks    int
+	jr       *journal
+	arithErr error // first numeric failure (division by zero, overflow) seen while evaluating a write
 }
 
 // bindParams maps the caller's named values onto the $names of the query. Every $name must be
@@ -499,7 +500,15 @@ func (r *run) eval(e Expr, t tuple) box.Value {
 			}
 			return box.Bool(c >= 0)
 		}
-		return arith(x.Op, a, b)
+		v := arith(x.Op, a, b)
+		if v.IsNell() && a.Kind == box.KindNumber && b.Kind == box.KindNumber && r.arithErr == nil {
+			if x.Op == "/" && b.Num == 0 {
+				r.arithErr = fmt.Errorf("%w: division by zero", ErrType)
+			} else {
+				r.arithErr = fmt.Errorf("%w: arithmetic overflow in %s", ErrType, x.Op)
+			}
+		}
+		return v
 	case *In:
 		v := r.eval(x.X, t)
 		for _, it := range r.inVals(x, t) {
@@ -564,6 +573,9 @@ func (r *run) resolveFile(name, boxName string, act sec.Action, forWrite bool) (
 	}
 	if forWrite && strings.Contains(name, ".red-xai") {
 		return name, nil // a new file named in full: the store decides whether it can be created
+	}
+	if forWrite {
+		return "", fmt.Errorf("%w: %q (to create a new file, write its full name in quotes, for example \"%s.red-xai.db\":%s[ID=1])", ErrNoFile, name, name, boxName)
 	}
 	return "", fmt.Errorf("%w: %q", ErrNoFile, name)
 }

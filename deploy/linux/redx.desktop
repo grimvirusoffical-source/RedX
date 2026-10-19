@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=RedX
+GenericName=Database host
+Comment=Start the RedX host and open the web console
+Exec=redx-launcher
+Icon=redx
+Terminal=false
+Categories=Development;Database;

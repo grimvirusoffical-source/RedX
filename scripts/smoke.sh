@@ -11,9 +11,26 @@ code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
 
 "$BIN/redxd" keygen --data-dir "$D" --id smoke-key >/dev/null && ok "redxd keygen wrote master.key (mode $(stat -c %a "$D/master.key"))" || bad "keygen"
 [ "$(stat -c %a "$D/master.key")" = 600 ] || bad "master.key is not mode 600"
-"$BIN/redxd" run --data-dir "$D" --code-allowed-boxes 'players.red-xai.db:Player' --listen "127.0.0.1:$PORT" > "$D/out.txt" 2>&1 & PID=$!
+"$BIN/redxd" run --no-open --bootstrap console --data-dir "$D" --code-allowed-boxes 'players.red-xai.db:Player' --listen "127.0.0.1:$PORT" > "$D/out.txt" 2>&1 & PID=$!
 for i in $(seq 1 50); do curl -sf "$URL/healthz" >/dev/null && break; sleep 0.1; done
 curl -sf "$URL/healthz" >/dev/null && ok "healthz" || { bad "daemon did not start"; cat "$D/out.txt"; exit 1; }
+
+# ---- web console served by redxd (embedded; no network, no CDN) ----
+HDR=$(curl -sD - -o "$D/index.html" "$URL/")
+echo "$HDR" | head -1 | grep -q 200 && grep -q '<title>' "$D/index.html" && ok "GET / serves the console" || bad "console index"
+echo "$HDR" | grep -qi '^content-security-policy:.*script-src .self.' && ok "console CSP header (script-src 'self')" || bad "CSP header"
+echo "$HDR" | grep -qi '^x-frame-options: DENY' && ok "X-Frame-Options DENY" || bad "X-Frame-Options"
+echo "$HDR" | grep -qi '^referrer-policy: no-referrer' && ok "Referrer-Policy no-referrer" || bad "Referrer-Policy"
+grep -qiE '<script(\s[^>]*)?>[^<]' "$D/index.html" && bad "inline script in console index" || ok "no inline script in the console index"
+grep -qiE 'https?://[a-z0-9.-]+\.(com|net|org|io|dev)' "$D/index.html" && bad "console index references an external host" || ok "console index loads nothing from the network"
+[ "$(code "$URL/ui/")" = 200 ] && ok "/ui/ serves the console too" || bad "/ui/"
+[ "$(code "$URL/ui/js/main.js")" = 200 ] && [ "$(code "$URL/ui/css/app.css")" = 200 ] && ok "console JS and CSS assets" || bad "console assets"
+curl -s "$URL/ui/manifest.webmanifest" | grep -q '"icons"' && ok "PWA manifest with icons" || bad "manifest"
+[ "$(code "$URL/ui/sw.js")" = 200 ] && ok "service worker served" || bad "sw.js"
+[ "$(code "$URL/ui/docs/console.md")" = 200 ] && ok "help docs embedded" || bad "docs"
+[ "$(code "$URL/ui/js/pages/studio.js")" = 200 ] && [ "$(code "$URL/ui/js/pages/shared.js")" = 200 ] && ok "lazy page modules present" || bad "page modules"
+curl -s "$URL/v1/ui/bootstrap-status" | grep -q '"needsSetup":false' && ok "bootstrap-status: no web setup offered when the key was printed" || bad "bootstrap-status (console mode)"
+[ "$(code -X POST "$URL/v1/ui/bootstrap")" != 200 ] && ok "web bootstrap refused in console mode" || bad "bootstrap must be refused"
 
 ADMIN=$(grep -o 'rx_live_[0-9A-Za-z]*' "$D/out.txt" | head -1)
 [ -n "$ADMIN" ] && ok "bootstrap admin key printed once on console" || bad "no bootstrap key"
@@ -131,4 +148,20 @@ cat > "$D/game.red-xai-code" <<'EOF'
 EOF
 "$BIN/redx" code define game "$D/game.red-xai-code" >/dev/null && ok "code define" || bad "code define"
 "$BIN/redx" code run heal 'players.red-xai.db:Player[ID=1]' 3 2>/dev/null | grep -q 10 && ok "code run (sandboxed, AllowedBoxes)" || bad "code run"
+
+# ---- first-run web bootstrap (second instance, loopback only, key shown once, never in stdout) ----
+D2=$(mktemp -d); PORT2=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')
+URL2="http://127.0.0.1:$PORT2"
+"$BIN/redxd" run --no-open --bootstrap web --data-dir "$D2" --listen "127.0.0.1:$PORT2" > "$D2/out.txt" 2>&1 & PID2=$!
+trap 'kill $PID $PID2 2>/dev/null; wait 2>/dev/null; rm -rf "$D" "$D2"' EXIT
+for i in $(seq 1 50); do curl -sf "$URL2/healthz" >/dev/null && break; sleep 0.1; done
+curl -s "$URL2/v1/ui/bootstrap-status" | grep -q '"needsSetup":true' && ok "fresh host offers web setup on loopback" || bad "web setup not offered"
+grep -q 'rx_live_' "$D2/out.txt" && bad "web bootstrap printed a key to stdout" || ok "web bootstrap prints no key on stdout"
+BODY=$(curl -s -X POST -H 'Content-Type: application/json' --data '{}' "$URL2/v1/ui/bootstrap")
+WEBKEY=$(echo "$BODY" | grep -o 'rx_live_[0-9A-Za-z]*' | head -1)
+[ -n "$WEBKEY" ] && ok "web bootstrap created the first admin key (shown once)" || bad "web bootstrap: $BODY"
+[ "$(code -X POST -H 'Content-Type: application/json' --data '{}' "$URL2/v1/ui/bootstrap")" != 200 ] && ok "second web bootstrap refused" || bad "web bootstrap repeated"
+curl -s "$URL2/v1/ui/bootstrap-status" | grep -q '"needsSetup":false' && ok "setup no longer offered" || bad "setup still offered"
+[ "$(code -H "Authorization: Bearer $WEBKEY" "$URL2/v1/admin/status")" = 200 ] && ok "web-created key is a working admin key" || bad "web key"
+kill $PID2 2>/dev/null; wait $PID2 2>/dev/null
 exit $fail

@@ -39,7 +39,7 @@ class Host:
             self.url = f"http://127.0.0.1:{port}"
             env = {"PATH": os.environ.get("PATH", ""), "HOME": self.tmp}  # no inherited REDX_* settings
             self.proc = subprocess.Popen(
-                [binary, "run", "--data-dir", os.path.join(self.tmp, "data"), "--listen", f"127.0.0.1:{port}"],
+                [binary, "run", "--no-open", "--bootstrap", "console", "--data-dir", os.path.join(self.tmp, "data"), "--listen", f"127.0.0.1:{port}"],
                 env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
             self._out = ""
             self._pump_t = threading.Thread(target=self._pump, daemon=True)

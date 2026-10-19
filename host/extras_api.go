@@ -151,6 +151,8 @@ func (h *Host) extrasMapErr(w http.ResponseWriter, err error) {
 	switch {
 	case errors.As(err, &mbe), errors.Is(err, ErrTooLarge):
 		writeErr(w, http.StatusRequestEntityTooLarge, "request body too large")
+	case errors.Is(err, ErrNotFound) && err.Error() != ErrNotFound.Error() && strings.HasPrefix(err.Error(), "query: "):
+		writeErr(w, http.StatusNotFound, err.Error()) // BoxQL: unknown file etc., with the documented text
 	case errors.Is(err, ErrUnsupported):
 		writeErr(w, http.StatusNotImplemented, err.Error())
 	case errors.Is(err, ErrForbidden):

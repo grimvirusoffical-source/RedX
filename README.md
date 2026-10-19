@@ -7,19 +7,21 @@ RedX is a database platform with its own file formats and its own query language
 * **BoxQL**, a query and command language written in the same grammar as the data files.
 * **`redx`**, a command-line client, and **SDKs** for JavaScript and Python.
 
-The current version is 0.3.0.
+The current version is 0.4.3.
 
 ## Features
 
+* A web console on the host's own port (open `http://127.0.0.1:7777`): data, BoxQL, keys, devices, cluster, presets and connected apps.
 * Single static binaries with no runtime dependencies (Go, CGO disabled).
 * Write-ahead log with checkpoints, configurable durability (`sync`, `group`, `async`) and crash recovery.
 * TTL expiry (fixed and sliding) driven by a timing wheel.
 * API keys with scopes (`read`, `write`, `admin`), per-database binding, path-prefix restrictions, expiry, rotation, rate limits and an audit log. Keys are stored as argon2id hashes.
 * Optional TLS with self-signed certificates and fingerprint pinning, or your own certificates.
-* Asynchronous leader/follower replication with offset resume and snapshot fallback.
+* Asynchronous leader/follower replication with offset resume and snapshot fallback; pairing codes to add nodes; manual promote that fences the old leader.
+* App connect: an app gets its own workspace and a scoped key after the owner approves it in the console.
 * Online and offline backup and restore.
 * Access policy documents, pack encryption (AES-256-GCM) and sandboxed scripts.
-* Installers for systemd, launchd and Windows services, plus a Dockerfile.
+* Installers for systemd, launchd and Windows services, a Dockerfile, and unsigned desktop installers (Windows setup, macOS `.dmg` / `.pkg`, Debian `.deb`).
 
 ## Install
 
@@ -27,21 +29,21 @@ Download the archive for your platform from the [releases page](https://github.c
 
 ```sh
 go build ./...
-VERSION=0.3.0 scripts/build.sh      # all platforms, archives in dist/
+VERSION=0.4.3 scripts/build.sh      # all platforms, archives in dist/
 ```
 
 ## Quick start
 
-Start a host in the foreground. On first start it prints a one-time admin key; copy it.
+Start a host in the foreground and open `http://127.0.0.1:7777` in a browser on the same machine: the console creates the first admin key. Or start it with `--bootstrap console` to have the key printed once.
 
 ```sh
-./redxd run --data-dir ./data
+./redxd run --data-dir ./data            # add --bootstrap console to print the first key instead
 ```
 
 In a second terminal:
 
 ```sh
-export REDX_KEY=rx_live_...         # the admin key printed on first start
+export REDX_KEY=rx_live_...         # the first admin key
 ./redx doctor
 ./redx set 'players.red-xai.db:Player[ID=1].Name' '"Ann"'
 ./redx bx '{Get[]} = players:Player[ID=*] -> Name'
@@ -66,7 +68,10 @@ Values are passed as `$name` parameters and are never parsed as command text. Th
 | [Getting started](docs/getting-started.md) | install, first key, first query |
 | [BoxQL](docs/boxql.md) | query and command language reference |
 | [Box grammar](docs/box-grammar.md) | file grammar and paths |
+| [Console](docs/console.md) | the web console, page by page |
 | [Hosting](docs/hosting.md) | platforms, services, Docker, troubleshooting, building |
+| [Installers](docs/installers.md) | desktop installers (unsigned) |
+| [Connecting apps](docs/connect.md) | app connect handshake and Connected apps |
 | [Configuration](docs/configuration.md) | `redx.toml`, environment variables, defaults |
 | [API reference](docs/api.md) | REST and WebSocket routes |
 | [Security](docs/security.md) | keys, TLS, policy, encryption |
@@ -92,7 +97,7 @@ Release binaries for every platform are cross-compiled from Linux. Only the Linu
 ## Known limitations
 
 * Replication is asynchronous. A write acknowledged by the leader can be lost if the leader fails before followers receive it.
-* Failover is manual (`redx node promote`). There is no automatic election, quorum write or multi-leader mode, and a partitioned old leader can keep accepting writes until it is stopped.
+* Failover is manual (`redx node promote`). There is no automatic election, quorum write or multi-leader mode. A promoted node fences the old leader as soon as it can reach it; a partitioned old leader can keep accepting writes until then.
 * Index, pack and media contents are not replicated; their definitions are.
 * Pulse rule timers are held in memory and are lost on restart or failover.
 * Database files are not encrypted by RedX; use disk encryption. Pack encryption is available through policy rules.
