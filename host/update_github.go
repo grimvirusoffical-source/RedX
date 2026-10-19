@@ -617,12 +617,14 @@ func (u *updater) fetch(ctx context.Context, raw string, limit int64) ([]byte, e
 }
 
 func (h *Host) updateGitHubWebhook(w http.ResponseWriter, r *http.Request) {
-	body := readBody(r)
 	secret := h.upd.webhookSecret()
 	if len(secret) == 0 {
-		writeUpdateErr(w, http.StatusServiceUnavailable, "forbidden", "webhook secret is not configured")
+		// 404, not 503: an unconfigured hook is not a server failure, and a 5xx
+		// before auth used to count against canary health.
+		writeUpdateErr(w, http.StatusNotFound, "not_found", "webhook secret is not configured")
 		return
 	}
+	body := readBody(r)
 	// GitHub's HMAC covers the raw body only. The delivery id is not in that signature;
 	// putting it there would reject GitHub's own posts and redeliveries (a redelivery
 	// uses a new X-GitHub-Delivery). claimDelivery rejects a repeated id. A captured

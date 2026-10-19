@@ -1,6 +1,8 @@
 package host
 
 import (
+	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -26,7 +28,9 @@ func TestHealthExcludesWaitsClusterAndNeedsSamples(t *testing.T) {
 		{"cluster status", req("GET", "http://h/v1/cluster/status"), 200, true},
 		{"wait seq", req("GET", "http://h/v1/path/a:b", "X-Redx-Wait-Seq", "999999999"), 504, true},
 		{"wait replicas", req("GET", "http://h/v1/path/a:b", "X-Redx-Wait-Replicas", "2"), 200, true},
-		{"client 504", req("GET", "http://h/v1/path/a:b"), 504, true},
+		{"server 504", req("GET", "http://h/v1/path/a:b"), 504, false},
+		{"healthz", req("GET", "http://h/healthz"), 200, true},
+		{"webhook", req("POST", "http://h/v1/updates/github/webhook"), 404, true},
 		{"events socket", req("GET", "http://h/v1/updates/events", "Upgrade", "websocket"), 101, true},
 		{"subscribe", req("GET", "http://h/v1/db/default/subscribe"), 200, true},
 		{"ordinary read", req("GET", "http://h/v1/path/a:b"), 200, false},
@@ -52,5 +56,53 @@ func TestHealthExcludesWaitsClusterAndNeedsSamples(t *testing.T) {
 	}
 	if g := h.liveHealthFor([]string{"zzz-node"}); g.Status != "unknown" || g.ErrorRate != nil {
 		t.Fatalf("other node counted: %+v", g)
+	}
+	if g := h.rolloutHealth([]string{"zzz-node"}); g.Status != "unknown" {
+		t.Fatalf("missing member treated as dead: %+v", g)
+	}
+}
+
+func TestHealthCountsAuthorizedServerErrorsOnly(t *testing.T) {
+	h := &Host{NodeID: "a-node"}
+	mark := func(method, raw string, hdr ...string) *http.Request {
+		r := httptest.NewRequest(method, raw, nil)
+		for i := 0; i+1 < len(hdr); i += 2 {
+			r.Header.Set(hdr[i], hdr[i+1])
+		}
+		m := &healthMark{ok: true}
+		return r.WithContext(context.WithValue(r.Context(), healthMarkKey{}, m))
+	}
+	h.observeRequest(mark("GET", "http://h/v1/path/a:b"), 504, 10*time.Millisecond)
+	h.observeRequest(mark("GET", "http://h/v1/path/a:b", "X-Redx-Wait-Seq", "9"), 504, 3*time.Second)
+	h.observeRequest(mark("POST", "http://h/v1/query"), 400, 3*time.Second)
+	h.observeRequest(mark("GET", "http://h/healthz"), 200, time.Millisecond)
+	h.observeRequest(httptest.NewRequest("POST", "http://h/v1/updates/github/webhook", nil), 503, time.Second)
+	h.observeRequest(httptest.NewRequest("GET", "http://h/v1/path/a:b", nil), 500, time.Second)
+	h.metricMu.Lock()
+	defer h.metricMu.Unlock()
+	if len(h.metricSamples) != 1 || h.metricSamples[0].status != 504 || h.metricSamples[0].ms > 50 {
+		t.Fatalf("samples %+v", h.metricSamples)
+	}
+}
+
+func TestHealthTimerStartsAfterBody(t *testing.T) {
+	mark := &healthMark{}
+	pr, pw := io.Pipe()
+	body := &bodyClock{ReadCloser: pr, mark: mark}
+	started := time.Now()
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		_, _ = pw.Write([]byte("x"))
+		_ = pw.Close()
+	}()
+	if _, err := io.ReadAll(body); err != nil {
+		t.Fatal(err)
+	}
+	d := healthDuration(started, mark)
+	if d > 80*time.Millisecond {
+		t.Fatalf("duration includes the slow body: %s", d)
+	}
+	if time.Since(started) < 150*time.Millisecond {
+		t.Fatal("body read was not slow")
 	}
 }

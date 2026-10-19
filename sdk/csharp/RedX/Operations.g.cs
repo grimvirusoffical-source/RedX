@@ -121,7 +121,7 @@ namespace RedX
             ["updateRolloutRollback"] = new Operation { Id = "updateRolloutRollback", Group = "updates", Method = "POST", Path = "/v1/updates/rollouts/{rollout_id}/rollback", Shorthand = "", Auth = "host-admin", Response = "json", Request = "json", HostConfirm = "", Summary = "Restore the snapshot taken before this rollout, including mid-canary.", Danger = DangerLevel.Dangerous },
             ["updateAppRollback"] = new Operation { Id = "updateAppRollback", Group = "updates", Method = "POST", Path = "/v1/updates/apps/{app}/rollback", Shorthand = "", Auth = "host-admin", Response = "json", Request = "json", HostConfirm = "", Summary = "Restore one snapshot for an app.", Danger = DangerLevel.Dangerous },
             ["updatePublish"] = new Operation { Id = "updatePublish", Group = "updates", Method = "POST", Path = "/v1/updates/apps/{app}/publish", Shorthand = "", Auth = "host-admin", Response = "json", Request = "json", HostConfirm = "", Summary = "Sign a host and/or github manifest for an app already in hosted_apps. A github target creates the release.", Danger = DangerLevel.Dangerous },
-            ["updateGitHubWebhook"] = new Operation { Id = "updateGitHubWebhook", Group = "updates", Method = "POST", Path = "/v1/updates/github/webhook", Shorthand = "", Auth = "none", Response = "json", Request = "", HostConfirm = "", Summary = "GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest.", Danger = DangerLevel.Write },
+            ["updateGitHubWebhook"] = new Operation { Id = "updateGitHubWebhook", Group = "updates", Method = "POST", Path = "/v1/updates/github/webhook", Shorthand = "", Auth = "none", Response = "json", Request = "", HostConfirm = "", Summary = "GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest. No webhook secret configured is 404.", Danger = DangerLevel.Write },
         };
     }
 
@@ -459,7 +459,7 @@ namespace RedX
         public Task<RedXResult> UpdatePublishAsync(string app, object? body = null, bool confirm = false, CancellationToken ct = default) =>
             CallAsync("updatePublish", new Dictionary<string, string> { ["app"] = app }, null, body, null, null, confirm, ct);
 
-        /// <summary>GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest. (POST /v1/updates/github/webhook; auth none; danger write)</summary>
+        /// <summary>GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest. No webhook secret configured is 404. (POST /v1/updates/github/webhook; auth none; danger write)</summary>
         public Task<RedXResult> UpdateGitHubWebhookAsync(CancellationToken ct = default) =>
             CallAsync("updateGitHubWebhook", null, null, null, null, null, false, ct);
 

@@ -72,6 +72,7 @@ func (h *Host) updateAuth(w http.ResponseWriter, r *http.Request, admin bool) (*
 		writeUpdateErr(w, http.StatusForbidden, "forbidden", "host-admin required")
 		return nil, false
 	}
+	allowHealth(r)
 	return pr, true
 }
 

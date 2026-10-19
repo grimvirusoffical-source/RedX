@@ -187,7 +187,7 @@ export interface RedXOperations {
   updateAppRollback(opts: { app: string; body?: { snapshot_id?: string }; confirm: true; headers?: Record<string, string> }): Promise<any>;
   /** Sign a host and/or github manifest for an app already in hosted_apps. A github target creates the release. (POST /v1/updates/apps/{app}/publish; auth host-admin; danger dangerous) */
   updatePublish(opts: { app: string; body?: { artifacts?: unknown[]; channel?: string; notes_md?: string; outcome_tags?: unknown[]; targets?: unknown[]; version?: string }; confirm: true; headers?: Record<string, string> }): Promise<any>;
-  /** GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest. (POST /v1/updates/github/webhook; auth none; danger write) */
+  /** GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest. No webhook secret configured is 404. (POST /v1/updates/github/webhook; auth none; danger write) */
   updateGitHubWebhook(opts?: { headers?: Record<string, string> }): Promise<any>;
 }
 

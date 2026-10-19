@@ -53,14 +53,16 @@ func (h *Host) routes() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capw := &statusCapture{ResponseWriter: w}
 		w = capw
+		mark := &healthMark{}
+		r = r.WithContext(context.WithValue(r.Context(), healthMarkKey{}, mark))
 		started := time.Now()
-		defer func() { h.observeRequest(r, capw.code, time.Since(started)) }()
+		defer func() { h.observeRequest(r, capw.code, healthDuration(started, mark)) }()
 		h.reqs.Add(1)
 		lim := int64(h.Cfg.MaxBodyMB) << 20
 		if r.Method == "PUT" && (strings.Contains(r.URL.Path, "/pack/") || strings.Contains(r.URL.Path, "/media/")) {
 			lim = int64(h.Cfg.MaxUploadMB) << 20
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, lim)
+		r.Body = &bodyClock{ReadCloser: http.MaxBytesReader(w, r.Body, lim), mark: mark}
 		if t := bearer(r); h.accts != nil && strings.HasPrefix(t, acctTokenPrefix) {
 			// requests made with a console session end when the session ends (WebSockets included)
 			ctx, cancel := context.WithCancel(r.Context())
@@ -164,6 +166,7 @@ func (h *Host) authz(w http.ResponseWriter, r *http.Request, need, db, path stri
 		n = 0
 	}
 	h.meterTraffic(pr, n+256) // request body + a small floor for the response
+	allowHealth(r)
 	return pr, true
 }
 
@@ -281,6 +284,8 @@ func (h *Host) maybeForward(w http.ResponseWriter, r *http.Request) bool {
 		writeErr(w, 503, "no leader configured")
 		return true
 	}
+	// The leader records the write. Counting it here as well would time the proxy hop.
+	clearHealth(r)
 	h.Cluster.proxy().ServeHTTP(w, r)
 	return true
 }
@@ -568,6 +573,7 @@ func (h *Host) dbsRoute(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusForbidden, "forbidden")
 			return
 		}
+		allowHealth(r)
 		writeJSON(w, 200, map[string]interface{}{"dbs": h.visibleDBs(pr)})
 	case "POST":
 		pr, ok := h.authz(w, r, ScopeAdmin, AllDBs, "", true)
@@ -647,6 +653,7 @@ func (h *Host) keysRoute(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 403, "forbidden")
 		return
 	}
+	allowHealth(r)
 	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/keys"), "/")
 	now := time.Now()
 	switch {

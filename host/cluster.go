@@ -120,6 +120,7 @@ type Cluster struct {
 	lastFenceNote string // last fence-notice problem logged (see noteFenceNotify)
 	meta          replMeta
 	members       map[string]*Member
+	nodeHealth    map[string]storedNodeHealth // last sample report from a follower, keyed by node id
 	tokens        map[[32]byte]time.Time
 	ackCh         chan struct{}
 	lastErr       string
@@ -553,6 +554,10 @@ func (c *Cluster) nodeHeaders(req *http.Request) {
 	if adv != "" {
 		req.Header.Set("X-Redx-Addr", adv)
 	}
+	// Sample health for this process. The leader files it under the authenticated node id.
+	if hdr := c.h.nodeHealthHeader(); hdr != "" {
+		req.Header.Set("X-Redx-Node-Health", hdr)
+	}
 }
 
 type logResp struct {
@@ -830,11 +835,49 @@ func (c *Cluster) touchMember(id, addr string, acked uint64, role string) {
 	c.mu.Unlock()
 }
 
+func (c *Cluster) noteNodeHealth(id, raw string) {
+	if c == nil || id == "" || raw == "" || len(raw) > 1024 {
+		return
+	}
+	var w nodeHealthWire
+	if json.Unmarshal([]byte(raw), &w) != nil {
+		return
+	}
+	if w.Status != "ok" && w.Status != "bad" && w.Status != "unknown" {
+		return
+	}
+	if w.Samples < 0 || w.Samples > 100000 {
+		return
+	}
+	c.mu.Lock()
+	if c.nodeHealth == nil {
+		c.nodeHealth = map[string]storedNodeHealth{}
+	}
+	c.nodeHealth[id] = storedNodeHealth{wire: w, at: time.Now()}
+	c.mu.Unlock()
+}
+
+// nodeHealthReport returns the last report and how old it is.
+// ok is false when this node has never reported.
+func (c *Cluster) nodeHealthReport(id string) (nodeHealthWire, time.Duration, bool) {
+	if c == nil || id == "" {
+		return nodeHealthWire{}, 0, false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	rep, ok := c.nodeHealth[id]
+	if !ok {
+		return nodeHealthWire{}, 0, false
+	}
+	return rep.wire, time.Since(rep.at), true
+}
+
 func (c *Cluster) handleLog(w http.ResponseWriter, r *http.Request) {
 	id, ok := c.nodeAuth(w, r)
 	if !ok {
 		return
 	}
+	c.noteNodeHealth(id, r.Header.Get("X-Redx-Node-Health"))
 	if !c.IsLeader() {
 		writeErr(w, http.StatusMisdirectedRequest, "not the leader")
 		return

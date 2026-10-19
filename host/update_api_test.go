@@ -681,7 +681,7 @@ func TestUpdateGitHubWebhookAndEvents(t *testing.T) {
 	// unconfigured secret
 	n2 := startNode(t, t.TempDir(), nil)
 	st, body, _ = do(t, "POST", n2.URL+"/v1/updates/github/webhook", "", `{}`, "Content-Type", "application/json", "X-Hub-Signature-256", good, "X-GitHub-Event", "release")
-	if st != 503 || errCode(t, body) != "forbidden" {
+	if st != 404 || errCode(t, body) != "not_found" {
 		t.Fatalf("no secret %d %s", st, body)
 	}
 }

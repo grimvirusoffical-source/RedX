@@ -1131,7 +1131,7 @@
    "path": "/v1/updates/github/webhook",
    "auth": "none",
    "danger": "write",
-   "summary": "GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest.",
+   "summary": "GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest. No webhook secret configured is 404.",
    "response": "json"
   }
  ],

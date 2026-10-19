@@ -94,7 +94,7 @@ var Operations = map[string]Operation{
 	"updateRolloutRollback": {ID: "updateRolloutRollback", Group: "updates", Method: "POST", Path: "/v1/updates/rollouts/{rollout_id}/rollback", Shorthand: "", Auth: "host-admin", Danger: DangerDangerous, Response: "json", Request: "json", HostConfirm: "", Summary: "Restore the snapshot taken before this rollout, including mid-canary."},
 	"updateAppRollback":     {ID: "updateAppRollback", Group: "updates", Method: "POST", Path: "/v1/updates/apps/{app}/rollback", Shorthand: "", Auth: "host-admin", Danger: DangerDangerous, Response: "json", Request: "json", HostConfirm: "", Summary: "Restore one snapshot for an app."},
 	"updatePublish":         {ID: "updatePublish", Group: "updates", Method: "POST", Path: "/v1/updates/apps/{app}/publish", Shorthand: "", Auth: "host-admin", Danger: DangerDangerous, Response: "json", Request: "json", HostConfirm: "", Summary: "Sign a host and/or github manifest for an app already in hosted_apps. A github target creates the release."},
-	"updateGitHubWebhook":   {ID: "updateGitHubWebhook", Group: "updates", Method: "POST", Path: "/v1/updates/github/webhook", Shorthand: "", Auth: "none", Danger: DangerWrite, Response: "json", Request: "", HostConfirm: "", Summary: "GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest."},
+	"updateGitHubWebhook":   {ID: "updateGitHubWebhook", Group: "updates", Method: "POST", Path: "/v1/updates/github/webhook", Shorthand: "", Auth: "none", Danger: DangerWrite, Response: "json", Request: "", HostConfirm: "", Summary: "GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest. No webhook secret configured is 404."},
 }
 
 // segmentParams are pack and media paths: each slash-separated segment is escaped, the slashes stay.
@@ -723,7 +723,7 @@ func (c *Client) UpdatePublish(ctx context.Context, app string, a Args) (*Result
 	return c.Call(ctx, "updatePublish", a)
 }
 
-// UpdateGitHubWebhook: GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest.
+// UpdateGitHubWebhook: GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest. No webhook secret configured is 404.
 //
 // POST /v1/updates/github/webhook, auth none, danger write.
 func (c *Client) UpdateGitHubWebhook(ctx context.Context, a Args) (*Result, error) {

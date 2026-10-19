@@ -96,7 +96,7 @@ OPERATIONS: Dict[str, Dict[str, Any]] = {
     "updateRolloutRollback": {"id": "updateRolloutRollback", "group": "updates", "method": "POST", "path": "/v1/updates/rollouts/{rollout_id}/rollback", "shorthand": "", "auth": "host-admin", "danger": "dangerous", "danger_level": 3, "response": "json", "request": "json", "host_confirm": "", "summary": "Restore the snapshot taken before this rollout, including mid-canary."},
     "updateAppRollback": {"id": "updateAppRollback", "group": "updates", "method": "POST", "path": "/v1/updates/apps/{app}/rollback", "shorthand": "", "auth": "host-admin", "danger": "dangerous", "danger_level": 3, "response": "json", "request": "json", "host_confirm": "", "summary": "Restore one snapshot for an app."},
     "updatePublish": {"id": "updatePublish", "group": "updates", "method": "POST", "path": "/v1/updates/apps/{app}/publish", "shorthand": "", "auth": "host-admin", "danger": "dangerous", "danger_level": 3, "response": "json", "request": "json", "host_confirm": "", "summary": "Sign a host and/or github manifest for an app already in hosted_apps. A github target creates the release."},
-    "updateGitHubWebhook": {"id": "updateGitHubWebhook", "group": "updates", "method": "POST", "path": "/v1/updates/github/webhook", "shorthand": "", "auth": "none", "danger": "write", "danger_level": 1, "response": "json", "request": "", "host_confirm": "", "summary": "GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest."},
+    "updateGitHubWebhook": {"id": "updateGitHubWebhook", "group": "updates", "method": "POST", "path": "/v1/updates/github/webhook", "shorthand": "", "auth": "none", "danger": "write", "danger_level": 1, "response": "json", "request": "", "host_confirm": "", "summary": "GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest. No webhook secret configured is 404."},
 }
 
 
@@ -443,5 +443,5 @@ class Operations:
         return self.call("updatePublish", app=app, body=body, confirm=confirm, headers=headers)
 
     def update_git_hub_webhook(self, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
-        """GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest. (POST /v1/updates/github/webhook; auth none; danger write)"""
+        """GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest. No webhook secret configured is 404. (POST /v1/updates/github/webhook; auth none; danger write)"""
         return self.call("updateGitHubWebhook", confirm=confirm, headers=headers)

@@ -45,6 +45,7 @@ func (h *Host) ownerAuth(w http.ResponseWriter, r *http.Request) (*Principal, bo
 		writeErr(w, 403, "forbidden")
 		return nil, false
 	}
+	allowHealth(r)
 	return pr, true
 }
 

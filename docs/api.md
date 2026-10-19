@@ -232,11 +232,17 @@ fresh id still verifies, which is also how a legitimate redelivery looks. Ingest
 and version: a version already stored is skipped (`202`) and is not published or auto-applied again.
 A redelivery of a version that was never stored is the first ingest.
 
-Rollout health is the error rate, latency and node liveness of traffic served by the nodes on the new
-version. `/v1/cluster/*`, requests that set `X-Redx-Wait-Seq`, `X-Redx-Wait-Replicas` or `wait_ms`,
-WebSocket and subscribe streams, and client-induced `504` timeouts are not samples. Fewer than 20
-qualifying samples in the two-minute window is `unknown` (`error_rate` and `p95_ms` are null) and
-nothing auto-rolls back. Auto-rollback runs only when health is `bad`. There is no auto-promote.
+Rollout health is the error rate and latency of authenticated, authorized API requests served by the
+nodes on the new version, plus whether those nodes are still live. Timing starts once the request body
+has been read. Unauthenticated requests, rejected requests, `4xx` responses, `/healthz` and other probes,
+`POST /v1/updates/github/webhook`, `/v1/cluster/*`, requests that set `X-Redx-Wait-Seq`,
+`X-Redx-Wait-Replicas` or `wait_ms`, and WebSocket and subscribe streams are not samples. A `504` counts
+only when the server produced it on an ordinary authorized call; a client wait or long-poll does not.
+Fewer than 20 qualifying samples on a canary node is `unknown` for that node (`error_rate` and `p95_ms`
+are null) and that alone does not roll back. Each node reports its own samples to the rollout holder on
+the authenticated cluster channel. A canary that is down, or that stops reporting, is `bad` even with no
+samples, and so is a cluster that has a dead member. Auto-rollback runs only when health is `bad`. There
+is no auto-promote.
 
 App ids and database names share one namespace. A snapshot of an app includes the database of the same
 name, and restore writes that database back. Do not put a customer database's name in `hosted_apps`.
@@ -255,7 +261,7 @@ The master accounts database is refused. This shared namespace is a known limita
 | `POST .../rollback` | host admin; owner while Accounts is on | restore one snapshot for this app |
 | `GET .../history` | host admin | publish, apply, snapshot, rollback |
 | `POST .../publish` | host admin; owner while Accounts is on, and the app must be hosted | sign a host and/or GitHub manifest |
-| `POST /v1/updates/github/webhook` | HMAC `X-Hub-Signature-256` over the body | allowlisted repo, `X-GitHub-Delivery` dedupe, SHA256SUMS, then a signed github-source manifest |
+| `POST /v1/updates/github/webhook` | HMAC `X-Hub-Signature-256` over the body | allowlisted repo, `X-GitHub-Delivery` dedupe, SHA256SUMS, then a signed github-source manifest. No webhook secret configured is `404 not_found` |
 | `GET /v1/updates/events` | host admin | WebSocket: `update.available`, `update.analysed`, `rollout.state`, `rollout.health`, `rollback.done` |
 | `GET /v1/apps/events` | Accounts client auth | Existing Accounts JSON poll. `update.*` events on that feed are forwarded to the WebSocket and do not end sessions |
 

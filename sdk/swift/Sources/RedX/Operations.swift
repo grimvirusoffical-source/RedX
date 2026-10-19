@@ -110,7 +110,7 @@ public let operations: [String: Operation] = [
     "updateRolloutRollback": Operation(id: "updateRolloutRollback", group: "updates", method: "POST", path: "/v1/updates/rollouts/{rollout_id}/rollback", shorthand: "", auth: "host-admin", response: "json", request: "json", hostConfirm: "", summary: "Restore the snapshot taken before this rollout, including mid-canary.", danger: .dangerous),
     "updateAppRollback": Operation(id: "updateAppRollback", group: "updates", method: "POST", path: "/v1/updates/apps/{app}/rollback", shorthand: "", auth: "host-admin", response: "json", request: "json", hostConfirm: "", summary: "Restore one snapshot for an app.", danger: .dangerous),
     "updatePublish": Operation(id: "updatePublish", group: "updates", method: "POST", path: "/v1/updates/apps/{app}/publish", shorthand: "", auth: "host-admin", response: "json", request: "json", hostConfirm: "", summary: "Sign a host and/or github manifest for an app already in hosted_apps. A github target creates the release.", danger: .dangerous),
-    "updateGitHubWebhook": Operation(id: "updateGitHubWebhook", group: "updates", method: "POST", path: "/v1/updates/github/webhook", shorthand: "", auth: "none", response: "json", request: "", hostConfirm: "", summary: "GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest.", danger: .write),
+    "updateGitHubWebhook": Operation(id: "updateGitHubWebhook", group: "updates", method: "POST", path: "/v1/updates/github/webhook", shorthand: "", auth: "none", response: "json", request: "", hostConfirm: "", summary: "GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest. No webhook secret configured is 404.", danger: .write),
 ]
 
 extension RedXClient {
@@ -618,7 +618,7 @@ extension RedXClient {
         try await call("updatePublish", params: ["app": app], body: body, confirm: confirm)
     }
 
-    /// GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest. (POST /v1/updates/github/webhook; auth none; danger write)
+    /// GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest. No webhook secret configured is 404. (POST /v1/updates/github/webhook; auth none; danger write)
     @discardableResult
     public func updateGitHubWebhook() async throws -> RedXResult {
         try await call("updateGitHubWebhook", params: [:])

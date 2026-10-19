@@ -67,6 +67,7 @@ func (h *Host) authzScope(w http.ResponseWriter, r *http.Request, need, db strin
 	if !h.refuseHiddenDB(w, r, pr, db) {
 		return nil, false
 	}
+	allowHealth(r)
 	return pr, true
 }
 

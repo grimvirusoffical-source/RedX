@@ -651,8 +651,8 @@ func (u *updater) releaseDelivery(id string) {
 }
 
 // measureHealth reads the canary. updated is the nodes serving the new version.
-// A forced test value still wins. Otherwise only samples from those nodes count,
-// and fewer than updateMinHealthSamples samples stays unknown.
+// A forced test value still wins. Otherwise each of those nodes is judged on its
+// own samples, and a dead canary is bad with no samples at all.
 func (u *updater) measureHealth(updated []string) healthView {
 	u.mu.Lock()
 	forced := u.healthSet
@@ -668,7 +668,7 @@ func (u *updater) measureHealth(updated []string) healthView {
 	if u.h == nil {
 		return healthView{Status: "unknown"}
 	}
-	return u.h.liveHealthFor(updated)
+	return u.h.rolloutHealth(updated)
 }
 
 func (u *updater) nextSequence(app string) int64 {

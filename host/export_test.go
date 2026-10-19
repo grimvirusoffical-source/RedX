@@ -56,6 +56,20 @@ func NoteUpdateSample(h *Host, status int, ms float64) {
 // UpdateMinHealthSamples is how many qualifying samples a verdict needs.
 func UpdateMinHealthSamples() int { return updateMinHealthSamples }
 
+// UpdateRolloutNodes returns the node ids serving the new version.
+func UpdateRolloutNodes(h *Host, id string) []string {
+	if h == nil || h.upd == nil {
+		return nil
+	}
+	h.upd.mu.Lock()
+	defer h.upd.mu.Unlock()
+	ro := h.upd.st.Rollouts[id]
+	if ro == nil {
+		return nil
+	}
+	return append([]string(nil), ro.Updated...)
+}
+
 // SetUpdatePermitTTL sets how long a plan confirmation stays valid.
 func SetUpdatePermitTTL(h *Host, d time.Duration) {
 	h.upd.mu.Lock()
