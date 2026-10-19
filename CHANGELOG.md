@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased: SDKs
+
+* One API description, `api/redx-api.json`, generates `api/openapi.json` and the SDKs (`go run ./scripts/gensdk`; CI checks for drift). Every operation has a danger level (`safe`, `write`, `admin`, `dangerous`); `dangerous` calls need `confirm`. See [SDKs](docs/sdks.md).
+* New SDKs: Go (`sdk/go/redx`), a C ABI shared library with headers (`sdk/go/cabi`), Swift (`sdk/swift`) and C# / .NET (`sdk/csharp`). JavaScript gains TypeScript types; JavaScript and Python gain every host and database operation, transactions, files/packs/media, streams that reconnect, and connect helpers (PKCE).
+* Game engine recipes for Unity, Godot and Unreal: [game-engines.md](docs/game-engines.md) (not tested in the engines).
+* JS/Python: `createKey` and `revokeKey` without `confirm` still work but warn once. `RedXError` has `code`.
+* CI runs the Go and C# SDK tests on Linux, Windows and macOS, the C ABI on Linux and macOS, and Swift on macOS.
+
 ## 0.4.3
 
 * Security: `redx` and `redxd` help output (`-h`) no longer prints secrets taken from the environment or `redx.toml` as flag defaults. `--key` shows "(currently set from $REDX_KEY)" and `--join` "(currently set from $REDX_JOIN or redx.toml)".

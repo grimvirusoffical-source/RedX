@@ -58,6 +58,31 @@ jobs:
           mkdir -p bin
           CGO_ENABLED=0 go build -trimpath -o bin/ ./cmd/redxd ./cmd/redx ./cmd/redx-launcher
           ls -la bin
+      - name: Generated SDK files match api/redx-api.json
+        if: runner.os == 'Linux'
+        run: go run ./scripts/gensdk -check
+      - name: Go SDK and C ABI (C ABI is skipped on Windows)
+        run: |
+          cd sdk/go
+          gofmt -l . | (! grep .)
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            go vet ./redx/... && go test -count=1 -timeout 10m ./redx/...
+          else
+            export REDXD_BIN="$GITHUB_WORKSPACE/bin/redxd"
+            go vet ./... && go test -count=1 -timeout 10m ./...
+          fi
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: C# SDK (.NET)
+        run: |
+          if [ "$RUNNER_OS" != "Windows" ]; then export REDXD_BIN="$GITHUB_WORKSPACE/bin/redxd"; fi
+          dotnet test sdk/csharp/RedX.Tests --nologo
+      - name: Swift SDK (macOS only)
+        if: runner.os == 'macOS'
+        run: |
+          swift --version
+          cd sdk/swift && REDXD_BIN="$GITHUB_WORKSPACE/bin/redxd" swift test
       - name: SDK tests (JavaScript and Python, Linux only)
         if: runner.os == 'Linux'
         run: |
