@@ -397,3 +397,12 @@ html[data-theme=light] .card, html[data-theme=light] .tbl-wrap { box-shadow: 0 1
 .ok-text { color: var(--ok); }
 canvas.qr { display: block; margin: 10px auto; background: #fff; border-radius: 8px; padding: 6px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.meter { height: 8px; border-radius: 99px; background: var(--line); overflow: hidden; }
+.meter > span { display: block; height: 100%; width: 0; background: var(--accent); }
+.meter.warn > span { background: var(--warn); }
+.meter.err > span { background: var(--err); }
+.meter-row { margin: 10px 0; }
+.meter-row .row { justify-content: space-between; margin-bottom: 4px; }
+.stack { display: flex; flex-direction: column; gap: 4px; }
+.price { font-size: 1.25rem; margin: 8px 0; }

@@ -1,16 +1,18 @@
 import { h, icon, mount, toast, $, clear } from './util.js';
 import { api, session, setUnauthorizedHandler, exchangePairingCode } from './api.js';
-import { state, subscribe, setMode, setTheme, setDb, applyTheme, loadWho, loadDbs, isHostAdmin, wizard } from './state.js';
+import { state, subscribe, setMode, setTheme, setDb, applyTheme, loadWho, loadDbs, isHostAdmin, wizard, pageAllowed } from './state.js';
 
 const NAV = [
   { id: 'dashboard', title: 'Dashboard', icon: 'home' },
   { id: 'databases', title: 'Databases', icon: 'db' },
   { id: 'data', title: 'Data Explorer', icon: 'table' },
   { id: 'studio', title: 'BoxQL Studio', icon: 'terminal' },
+  { id: 'hosting', title: 'Hosting', icon: 'globe' },
   { id: 'keys', title: 'API Keys', icon: 'key' },
   { id: 'devices', title: 'Add a device', icon: 'phone' },
   { id: 'apps', title: 'Connected apps', icon: 'link' },
   { id: 'backups', title: 'Backups', icon: 'backup' },
+  { id: 'updates', title: 'Updates', icon: 'refresh' },
   { id: 'settings', title: 'Settings', icon: 'gear' },
   { id: 'help', title: 'Help', icon: 'book' },
   { id: 'watch', title: 'Live Watch', icon: 'pulse', adv: true },
@@ -18,7 +20,7 @@ const NAV = [
   { id: 'policy', title: 'Security · Rules · Code', icon: 'shield', adv: true },
   { id: 'cluster', title: 'Cluster & nodes', icon: 'nodes', adv: true },
   { id: 'presets', title: 'Presets', icon: 'compare', adv: true },
-  { id: 'owner', title: 'Owner', icon: 'shield', owner: true },
+  { id: 'owner', title: 'Owner', icon: 'shield' },
 ];
 const PAGES = new Set([...NAV.map((n) => n.id), 'join', 'wizard', 'connect']);
 
@@ -170,16 +172,21 @@ function buildShell() {
   function refresh() {
     clear(nav);
     const mk = (n) => h('a', { class: 'nav-item', href: '#/' + n.id, 'data-id': n.id, onclick: () => root.classList.remove('open') }, icon(n.icon, 18), h('span', null, n.title));
-    const isOwner = !!(state.who && state.who.owner);
-    NAV.filter((n) => !n.adv && (!n.owner || isOwner)).forEach((n) => nav.append(mk(n)));
-    nav.append(h('div', { class: 'nav-sep' }, state.mode === 'advanced' ? 'Advanced' : h('a', { href: '#', onclick: (e) => { e.preventDefault(); setMode('advanced'); } }, 'Show advanced pages')));
-    if (state.mode === 'advanced') NAV.filter((n) => n.adv).forEach((n) => nav.append(mk(n)));
+    const show = (n) => pageAllowed(n.id);
+    NAV.filter((n) => !n.adv && n.id !== 'owner' && show(n)).forEach((n) => nav.append(mk(n)));
+    const owner = NAV.find((n) => n.id === 'owner');
+    if (owner && show(owner)) nav.append(mk(owner));
+    const adv = NAV.filter((n) => n.adv && show(n));
+    if (adv.length) {
+      nav.append(h('div', { class: 'nav-sep' }, state.mode === 'advanced' ? 'Advanced' : h('a', { href: '#', onclick: (e) => { e.preventDefault(); setMode('advanced'); } }, 'Show advanced pages')));
+      if (state.mode === 'advanced') adv.forEach((n) => nav.append(mk(n)));
+    }
     clear(dbSel);
     (state.dbs.length ? state.dbs : [state.db]).forEach((d) => dbSel.append(h('option', { value: d, selected: d === state.db }, d)));
     modeBtn.querySelectorAll('.seg-opt').forEach((o) => o.classList.toggle('on', o.dataset.m === state.mode));
     themeBtn.sync();
     const acct = state.who && state.who.account;
-    mount(who, !state.who ? '' : acct ? (acct.username || acct.email) + (acct.owner ? ' · owner' : '') : (state.who.label || state.who.id) + ' · ' + state.who.scope);
+    mount(who, !state.who ? '' : acct ? (acct.username || acct.email) + (acct.owner === true ? ' · owner' : '') : (state.who.label || state.who.id) + ' · ' + state.who.scope);
     markActive();
   }
   function markActive() {
@@ -204,12 +211,22 @@ async function route() {
   if (!shell) return;
   const seq = ++routeSeq;
   const { page, args, query } = parseHash();
-  const id = PAGES.has(page) ? page : 'dashboard';
+  const known = PAGES.has(page);
+  const id = known ? page : 'dashboard';
   shell.markActive();
   if (current && current.destroy) { try { current.destroy(); } catch { /* ignore */ } }
   current = null;
   const main = shell.main;
   mount(main, h('div', { class: 'loading' }, h('span', { class: 'spin' }), 'Loading…'));
+  if (known && !pageAllowed(id)) {
+    document.title = 'Not found · RedX Console';
+    clear(main);
+    main.append(h('div', { class: 'page', id: 'page-missing' },
+      h('h1', null, 'Page not found'),
+      h('p', null, 'That page does not exist.'),
+      h('p', null, h('a', { href: '#/dashboard' }, 'Back to the dashboard'))));
+    return;
+  }
   document.title = (NAV.find((n) => n.id === id)?.title || (id === 'connect' ? 'Connect an app' : 'RedX')) + ' · RedX Console';
   try {
     const mod = await import('./pages/' + id + '.js');

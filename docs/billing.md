@@ -83,7 +83,7 @@ Environment only (never the config file, never logged):
 - `POST /v1/billing/webhook`: Stripe events, `Stripe-Signature` checked (5 minute tolerance), event ids
   de-duplicated, live/test mode must match the key.
 
-The page is `/ui/billing.html` (Settings → RedX Hosted plan → Choose a plan): Stripe's Payment Element with
+The console page is `#/hosting` (Settings → RedX Hosted plan → Open hosting). Choose a plan opens `/ui/billing.html?plan=<tier>&interval=month|year`: Stripe's Payment Element with
 the Appearance API in the console's crimson theme. Only that page's CSP allows `https://js.stripe.com` and
 Stripe's frames; the rest of the console keeps the strict policy. `?preview=1` renders it without Stripe.
 Pick monthly or annual on the plan grid.

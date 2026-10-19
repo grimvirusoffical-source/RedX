@@ -17,8 +17,9 @@ type clientIPKey struct{}
 type meterKey struct{}
 
 type reqMeter struct {
-	pr  *Principal
-	req int64
+	pr   *Principal
+	seen *Principal // set as soon as the caller is known, including when the call is refused
+	req  int64
 }
 
 // clientIP is the address of the caller.
@@ -145,6 +146,19 @@ func (h *Host) notePrincipal(r *http.Request, pr *Principal) {
 	}
 	if m, ok := r.Context().Value(meterKey{}).(*reqMeter); ok && m != nil {
 		m.pr = pr
+		if m.seen == nil {
+			m.seen = pr
+		}
+	}
+}
+
+// noteSeen records the caller for the activity log without counting the request toward traffic.
+func (h *Host) noteSeen(r *http.Request, pr *Principal) {
+	if r == nil || pr == nil {
+		return
+	}
+	if m, ok := r.Context().Value(meterKey{}).(*reqMeter); ok && m != nil && m.seen == nil {
+		m.seen = pr
 	}
 }
 

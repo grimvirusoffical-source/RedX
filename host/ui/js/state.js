@@ -37,7 +37,22 @@ export function applyTheme() {
   return t;
 }
 export const isAdmin = () => !!(state.who && state.who.scope === 'admin');
-export const isHostAdmin = () => !!(state.who && state.who.host_admin);
+export const isHostAdmin = () => !!(state.who && state.who.host_admin === true);
+
+/** Owner is a boolean on the account for a console session, and on whoami for an API key. Never a string. */
+export function isOwner() {
+  const w = state.who;
+  if (!w) return false;
+  if (w.account) return w.account.owner === true;
+  return w.owner === true;
+}
+
+/** pageAllowed is the nav and the router. Only whoami.pages[id] === true opens a page. join is public. */
+export function pageAllowed(id) {
+  if (id === 'join') return true;
+  const pages = state.who && state.who.pages;
+  return !!(pages && pages[id] === true);
+}
 
 export async function loadDbs() {
   try {
