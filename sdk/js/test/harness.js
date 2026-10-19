@@ -30,32 +30,39 @@ async function startHost() {
   const dataDir = path.join(tmp, 'data');
   // minimal environment: no inherited REDX_* settings or keys
   const env = { PATH: process.env.PATH, HOME: tmp };
-  const child = spawn(bin, ['run', '--no-open', '--bootstrap', 'console', '--data-dir', dataDir, '--listen', `127.0.0.1:${port}`], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+  let child;
   let out = '';
   let adminKey = null;
-  child.stdout.on('data', (d) => {
-    out += d;
-    if (!adminKey) { const m = /rx_live_[A-Za-z0-9]{43}/.exec(out); if (m) adminKey = m[0]; }
-    if (out.length > 20000) out = out.slice(-5000);
-  });
-  child.stderr.on('data', () => {});
   const url = `http://127.0.0.1:${port}`;
-  const stop = async () => {
+  const spawnHost = () => {
+    child = spawn(bin, ['run', '--no-open', '--bootstrap', 'console', '--data-dir', dataDir, '--listen', `127.0.0.1:${port}`], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    child.stdout.on('data', (d) => {
+      out += d;
+      if (!adminKey) { const m = /rx_live_[A-Za-z0-9]{43}/.exec(out); if (m) adminKey = m[0]; }
+      if (out.length > 20000) out = out.slice(-5000);
+    });
+    child.stderr.on('data', () => {});
+  };
+  const kill = async () => {
     if (child.exitCode === null) {
       child.kill('SIGKILL');
       await new Promise((r) => child.once('exit', r));
     }
-    fs.rmSync(tmp, { recursive: true, force: true });
   };
-  try {
+  const stop = async () => { await kill(); fs.rmSync(tmp, { recursive: true, force: true }); };
+  const ready = async () => {
     for (let i = 0; ; i++) {
       if (child.exitCode !== null) throw new Error('redxd exited early');
       try { const r = await fetch(url + '/healthz'); if (r.ok && adminKey) break; } catch { /* not up yet */ }
       if (i > 200) throw new Error('redxd did not become ready');
       await new Promise((r) => setTimeout(r, 50));
     }
-  } catch (e) { await stop(); throw e; }
-  return { url, adminKey, stop, dataDir };
+  };
+  spawnHost();
+  try { await ready(); } catch (e) { await stop(); throw e; }
+  // restart: kill the host, wait downMs, start it again on the same port and data (to test reconnects)
+  const restart = async (downMs = 300) => { await kill(); await new Promise((r) => setTimeout(r, downMs)); spawnHost(); await ready(); };
+  return { url, adminKey, stop, restart, dataDir };
 }
 
 module.exports = { startHost };

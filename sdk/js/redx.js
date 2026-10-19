@@ -10,18 +10,22 @@
 // message, JSON.stringify(client) or util.inspect(client).
 
 const util = require('node:util');
+const crypto = require('node:crypto');
 const wsClient = require('./ws');
 const { fromBox, BoxTextError } = require('./boxtext');
+const { OPERATIONS, DANGER, SEGMENT_PARAMS, install } = require('./operations');
 
 const DB_NAME = /^[a-z0-9][a-z0-9_-]{0,62}$/;
 const KEY_SHAPE = /rx_live_[A-Za-z0-9]+/g;
 
 class RedXError extends Error {
   /** @param {number} status HTTP status (0 = network/timeout/client-side error) */
-  constructor(status, message, { retryAfter = null, body = null } = {}) {
+  constructor(status, message, { retryAfter = null, body = null, code = null } = {}) {
     super(message);
     this.name = 'RedXError';
     this.status = status;
+    // machine-readable code: the host's "code" field, or "confirm_required" when a dangerous call was not confirmed
+    this.code = code ?? (body && typeof body.code === 'string' ? body.code : null);
     this.retryAfter = retryAfter; // seconds, for 429
     this.body = body;
   }
@@ -68,7 +72,7 @@ class RedX {
 
   #dbPrefix() { return this.db ? `/v1/db/${this.db}` : '/v1'; }
 
-  async #request(method, path, { body, headers = {}, query, accept } = {}) {
+  async #request(method, path, { body, headers = {}, query, accept, raw = false, anonymous = false } = {}) {
     let url = this.baseUrl + path;
     if (query) {
       const q = new URLSearchParams();
@@ -76,7 +80,7 @@ class RedX {
       const s = q.toString();
       if (s) url += '?' + s;
     }
-    const h = { Authorization: `Bearer ${this.#key}`, ...headers };
+    const h = anonymous ? { ...headers } : { Authorization: `Bearer ${this.#key}`, ...headers };
     if (accept) h.Accept = accept;
     let res;
     try {
@@ -85,6 +89,7 @@ class RedX {
       const timedOut = e && (e.name === 'TimeoutError' || e.name === 'AbortError');
       throw new RedXError(0, timedOut ? `request timed out after ${this.timeoutMs}ms` : scrub(`request failed: ${e && e.cause ? e.cause.message || e.cause : e.message}`));
     }
+    if (raw && res.ok) return { text: '', buf: Buffer.from(await res.arrayBuffer()), res };
     const text = await res.text();
     if (!res.ok) {
       let msg = `HTTP ${res.status}`;
@@ -208,18 +213,23 @@ class RedX {
   }
 
   /** Create an API key (needs an admin key). The returned `key` is shown once; store it. */
-  createKey({ db, scope, prefix, label, ttl, rateRps, rateBurst } = {}) {
+  createKey({ db, scope, prefix, label, ttl, rateRps, rateBurst, roles, confirm } = {}) {
+    if (confirm !== true) unconfirmed('createKey');
     const body = { db: db ?? this.db ?? 'default', scope };
     if (prefix !== undefined) body.prefix = prefix;
     if (label !== undefined) body.label = label;
     if (ttl !== undefined) body.ttl = ttl;
     if (rateRps !== undefined) body.rate_rps = rateRps;
     if (rateBurst !== undefined) body.rate_burst = rateBurst;
+    if (roles !== undefined) body.roles = roles;
     return this.#json('POST', '/v1/keys', { body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } });
   }
 
   /** Revoke a key by id (admin). */
-  revokeKey(id) { return this.#json('DELETE', `/v1/keys/${encodeURIComponent(id)}`); }
+  revokeKey(id, { confirm } = {}) {
+    if (confirm !== true) unconfirmed('revokeKey');
+    return this.#json('DELETE', `/v1/keys/${encodeURIComponent(id)}`);
+  }
 
   /**
    * Subscribe to changes under `pathPrefix` (WebSocket, Node only).
@@ -230,17 +240,158 @@ class RedX {
    * @param {(ev: object) => void} handler
    * @param {{onError?: (e: Error) => void, onClose?: (c: {code:number, reason:string}) => void}} [opts]
    */
-  async subscribe(pathPrefix, handler, { onError, onClose } = {}) {
-    return this.#stream('/subscribe', { path: pathPrefix }, handler, { onError, onClose });
+  async subscribe(pathPrefix, handler, { onError, onClose, reconnect, onReconnect } = {}) {
+    return this.#stream('/subscribe', { path: pathPrefix }, handler, { onError, onClose, reconnect, onReconnect });
   }
 
-  async #stream(subPath, searchParams, handler, { onError, onClose } = {}) {
+  /**
+   * Run any operation of api/redx-api.json by id: call('createDatabase', { body: { name: 'game' } }).
+   * opts: { db, <path params by name>, query, body, headers, confirm }. Path params are escaped here.
+   * Operations whose danger is "dangerous" are refused without a request unless confirm === true
+   * (RedXError with code "confirm_required"). Resolves parsed JSON, a string (Box text) or a Buffer (binary).
+   */
+  async call(opId, opts = {}) {
+    const op = OPERATIONS[opId];
+    if (!op) throw new TypeError(`unknown operation ${JSON.stringify(opId)}`);
+    if (op.response === 'websocket') throw new TypeError(`${opId} is a WebSocket stream: use stream('${opId}', opts, handler)`);
+    checkDanger(op, opts);
+    const headers = { ...(opts.headers || {}) };
+    let body;
+    if (op.request === 'json') {
+      body = JSON.stringify(opts.body === undefined ? {} : opts.body);
+      headers['Content-Type'] = 'application/json';
+    } else if (op.request === 'text') {
+      if (typeof opts.body !== 'string') throw new TypeError(`${opId} takes Box text (a string) as body`);
+      body = opts.body;
+      headers['Content-Type'] = 'text/x-redx-box';
+    } else if (op.request === 'binary') {
+      if (opts.body === undefined || opts.body === null) throw new TypeError(`${opId} needs a body (Buffer, Uint8Array or string)`);
+      body = typeof opts.body === 'string' ? Buffer.from(opts.body) : opts.body;
+      headers['Content-Type'] = headers['Content-Type'] || 'application/octet-stream';
+      if (!Object.keys(headers).some((k) => k.toLowerCase() === 'x-redx-sha256')) {
+        headers['X-Redx-SHA256'] = crypto.createHash('sha256').update(body).digest('hex');
+      }
+    }
+    let query = opts.query;
+    if (op.hostConfirm) { // the host's own guard: repeat the name, e.g. DELETE /v1/db/x?confirm=x
+      const v = op.hostConfirm === 'db' ? (opts.db ?? this.db ?? 'default') : opts[op.hostConfirm];
+      query = { confirm: v, ...(query || {}) };
+    }
+    const ro = { body, headers, query, anonymous: op.auth === 'none' };
+    const path = this.#opPath(op, opts);
+    if (op.response === 'binary') return (await this.#request(op.method, path, { ...ro, raw: true })).buf;
+    if (op.response === 'text') return (await this.#request(op.method, path, { ...ro, accept: 'text/x-redx-box' })).text;
+    const { text } = await this.#request(op.method, path, ro);
+    if (text === '') return {};
+    try { return JSON.parse(text); } catch { throw new RedXError(0, 'server sent a non-JSON response'); }
+  }
+
+  /** Open any WebSocket operation (bxWatch, subscribe, rulesSubscribe) by id; same options as subscribe(). */
+  async stream(opId, opts = {}, handler, streamOpts = {}) {
+    const op = OPERATIONS[opId];
+    if (!op || op.response !== 'websocket') throw new TypeError(`${opId} is not a WebSocket operation`);
+    const prefix = this.#opPath(op, opts);
+    const sp = {};
+    for (const [k, v] of Object.entries(opts.query || {})) if (v !== undefined && v !== null) sp[k] = String(v);
+    return this.#stream(prefix, sp, handler, streamOpts, true);
+  }
+
+  #opPath(op, opts) {
+    let p = op.path;
+    if (p.includes('{db}')) {
+      const db = opts.db ?? this.db;
+      if (db !== undefined && db !== null && !DB_NAME.test(db)) throw new TypeError('invalid db name');
+      if (!db && op.shorthand) p = op.shorthand;
+      else p = p.replace('{db}', db || 'default');
+    }
+    return p.replace(/\{([a-z]+)\}/g, (_, n) => {
+      const v = opts[n];
+      if (v === undefined || v === null || v === '') {
+        if (n === 'folder') return '';
+        throw new TypeError(`${op.id} needs ${n}`);
+      }
+      return SEGMENT_PARAMS.has(n) ? String(v).split('/').map(encodeURIComponent).join('/') : encodeURIComponent(String(v));
+    });
+  }
+
+  /** Run several BoxQL commands all-or-nothing: tx(['{Set[]} = ...', '{Add[]} = ...'], params). */
+  tx(commands, params = {}) {
+    if (!Array.isArray(commands) || commands.length === 0) throw new TypeError('tx needs a non-empty array of commands');
+    return this.bx(`{Tx[]} = [\n  ${commands.join(',\n  ')}\n]`, params);
+  }
+
+  /** Upload a file into a pack (streamed by the host, verified with its SHA-256). */
+  uploadFile(pack, file, data, { db } = {}) { return this.call('packPut', { db, pack, file, body: data }); }
+
+  /** Download a file of a pack; range: [start, end] inclusive byte offsets (end optional). */
+  downloadFile(pack, file, { db, range } = {}) {
+    return this.call('packGet', { db, pack, file, headers: rangeHeader(range) });
+  }
+
+  /** Upload a media item; type declares the media type (e.g. image/png). */
+  uploadMedia(lib, name, data, { db, type } = {}) { return this.call('mediaPut', { db, lib, name, body: data, query: { type } }); }
+
+  /** Download a media item; same range option as downloadFile(). */
+  downloadMedia(lib, name, { db, range } = {}) { return this.call('mediaGet', { db, lib, name, headers: rangeHeader(range) }); }
+
+  async #stream(subPath, searchParams, handler, { onError, onClose, reconnect, onReconnect } = {}, absolute = false) {
     if (typeof handler !== 'function') throw new TypeError('handler must be a function');
-    const wsUrl = new URL(`${this.baseUrl}${this.#dbPrefix()}${subPath}`);
+    const wsUrl = new URL(`${this.baseUrl}${absolute ? '' : this.#dbPrefix()}${subPath}`);
     for (const [k, v] of Object.entries(searchParams)) wsUrl.searchParams.set(k, v);
+    if (reconnect) return this.#reconnecting(wsUrl.toString(), handler, { onError, onClose, onReconnect, reconnect });
+    return this.#open(wsUrl.toString(), handler, { onError, onClose });
+  }
+
+  // Keeps a stream open: after an unexpected close it reconnects with exponential backoff (with jitter).
+  // Events that happen while disconnected are not replayed; onReconnect is the place to re-read state.
+  // It gives up (onError, then closed resolves) when the host refuses the stream (400/401/403/404).
+  async #reconnecting(url, handler, { onError, onClose, onReconnect, reconnect }) {
+    const minMs = (reconnect && reconnect.minMs) || 250;
+    const maxMs = (reconnect && reconnect.maxMs) || 10000;
+    let stopped = false;
+    let current = await this.#open(url, handler, { onError }); // the first connect reports its error to the caller
+    let resolveClosed;
+    const closed = new Promise((r) => { resolveClosed = r; });
+    const finish = (c) => { if (onClose) onClose(c); resolveClosed(c); };
+    let wake = null;
+    const sleep = (ms) => new Promise((r) => { const t = setTimeout(r, ms); wake = () => { clearTimeout(t); r(); }; });
+    (async () => {
+      let delay = minMs;
+      for (;;) {
+        const c = await current.closed;
+        if (stopped) { finish(c); return; }
+        for (;;) {
+          await sleep(delay / 2 + Math.random() * delay / 2);
+          delay = Math.min(delay * 2, maxMs);
+          if (stopped) { finish({ code: 1000, reason: 'bye' }); return; }
+          try {
+            current = await this.#open(url, handler, { onError });
+          } catch (e) {
+            if (e instanceof RedXError && [400, 401, 403, 404].includes(e.status)) {
+              if (onError) onError(e);
+              finish({ code: 0, reason: e.message });
+              return;
+            }
+            continue;
+          }
+          if (stopped) { current.close(); continue; }
+          delay = minMs;
+          if (onReconnect) { try { onReconnect(); } catch (e) { if (onError) onError(e); } }
+          break;
+        }
+      }
+    })();
+    return {
+      close: () => { stopped = true; if (wake) wake(); current.close(); },
+      closed,
+      ping: () => current.ping(),
+    };
+  }
+
+  async #open(url, handler, { onError, onClose } = {}) {
     let ws;
     try {
-      ws = await wsClient.connect(wsUrl.toString(), { Authorization: `Bearer ${this.#key}` }, { timeoutMs: this.timeoutMs });
+      ws = await wsClient.connect(url, { Authorization: `Bearer ${this.#key}` }, { timeoutMs: this.timeoutMs });
     } catch (e) {
       let msg = e.message, body = null;
       try { body = JSON.parse(e.body); if (body && body.error) msg = body.error; } catch { /* keep */ }
@@ -261,4 +412,92 @@ class RedX {
   }
 }
 
-module.exports = { RedX, RedXError, BoxTextError, fromBox, escapePath };
+function checkDanger(op, opts) {
+  if (op.danger === 'dangerous' && (!opts || opts.confirm !== true)) {
+    throw new RedXError(0, `${op.id} is a dangerous operation (${op.summary}) and needs confirm: true`, { code: 'confirm_required' });
+  }
+}
+
+const warned = new Set();
+function unconfirmed(name) {
+  if (warned.has(name)) return;
+  warned.add(name);
+  process.emitWarning(`${name}() without { confirm: true } is deprecated: it is a dangerous operation and will need confirm in a later release`, 'DeprecationWarning');
+}
+
+function rangeHeader(range) {
+  if (!range) return {};
+  const [start, end] = range;
+  return { Range: `bytes=${start}-${end === undefined || end === null ? '' : end}` };
+}
+
+// ---- app side of the connect handshake (no key needed) ----
+
+const b64url = (buf) => Buffer.from(buf).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+/** A fresh state and PKCE pair: { state, verifier, challenge }. Keep state and verifier secret until the exchange. */
+function connectRequest() {
+  const verifier = b64url(crypto.randomBytes(32));
+  return { state: b64url(crypto.randomBytes(24)), verifier, challenge: b64url(crypto.createHash('sha256').update(verifier).digest()) };
+}
+
+const LINK_FIELDS = ['provider', 'app', 'workspace', 'scope', 'prefix', 'label', 'state', 'callback', 'host', 'pin', 'name'];
+
+/**
+ * The connect link for the owner to open: redx://connect?... or, with consoleUrl, <consoleUrl>/#/connect?...
+ * o: { provider, state, challenge, app?, workspace?, scope?, prefix?, label?, callback?, host?, pin?, name?, consoleUrl? }
+ */
+function connectLink(o) {
+  if (!o || !o.provider || !o.state || !o.challenge) throw new TypeError('connectLink needs provider, state and challenge');
+  const q = new URLSearchParams({ v: '1' });
+  for (const k of LINK_FIELDS) if (o[k] !== undefined && o[k] !== null && o[k] !== '') q.set(k, String(o[k]));
+  q.set('pkce_challenge', o.challenge);
+  q.set('pkce_method', 'S256');
+  if (o.consoleUrl) return `${new URL(o.consoleUrl).origin}/#/connect?${q}`;
+  return `redx://connect?${q}`;
+}
+
+/** Read the callback URL the console opened; throws unless its state matches. Resolves { code, state, host, pin }. */
+function parseCallback(url, expectedState) {
+  const u = new URL(url);
+  const g = (k) => u.searchParams.get(k) || '';
+  const out = { code: g('code'), state: g('state'), host: g('host'), pin: g('pin') };
+  if (!out.code) throw new RedXError(0, 'callback carries no code', { code: 'bad_callback' });
+  const a = Buffer.from(out.state), b = Buffer.from(String(expectedState || ''));
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) throw new RedXError(0, 'callback state does not match', { code: 'state_mismatch' });
+  return out;
+}
+
+async function anonymousPost(url, path, body, timeoutMs = 30000) {
+  let res;
+  try {
+    res = await fetch(new URL(url).origin + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs), redirect: 'error' });
+  } catch (e) { throw new RedXError(0, scrub(`request failed: ${e && e.cause ? e.cause.message || e.cause : e.message}`)); }
+  const text = await res.text();
+  let parsed = null;
+  try { parsed = JSON.parse(text); } catch { /* not JSON */ }
+  if (!res.ok) throw new RedXError(res.status, scrub(parsed && parsed.error ? parsed.error : `HTTP ${res.status}`), { body: parsed });
+  return parsed;
+}
+
+/** Trade an approved connect code plus the PKCE verifier for the app's key: { key, workspace, scope, ... } (key shown once). */
+function exchangeConnectCode({ url, code, verifier, state, deviceLabel, providerGrant, timeoutMs }) {
+  const body = { code, pkce_verifier: verifier, state };
+  if (deviceLabel) body.device_label = deviceLabel;
+  if (providerGrant) body.provider_grant = providerGrant;
+  return anonymousPost(url, '/v1/connect/exchange', body, timeoutMs);
+}
+
+/** Trade a sign-in (pairing) code for a key. */
+function exchangePairingCode({ url, code, timeoutMs }) { return anonymousPost(url, '/v1/pair/exchange', { code }, timeoutMs); }
+
+install(RedX.prototype);
+
+/** The danger level of an operation id ("safe", "write", "admin", "dangerous"). */
+function dangerOf(opId) { const op = OPERATIONS[opId]; if (!op) throw new TypeError(`unknown operation ${opId}`); return op.danger; }
+
+module.exports = {
+  RedX, RedXError, BoxTextError, fromBox, escapePath,
+  OPERATIONS, DANGER, dangerOf,
+  connectRequest, connectLink, parseCallback, exchangeConnectCode, exchangePairingCode,
+};

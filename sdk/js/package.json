@@ -1,10 +1,23 @@
 {
   "name": "redx-client",
-  "version": "0.1.0-dev",
+  "version": "0.2.0-dev",
   "private": true,
   "description": "Dependency-free JavaScript client for the RedX host (redxd). Local only; not published.",
   "main": "redx.js",
-  "engines": { "node": ">=18" },
-  "scripts": { "test": "node --test test/sdk.test.js test/ws.test.js" },
-  "license": "UNLICENSED"
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test test/sdk.test.js test/ws.test.js test/full.test.js"
+  },
+  "license": "UNLICENSED",
+  "types": "redx.d.ts",
+  "files": [
+    "redx.js",
+    "redx.d.ts",
+    "ws.js",
+    "boxtext.js",
+    "operations.js",
+    "operations.d.ts"
+  ]
 }

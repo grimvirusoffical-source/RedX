@@ -1,0 +1,918 @@
+{
+ "name": "RedX HTTP API",
+ "version": "1",
+ "api": "/v1",
+ "notes": "Source of truth for the RedX SDKs. scripts/gensdk turns it into api/openapi.json and the operation tables of every SDK. Change the API here first.",
+ "auth": {
+  "none": "no key",
+  "key": "any valid key",
+  "read": "key with read scope on the database",
+  "write": "write scope on the database",
+  "admin": "admin scope on the database",
+  "host-admin": "admin key for all databases (db \"*\")",
+  "app-key": "the app's own key from the connect flow"
+ },
+ "danger": [
+  {
+   "name": "safe",
+   "level": 0,
+   "meaning": "reads only"
+  },
+  {
+   "name": "write",
+   "level": 1,
+   "meaning": "changes data inside the key's own scope"
+  },
+  {
+   "name": "admin",
+   "level": 2,
+   "meaning": "changes host or database definitions; reversible"
+  },
+  {
+   "name": "dangerous",
+   "level": 3,
+   "meaning": "irreversible, grants or removes access, or moves leadership; SDKs refuse it unless the call is explicitly confirmed"
+  }
+ ],
+ "rottenAppleLevels": {
+  "safe": "L1",
+  "write": "L1",
+  "admin": "developer-tool",
+  "dangerous": "developer-tool",
+  "notes": "safe and write calls on the app's own workspace are the data.redx service (L1 in Rotten Apple's SDK levels). admin and dangerous calls are developer and operator tools only: they must not be exposed to in-app code through the launcher."
+ },
+ "operations": [
+  {
+   "id": "health",
+   "group": "host",
+   "method": "GET",
+   "path": "/healthz",
+   "auth": "none",
+   "danger": "safe",
+   "summary": "Liveness, node id, role and version (no key needed).",
+   "response": "json"
+  },
+  {
+   "id": "whoami",
+   "group": "host",
+   "method": "GET",
+   "path": "/v1/ui/whoami",
+   "auth": "key",
+   "danger": "safe",
+   "summary": "The calling key's id, scope, database and prefix.",
+   "response": "json"
+  },
+  {
+   "id": "stats",
+   "group": "database",
+   "method": "GET",
+   "path": "/v1/db/{db}/stats",
+   "auth": "read",
+   "danger": "safe",
+   "summary": "Engine and host counters of a database.",
+   "response": "json",
+   "shorthand": "/v1/stats"
+  },
+  {
+   "id": "listDatabases",
+   "group": "host",
+   "method": "GET",
+   "path": "/v1/dbs",
+   "auth": "read",
+   "danger": "safe",
+   "summary": "Databases the key can see.",
+   "response": "json"
+  },
+  {
+   "id": "createDatabase",
+   "group": "host",
+   "method": "POST",
+   "path": "/v1/dbs",
+   "auth": "host-admin",
+   "danger": "admin",
+   "summary": "Create a database.",
+   "response": "json",
+   "body": {
+    "name": "string"
+   }
+  },
+  {
+   "id": "deleteDatabase",
+   "group": "host",
+   "method": "DELETE",
+   "path": "/v1/db/{db}",
+   "auth": "host-admin",
+   "danger": "dangerous",
+   "summary": "Delete a database and all its files (irreversible).",
+   "response": "json",
+   "query": {
+    "confirm": "string"
+   },
+   "hostConfirm": "db",
+   "notes": "The host also wants the database name repeated as ?confirm=<db>; SDKs add it when the call is confirmed."
+  },
+  {
+   "id": "validate",
+   "group": "host",
+   "method": "POST",
+   "path": "/v1/ui/validate",
+   "auth": "read",
+   "danger": "safe",
+   "summary": "Parse Box text, BoxQL or a policy and report line:col errors.",
+   "response": "json",
+   "body": {
+    "kind": "string",
+    "text": "string"
+   }
+  },
+  {
+   "id": "adminStatus",
+   "group": "host",
+   "method": "GET",
+   "path": "/v1/admin/status",
+   "auth": "host-admin",
+   "danger": "safe",
+   "summary": "Dashboard status: version, data dir, TLS, cluster, warnings.",
+   "response": "json"
+  },
+  {
+   "id": "adminAudit",
+   "group": "host",
+   "method": "GET",
+   "path": "/v1/admin/audit",
+   "auth": "host-admin",
+   "danger": "safe",
+   "summary": "Newest audit events (never contain keys).",
+   "response": "json",
+   "query": {
+    "limit": "integer"
+   }
+  },
+  {
+   "id": "adminConfig",
+   "group": "host",
+   "method": "GET",
+   "path": "/v1/admin/config",
+   "auth": "host-admin",
+   "danger": "safe",
+   "summary": "Effective configuration with secrets hidden.",
+   "response": "json"
+  },
+  {
+   "id": "listPresets",
+   "group": "host",
+   "method": "GET",
+   "path": "/v1/admin/presets",
+   "auth": "host-admin",
+   "danger": "safe",
+   "summary": "Settings presets with every value and reason.",
+   "response": "json"
+  },
+  {
+   "id": "backup",
+   "group": "host",
+   "method": "GET",
+   "path": "/v1/admin/backup",
+   "auth": "host-admin",
+   "danger": "admin",
+   "summary": "Online backup of all databases and keys as one archive (contains everything: store it safely).",
+   "response": "binary",
+   "notes": "Restore is offline only (redx restore FILE with the host stopped); there is no HTTP restore."
+  },
+  {
+   "id": "listFiles",
+   "group": "database",
+   "method": "GET",
+   "path": "/v1/db/{db}/files",
+   "auth": "admin",
+   "danger": "safe",
+   "summary": "Files of a database with type and size.",
+   "response": "json"
+  },
+  {
+   "id": "listKeys",
+   "group": "keys",
+   "method": "GET",
+   "path": "/v1/keys",
+   "auth": "admin",
+   "danger": "safe",
+   "summary": "Keys (ids, scopes, status; never the secrets).",
+   "response": "json"
+  },
+  {
+   "id": "getKey",
+   "group": "keys",
+   "method": "GET",
+   "path": "/v1/keys/{id}",
+   "auth": "admin",
+   "danger": "safe",
+   "summary": "One key's details.",
+   "response": "json"
+  },
+  {
+   "id": "createKey",
+   "group": "keys",
+   "method": "POST",
+   "path": "/v1/keys",
+   "auth": "admin",
+   "danger": "dangerous",
+   "summary": "Create an API key; the secret is returned once.",
+   "response": "json",
+   "body": {
+    "db": "string",
+    "scope": "string",
+    "prefix": "string",
+    "label": "string",
+    "ttl": "string",
+    "roles": "array",
+    "rate_rps": "number",
+    "rate_burst": "integer"
+   }
+  },
+  {
+   "id": "revokeKey",
+   "group": "keys",
+   "method": "DELETE",
+   "path": "/v1/keys/{id}",
+   "auth": "admin",
+   "danger": "dangerous",
+   "summary": "Revoke a key at once.",
+   "response": "json"
+  },
+  {
+   "id": "rotateKey",
+   "group": "keys",
+   "method": "POST",
+   "path": "/v1/keys/{id}/rotate",
+   "auth": "admin",
+   "danger": "dangerous",
+   "summary": "Issue a replacement key; the old one stops after the grace period.",
+   "response": "json",
+   "body": {
+    "grace": "string"
+   }
+  },
+  {
+   "id": "createPairingCode",
+   "group": "keys",
+   "method": "POST",
+   "path": "/v1/keys/pairing",
+   "auth": "admin",
+   "danger": "dangerous",
+   "summary": "One-time sign-in code (5 min) that another device trades for a new key.",
+   "response": "json",
+   "body": {
+    "db": "string",
+    "scope": "string",
+    "label": "string",
+    "ttl": "string"
+   }
+  },
+  {
+   "id": "pairExchange",
+   "group": "keys",
+   "method": "POST",
+   "path": "/v1/pair/exchange",
+   "auth": "none",
+   "danger": "write",
+   "summary": "Trade a sign-in code for a key.",
+   "response": "json",
+   "body": {
+    "code": "string"
+   }
+  },
+  {
+   "id": "getPath",
+   "group": "database",
+   "method": "GET",
+   "path": "/v1/db/{db}/path/{path}",
+   "auth": "read",
+   "danger": "safe",
+   "summary": "Read the value at a path ({path, value} with value as Box text).",
+   "response": "json",
+   "shorthand": "/v1/path/{path}",
+   "query": {
+    "resolve": "boolean",
+    "depth": "integer"
+   }
+  },
+  {
+   "id": "getPathBox",
+   "group": "database",
+   "method": "GET",
+   "path": "/v1/db/{db}/path/{path}",
+   "auth": "read",
+   "danger": "safe",
+   "summary": "Read the value at a path as raw Box text.",
+   "response": "text",
+   "shorthand": "/v1/path/{path}"
+  },
+  {
+   "id": "setPath",
+   "group": "database",
+   "method": "PUT",
+   "path": "/v1/db/{db}/path/{path}",
+   "auth": "write",
+   "danger": "write",
+   "summary": "Write a value (JSON envelope or Box text) with optional TTL.",
+   "response": "json",
+   "shorthand": "/v1/path/{path}",
+   "body": {
+    "value": "any",
+    "ttl_seconds": "integer",
+    "sliding": "boolean",
+    "checkpoint_seconds": "integer"
+   },
+   "query": {
+    "ttl": "integer",
+    "sliding": "boolean",
+    "checkpoint": "integer"
+   }
+  },
+  {
+   "id": "deletePath",
+   "group": "database",
+   "method": "DELETE",
+   "path": "/v1/db/{db}/path/{path}",
+   "auth": "write",
+   "danger": "write",
+   "summary": "Delete the value at a path.",
+   "response": "json",
+   "shorthand": "/v1/path/{path}"
+  },
+  {
+   "id": "pathQuery",
+   "group": "database",
+   "method": "POST",
+   "path": "/v1/db/{db}/query",
+   "auth": "read",
+   "danger": "safe",
+   "summary": "Path-pattern query, e.g. file:Box[ID=*].Name.",
+   "response": "json",
+   "shorthand": "/v1/query",
+   "body": {
+    "q": "string"
+   }
+  },
+  {
+   "id": "bx",
+   "group": "database",
+   "method": "POST",
+   "path": "/v1/db/{db}/bx",
+   "auth": "read",
+   "danger": "write",
+   "summary": "Run one BoxQL command or {Tx[]} transaction with $params.",
+   "response": "json",
+   "shorthand": "/v1/bx",
+   "body": {
+    "q": "string",
+    "params": "object",
+    "explain": "boolean"
+   },
+   "notes": "Get/Require/Explain need read; Add/Set/Delete and a Tx containing one need write."
+  },
+  {
+   "id": "bxWatch",
+   "group": "database",
+   "method": "GET",
+   "path": "/v1/db/{db}/bx/watch",
+   "auth": "read",
+   "danger": "safe",
+   "summary": "WebSocket: stream changes matching a {Watch[]} command.",
+   "response": "websocket",
+   "shorthand": "/v1/bx/watch",
+   "query": {
+    "q": "string",
+    "params": "string"
+   }
+  },
+  {
+   "id": "subscribe",
+   "group": "database",
+   "method": "GET",
+   "path": "/v1/db/{db}/subscribe",
+   "auth": "read",
+   "danger": "safe",
+   "summary": "WebSocket: stream changes under a path prefix.",
+   "response": "websocket",
+   "shorthand": "/v1/subscribe",
+   "query": {
+    "path": "string"
+   }
+  },
+  {
+   "id": "listPacks",
+   "group": "files",
+   "method": "GET",
+   "path": "/v1/db/{db}/pack",
+   "auth": "read",
+   "danger": "safe",
+   "summary": "File packs of a database.",
+   "response": "json"
+  },
+  {
+   "id": "packList",
+   "group": "files",
+   "method": "GET",
+   "path": "/v1/db/{db}/pack/{pack}/ls/{folder}",
+   "auth": "read",
+   "danger": "safe",
+   "summary": "List a folder of a pack.",
+   "response": "json"
+  },
+  {
+   "id": "packStat",
+   "group": "files",
+   "method": "GET",
+   "path": "/v1/db/{db}/pack/{pack}/stat/{file}",
+   "auth": "read",
+   "danger": "safe",
+   "summary": "One file's size, hash and type.",
+   "response": "json"
+  },
+  {
+   "id": "packGet",
+   "group": "files",
+   "method": "GET",
+   "path": "/v1/db/{db}/pack/{pack}/file/{file}",
+   "auth": "read",
+   "danger": "safe",
+   "summary": "Download a file (HTTP Range supported).",
+   "response": "binary"
+  },
+  {
+   "id": "packPut",
+   "group": "files",
+   "method": "PUT",
+   "path": "/v1/db/{db}/pack/{pack}/file/{file}",
+   "auth": "write",
+   "danger": "write",
+   "summary": "Upload a file (streamed; X-Redx-SHA256 verified).",
+   "response": "json",
+   "request": "binary"
+  },
+  {
+   "id": "packDelete",
+   "group": "files",
+   "method": "DELETE",
+   "path": "/v1/db/{db}/pack/{pack}/file/{file}",
+   "auth": "write",
+   "danger": "write",
+   "summary": "Delete a file.",
+   "response": "json"
+  },
+  {
+   "id": "packGc",
+   "group": "files",
+   "method": "POST",
+   "path": "/v1/db/{db}/pack/{pack}/gc",
+   "auth": "admin",
+   "danger": "admin",
+   "summary": "Free chunks of deleted or replaced files.",
+   "response": "json"
+  },
+  {
+   "id": "packFsck",
+   "group": "files",
+   "method": "GET",
+   "path": "/v1/db/{db}/pack/{pack}/fsck",
+   "auth": "admin",
+   "danger": "safe",
+   "summary": "Integrity report (changes nothing).",
+   "response": "json",
+   "query": {
+    "deep": "boolean"
+   }
+  },
+  {
+   "id": "listMedia",
+   "group": "files",
+   "method": "GET",
+   "path": "/v1/db/{db}/media",
+   "auth": "read",
+   "danger": "safe",
+   "summary": "Media libraries of a database.",
+   "response": "json"
+  },
+  {
+   "id": "mediaList",
+   "group": "files",
+   "method": "GET",
+   "path": "/v1/db/{db}/media/{lib}",
+   "auth": "read",
+   "danger": "safe",
+   "summary": "Items of a media library.",
+   "response": "json"
+  },
+  {
+   "id": "mediaStat",
+   "group": "files",
+   "method": "GET",
+   "path": "/v1/db/{db}/media/{lib}/stat/{name}",
+   "auth": "read",
+   "danger": "safe",
+   "summary": "One item's manifest.",
+   "response": "json"
+  },
+  {
+   "id": "mediaGet",
+   "group": "files",
+   "method": "GET",
+   "path": "/v1/db/{db}/media/{lib}/file/{name}",
+   "auth": "read",
+   "danger": "safe",
+   "summary": "Download an item (HTTP Range supported).",
+   "response": "binary"
+  },
+  {
+   "id": "mediaPut",
+   "group": "files",
+   "method": "PUT",
+   "path": "/v1/db/{db}/media/{lib}/file/{name}",
+   "auth": "write",
+   "danger": "write",
+   "summary": "Upload an item (?type= declares the media type).",
+   "response": "json",
+   "request": "binary",
+   "query": {
+    "type": "string"
+   }
+  },
+  {
+   "id": "mediaDelete",
+   "group": "files",
+   "method": "DELETE",
+   "path": "/v1/db/{db}/media/{lib}/file/{name}",
+   "auth": "write",
+   "danger": "write",
+   "summary": "Delete an item.",
+   "response": "json"
+  },
+  {
+   "id": "listIndexes",
+   "group": "database",
+   "method": "GET",
+   "path": "/v1/db/{db}/idx",
+   "auth": "read",
+   "danger": "safe",
+   "summary": "Index sets of a database.",
+   "response": "json"
+  },
+  {
+   "id": "indexQuery",
+   "group": "database",
+   "method": "GET",
+   "path": "/v1/db/{db}/idx/{set}/{index}/query",
+   "auth": "read",
+   "danger": "safe",
+   "summary": "Query an index (exact, prefix, range, text).",
+   "response": "json",
+   "query": {
+    "mode": "string",
+    "field": "string",
+    "value": "string",
+    "lo": "string",
+    "hi": "string",
+    "q": "string",
+    "op": "string",
+    "limit": "integer",
+    "record": "boolean"
+   }
+  },
+  {
+   "id": "defineIndex",
+   "group": "database",
+   "method": "PUT",
+   "path": "/v1/db/{db}/idx/{set}",
+   "auth": "admin",
+   "danger": "admin",
+   "summary": "Define or replace an index set (Box text).",
+   "response": "json",
+   "request": "text"
+  },
+  {
+   "id": "dropIndex",
+   "group": "database",
+   "method": "DELETE",
+   "path": "/v1/db/{db}/idx/{set}",
+   "auth": "admin",
+   "danger": "admin",
+   "summary": "Drop an index set (the data stays).",
+   "response": "json"
+  },
+  {
+   "id": "rebuildIndex",
+   "group": "database",
+   "method": "POST",
+   "path": "/v1/db/{db}/idx/{set}/rebuild",
+   "auth": "admin",
+   "danger": "admin",
+   "summary": "Rebuild an index set from the data.",
+   "response": "json"
+  },
+  {
+   "id": "checkIndex",
+   "group": "database",
+   "method": "GET",
+   "path": "/v1/db/{db}/idx/{set}/check",
+   "auth": "read",
+   "danger": "safe",
+   "summary": "Compare an index set with the data.",
+   "response": "json"
+  },
+  {
+   "id": "getRules",
+   "group": "database",
+   "method": "GET",
+   "path": "/v1/db/{db}/pulse",
+   "auth": "read",
+   "danger": "safe",
+   "summary": "Pulse rules and pending timers.",
+   "response": "json"
+  },
+  {
+   "id": "putRules",
+   "group": "database",
+   "method": "PUT",
+   "path": "/v1/db/{db}/pulse",
+   "auth": "admin",
+   "danger": "admin",
+   "summary": "Replace the rule set (Box text, validated first).",
+   "response": "json",
+   "request": "text"
+  },
+  {
+   "id": "deleteRules",
+   "group": "database",
+   "method": "DELETE",
+   "path": "/v1/db/{db}/pulse",
+   "auth": "admin",
+   "danger": "admin",
+   "summary": "Remove all rules.",
+   "response": "json"
+  },
+  {
+   "id": "rulesSubscribe",
+   "group": "database",
+   "method": "GET",
+   "path": "/v1/db/{db}/pulse/subscribe",
+   "auth": "read",
+   "danger": "safe",
+   "summary": "WebSocket: rule events.",
+   "response": "websocket",
+   "query": {
+    "topic": "string",
+    "changes": "boolean"
+   }
+  },
+  {
+   "id": "getPolicy",
+   "group": "database",
+   "method": "GET",
+   "path": "/v1/db/{db}/sec",
+   "auth": "read",
+   "danger": "safe",
+   "summary": "Access policy summary (source for admins).",
+   "response": "json"
+  },
+  {
+   "id": "putPolicy",
+   "group": "database",
+   "method": "PUT",
+   "path": "/v1/db/{db}/sec",
+   "auth": "admin",
+   "danger": "dangerous",
+   "summary": "Replace the access policy (changes who can read what).",
+   "response": "json",
+   "request": "text"
+  },
+  {
+   "id": "deletePolicy",
+   "group": "database",
+   "method": "DELETE",
+   "path": "/v1/db/{db}/sec",
+   "auth": "admin",
+   "danger": "dangerous",
+   "summary": "Remove the access policy.",
+   "response": "json"
+  },
+  {
+   "id": "listScripts",
+   "group": "database",
+   "method": "GET",
+   "path": "/v1/db/{db}/code",
+   "auth": "read",
+   "danger": "safe",
+   "summary": "Script files of a database.",
+   "response": "json"
+  },
+  {
+   "id": "putScript",
+   "group": "database",
+   "method": "PUT",
+   "path": "/v1/db/{db}/code/file/{file}",
+   "auth": "admin",
+   "danger": "admin",
+   "summary": "Define or replace a script file.",
+   "response": "json",
+   "request": "text"
+  },
+  {
+   "id": "deleteScript",
+   "group": "database",
+   "method": "DELETE",
+   "path": "/v1/db/{db}/code/file/{file}",
+   "auth": "admin",
+   "danger": "admin",
+   "summary": "Delete a script file.",
+   "response": "json"
+  },
+  {
+   "id": "runScript",
+   "group": "database",
+   "method": "POST",
+   "path": "/v1/db/{db}/code/run/{script}",
+   "auth": "write",
+   "danger": "write",
+   "summary": "Run a script with arguments.",
+   "response": "json",
+   "body": {
+    "args": "array"
+   }
+  },
+  {
+   "id": "clusterStatus",
+   "group": "cluster",
+   "method": "GET",
+   "path": "/v1/cluster/status",
+   "auth": "host-admin",
+   "danger": "safe",
+   "summary": "Role, leader, members, replication offsets, fence.",
+   "response": "json"
+  },
+  {
+   "id": "createJoinToken",
+   "group": "cluster",
+   "method": "POST",
+   "path": "/v1/cluster/join-token",
+   "auth": "host-admin",
+   "danger": "dangerous",
+   "summary": "Join token or pairing code that lets a node join and receive all data.",
+   "response": "json",
+   "body": {
+    "ttl_seconds": "integer",
+    "kind": "string"
+   }
+  },
+  {
+   "id": "promote",
+   "group": "cluster",
+   "method": "POST",
+   "path": "/v1/cluster/promote",
+   "auth": "host-admin",
+   "danger": "dangerous",
+   "summary": "Make this follower the leader (fences the old leader; unreplicated writes are lost).",
+   "response": "json"
+  },
+  {
+   "id": "repoint",
+   "group": "cluster",
+   "method": "POST",
+   "path": "/v1/cluster/leader",
+   "auth": "host-admin",
+   "danger": "dangerous",
+   "summary": "Make this node follow another leader (its own un-replicated writes are discarded).",
+   "response": "json",
+   "body": {
+    "url": "string",
+    "join_token": "string",
+    "pin_sha256": "string"
+   }
+  },
+  {
+   "id": "connectStart",
+   "group": "connect",
+   "method": "POST",
+   "path": "/v1/connect/start",
+   "auth": "host-admin",
+   "danger": "admin",
+   "summary": "Register an app's connect request (what the console does with a link).",
+   "response": "json",
+   "body": {
+    "v": "integer",
+    "provider": "string",
+    "app": "string",
+    "workspace": "string",
+    "scope": "string",
+    "prefix": "string",
+    "label": "string",
+    "state": "string",
+    "pkce_challenge": "string",
+    "pkce_method": "string",
+    "callback": "string",
+    "host": "string",
+    "pin": "string",
+    "name": "string"
+   }
+  },
+  {
+   "id": "connectPending",
+   "group": "connect",
+   "method": "GET",
+   "path": "/v1/connect/pending",
+   "auth": "host-admin",
+   "danger": "safe",
+   "summary": "Open connect requests.",
+   "response": "json"
+  },
+  {
+   "id": "connectApprove",
+   "group": "connect",
+   "method": "POST",
+   "path": "/v1/connect/approve",
+   "auth": "host-admin",
+   "danger": "dangerous",
+   "summary": "Approve: creates the workspace and a one-time code for the app's key.",
+   "response": "json",
+   "body": {
+    "request_id": "string",
+    "workspace": "string",
+    "scope": "string",
+    "confirm": "string",
+    "replace": "boolean"
+   }
+  },
+  {
+   "id": "connectDeny",
+   "group": "connect",
+   "method": "POST",
+   "path": "/v1/connect/deny",
+   "auth": "host-admin",
+   "danger": "write",
+   "summary": "Deny an open request.",
+   "response": "json",
+   "body": {
+    "request_id": "string",
+    "ref": "string"
+   }
+  },
+  {
+   "id": "connectExchange",
+   "group": "connect",
+   "method": "POST",
+   "path": "/v1/connect/exchange",
+   "auth": "none",
+   "danger": "write",
+   "summary": "App side: trade the code plus PKCE verifier for the workspace key.",
+   "response": "json",
+   "body": {
+    "code": "string",
+    "pkce_verifier": "string",
+    "state": "string",
+    "device_label": "string",
+    "provider_grant": "string"
+   }
+  },
+  {
+   "id": "connectRevoke",
+   "group": "connect",
+   "method": "POST",
+   "path": "/v1/connect/revoke",
+   "auth": "app-key",
+   "danger": "write",
+   "summary": "App side: revoke the app's own key (on uninstall).",
+   "response": "json"
+  },
+  {
+   "id": "connectApps",
+   "group": "connect",
+   "method": "GET",
+   "path": "/v1/connect/apps",
+   "auth": "host-admin",
+   "danger": "safe",
+   "summary": "Connected apps.",
+   "response": "json"
+  },
+  {
+   "id": "connectRevokeApp",
+   "group": "connect",
+   "method": "DELETE",
+   "path": "/v1/connect/apps/{id}",
+   "auth": "host-admin",
+   "danger": "dangerous",
+   "summary": "Revoke a connected app's key.",
+   "response": "json"
+  }
+ ],
+ "paramEncoding": {
+  "default": "component",
+  "segments": [
+   "file",
+   "folder",
+   "name"
+  ],
+  "notes": "component: encodeURIComponent of the whole value (a RedX path like file:Box[ID=1].X becomes one segment). segments: a slash-separated pack or media path; each segment is encoded, the slashes stay."
+ },
+ "dbDefault": "When an operation has a {db} parameter and the caller gives none, SDKs use the client's database; with no client database they use the shorthand route if there is one (the host's default database), otherwise the database named default.",
+ "hostConfirm": "hostConfirm names the parameter whose value a confirmed dangerous call repeats as ?confirm= (the host's own guard)."
+}
