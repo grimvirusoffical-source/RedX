@@ -79,7 +79,7 @@ Values are passed as `$name` parameters and are never parsed as command text. Th
 | [Backup and restore](docs/backup.md) | online and offline backups |
 | [Storage engines](docs/engines.md) | on-disk formats, TTL, recovery |
 | [Indexes and packs](docs/indexes-and-packs.md), [Links and rules](docs/links-and-rules.md), [Media](docs/media.md), [Policy and encryption](docs/policy-and-encryption.md), [Scripts](docs/scripts.md) | feature references |
-| [Query engine](docs/query-engine.md), [SDKs](docs/sdks.md) | embedding and client libraries |
+| [Query engine](docs/query-engine.md), [SDKs](docs/sdks.md), [Game engines](docs/game-engines.md) | embedding and client libraries |
 | [Benchmarks](docs/benchmarks.md) | engine measurements |
 | [Changelog](CHANGELOG.md), [Contributing](CONTRIBUTING.md), [Security policy](SECURITY.md) | project information |
 

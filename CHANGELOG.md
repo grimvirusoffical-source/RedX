@@ -2,14 +2,17 @@
 
 ## Unreleased (0.4.4)
 
-## Unreleased (0.4.4)
-
 * Connect: added the `quicklaunch` provider (QuickLaunch developer tool) and a strict loopback callback rule: `http://127.0.0.1`, `http://[::1]` or `http://localhost` on any port with exactly the registered path; everything else is refused.
 * The console Help page has an About card with the ownership notice, also in the README.
 * Subscriptions (`/v1/subscribe`) are armed before the WebSocket handshake completes, so a write made right after `subscribe()` returns is always delivered.
 * macOS installers: every Mach-O is signed explicitly, inside out, including `Contents/Resources/bin/redx` and the `.pkg`'s `/usr/local/bin` binaries (`codesign --deep` did not reach them). Optional `MACOS_SIGN_IDENTITY` (hardened runtime) / `MACOS_INSTALLER_IDENTITY` (`productbuild --sign`); installers stay unsigned (ad-hoc) by default.
 * Release builds refuse a dirty git tree (`REDX_ALLOW_DIRTY=1` overrides and stamps `-dirty`).
 * Removed a stray development binary from the repository root; root build outputs are ignored.
+* One API description, `api/redx-api.json`, generates `api/openapi.json` and the SDKs (`go run ./scripts/gensdk`; CI checks for drift). Every operation has a danger level (`safe`, `write`, `admin`, `dangerous`); `dangerous` calls need `confirm`. See [SDKs](docs/sdks.md).
+* New SDKs: Go (`sdk/go/redx`), a C ABI shared library with headers (`sdk/go/cabi`), Swift (`sdk/swift`) and C# / .NET (`sdk/csharp`). JavaScript gains TypeScript types; JavaScript and Python gain every host and database operation, transactions, files/packs/media, streams that reconnect, and connect helpers (PKCE).
+* Game engine recipes for Unity, Godot and Unreal: [game-engines.md](docs/game-engines.md) (not tested in the engines).
+* JS/Python: `createKey` and `revokeKey` without `confirm` still work but warn once. `RedXError` has `code`.
+* CI runs the Go and C# SDK tests on Linux, Windows and macOS, the C ABI on Linux and macOS, and Swift on macOS.
 
 ## 0.4.3
 
