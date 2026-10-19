@@ -4,7 +4,7 @@
 
 Supported platforms: Windows 10/11 and Server (amd64, arm64), macOS (Intel and Apple silicon), Linux (amd64, arm64, armv7) including Raspberry Pi OS. See the [status matrix](../README.md#status) for what has been tested on each.
 
-Related documents: [Getting started](getting-started.md) · [Configuration](configuration.md) · [Security](security.md) · [Clustering and replication](clustering.md) · [Backup and restore](backup.md)
+Related documents: [Getting started](getting-started.md) · [Configuration](configuration.md) · [Security](security.md) · [Clustering and replication](clustering.md) · [Backup and restore](backup.md) · [Hosting apps and sites](hosting-apps.md)
 
 ## Components
 
@@ -95,6 +95,10 @@ Secrets are never printed: `-h` shows `--key` as "(currently set from $REDX_KEY)
 * Follower log shows `leader answered 401` — wrong token/secret, or the node id given to `redx node join --node-id` differs from the daemon's (the CLI writes `node.id` for you; don't override `node_id` in the config afterwards).
 * `429` while testing wrong keys — you tripped the per-IP failed-auth throttle; wait a minute.
 * Termux/Android: Go binaries built for linux cannot read Android's DNS config; use **IP addresses** for `peers`/`advertise`, run with `./install.sh --user`, and keep the app awake (Android may kill background processes). Not tested.
+
+## Apps and sites
+
+Paying subscribers can host a static site or a container next to their databases. Each app is sandboxed, gets `<name>-<tenant>.host.rottenapplestore.org`, and can use a custom domain after a TXT or HTTP check. The console page is **Apps**. Setup for the Kamatera host (rootless podman, Caddy on-demand TLS, the DNS wildcard) is in [Hosting apps and sites](hosting-apps.md).
 
 ## Building and releases
 

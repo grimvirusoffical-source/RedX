@@ -96,6 +96,7 @@ func TestDangerousOpsRequireConfirm(t *testing.T) {
 		{"updateRolloutRollback", "POST", "/v1/updates/rollouts/ro_missing/rollback", `{}`, "updateRolloutRollback", "", 0},
 		{"updateAppRollback", "POST", "/v1/updates/apps/redx/rollback", `{"snapshot_id":"snap_missing"}`, "updateAppRollback", "", 0},
 		{"updatePublish", "POST", "/v1/updates/apps/redx/publish", `{"version":"0.0.1","targets":["host"]}`, "updatePublish", "", 0},
+		{"deleteHostedApp", "DELETE", "/v1/hosted/apps/ha_missing", "", "deleteHostedApp", "", 0},
 		{"deleteDatabase", "DELETE", "/v1/db/scratch", "", "deleteDatabase", "scratch", 200},
 	}
 	// recreate a key for rotate (revoke above consumed the seed)

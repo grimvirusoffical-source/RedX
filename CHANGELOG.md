@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+* Hosted apps and sites: a paying tenant can deploy a static site (uploaded archive or GitHub) or a container/process (image or a Dockerfile) from the console, `redx app`, and `/v1/hosted`. Deploys keep a signed manifest and a snapshot, and can roll back or promote a canary / blue-green release. Each app is a rootless podman spec (seccomp, dropped caps, loopback publish only). Custom domains are verified before routing; Caddy on-demand TLS asks `/v1/hosted/tls/ask`, which allows only verified names. Secrets are encrypted at rest and never returned. See [hosting apps](docs/hosting-apps.md).
 * Hosted tenants: an API key minted for an account follows the plan gate. After the plan is read-only or suspended, that key gets the same `402` as the console session, and quota checks still apply. Host-admin keys and owner sessions are unchanged.
 * Hosted tenants: a signed-in non-owner with an active or trialing RedX Hosted plan creates and uses only its own databases and API keys. Names are namespaced. Quotas (traffic, on-disk storage, host switches) are enforced. A lapsed plan becomes read-only for 3 days after period end, then suspended; databases are kept. See [billing](docs/billing.md) and [API](docs/api.md).
 * `trusted_proxies` / `REDX_TRUSTED_PROXIES`: when the direct peer is listed, client IP for rate limits and audit comes from `X-Forwarded-For` (rightmost untrusted hop) or `X-Real-IP`. Other peers cannot spoof it.
