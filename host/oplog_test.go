@@ -57,6 +57,7 @@ func TestOpLogAppendReadReopenTruncateReset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer l.Close() // Windows cannot remove the temp dir while the file is open
 	if l.Last() != 10 || l.First() != 6 {
 		t.Fatalf("reopen first=%d last=%d", l.First(), l.Last())
 	}

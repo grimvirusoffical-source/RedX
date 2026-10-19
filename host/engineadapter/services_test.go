@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -807,7 +808,7 @@ func TestMasterKeyFileAndEncryptedPacks(t *testing.T) {
 	if fmt.Sprint(ring.IDs()) != "[main-2026]" {
 		t.Fatalf("ids %v", ring.IDs())
 	}
-	if os.Getenv("GOOS") != "windows" {
+	if runtime.GOOS != "windows" { // Windows has no Unix permission bits
 		if err := os.Chmod(kf, 0o644); err != nil {
 			t.Fatal(err)
 		}

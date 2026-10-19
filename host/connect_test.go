@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -127,7 +128,7 @@ func TestConnectHappyPathRottenAppleLauncher(t *testing.T) {
 			t.Fatal("a request id, state, code, verifier or key was stored in plain text")
 		}
 	}
-	if fi, err := os.Stat(filepath.Join(n.Dir, "connect", "connect.json")); err != nil || fi.Mode().Perm() != 0o600 {
+	if fi, err := os.Stat(filepath.Join(n.Dir, "connect", "connect.json")); err != nil || (runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600) { // no Unix mode bits on Windows
 		t.Fatalf("connect.json must be 0600: %v %v", fi, err)
 	}
 }

@@ -1,8 +1,11 @@
-# Manual: build the 0.4.x archives and installers and upload them as WORKFLOW ARTIFACTS (not a GitHub Release).
+# Build the archives and installers and upload them as WORKFLOW ARTIFACTS (not a GitHub Release).
 # Releases are created by hand after testing. All installers are UNSIGNED.
 name: release-build
 
+# Runs by hand, and on pushes to release-* branches.
 on:
+  push:
+    branches: ['release-*']
   workflow_dispatch:
     inputs:
       version:
@@ -14,7 +17,7 @@ permissions:
   contents: read
 
 env:
-  VERSION: ${{ inputs.version }}
+  VERSION: ${{ inputs.version || '0.4.3' }}
 
 jobs:
   linux-build:
@@ -25,7 +28,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
+          go-version: stable
           cache: true
       - name: Install NSIS (makensis)
         run: sudo apt-get update -qq && sudo apt-get install -y -qq nsis
@@ -73,7 +76,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
+          go-version: stable
           cache: true
       - name: Build
         run: scripts/package.sh macos "$VERSION"
