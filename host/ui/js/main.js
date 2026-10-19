@@ -1,40 +1,46 @@
 import { h, icon, mount, toast, $, clear } from './util.js';
 import { api, session, setUnauthorizedHandler, exchangePairingCode } from './api.js';
-import { state, subscribe, setMode, setTheme, setDb, applyTheme, loadWho, loadDbs, isHostAdmin, wizard, pageAllowed, setConsoleMode, applyConsoleModeForRoute, HOST_PAGES, DATABASE_PAGES } from './state.js';
+import { state, subscribe, setMode, setTheme, setDb, applyTheme, loadWho, loadDbs, isHostAdmin, isOwner, wizard, pageAllowed, setConsoleMode, applyConsoleModeForRoute } from './state.js';
 
-const DATABASE_NAV = [
-  { id: 'dashboard', title: 'Dashboard', icon: 'home' },
-  { id: 'databases', title: 'Databases', icon: 'db' },
-  { id: 'data', title: 'Data Explorer', icon: 'table' },
-  { id: 'studio', title: 'BoxQL Studio', icon: 'terminal' },
-  { id: 'keys', title: 'API Keys', icon: 'key' },
-  { id: 'devices', title: 'Add a device', icon: 'phone' },
-  { id: 'apps', title: 'Connected apps', icon: 'link' },
-  { id: 'backups', title: 'Backups', icon: 'backup' },
-  { id: 'settings', title: 'Settings', icon: 'gear' },
-  { id: 'help', title: 'Help', icon: 'book' },
-  { id: 'watch', title: 'Live Watch', icon: 'pulse', adv: true },
-  { id: 'raw', title: 'Raw editor', icon: 'file', adv: true },
-  { id: 'policy', title: 'Security · Rules · Code', icon: 'shield', adv: true },
-  { id: 'cluster', title: 'Cluster & nodes', icon: 'nodes', adv: true },
-  { id: 'presets', title: 'Presets', icon: 'compare', adv: true },
-  { id: 'owner', title: 'Owner', icon: 'shield' },
+// One registry. A later page is a new entry here: mode, route, label, role.
+// mode is database, host, or both. role is any, admin, or owner.
+// whoami.pages[route] must still be true; the router refuses anything else.
+const NAV = [
+  { mode: 'database', route: 'dashboard', label: 'Dashboard', icon: 'home', role: 'any' },
+  { mode: 'database', route: 'databases', label: 'Databases', icon: 'db', role: 'any' },
+  { mode: 'database', route: 'data', label: 'Data Explorer', icon: 'table', role: 'any' },
+  { mode: 'database', route: 'studio', label: 'BoxQL Studio', icon: 'terminal', role: 'any' },
+  { mode: 'database', route: 'keys', label: 'API Keys', icon: 'key', role: 'any' },
+  { mode: 'database', route: 'devices', label: 'Add a device', icon: 'phone', role: 'admin' },
+  { mode: 'database', route: 'apps', label: 'Connected apps', icon: 'link', role: 'admin' },
+  { mode: 'database', route: 'backups', label: 'Backups', icon: 'backup', role: 'admin' },
+  { mode: 'database', route: 'settings', label: 'Settings', icon: 'gear', role: 'any' },
+  { mode: 'database', route: 'help', label: 'Help', icon: 'book', role: 'any' },
+  { mode: 'database', route: 'watch', label: 'Live Watch', icon: 'pulse', role: 'any', adv: true },
+  { mode: 'database', route: 'raw', label: 'Raw editor', icon: 'file', role: 'any', adv: true },
+  { mode: 'database', route: 'policy', label: 'Security · Rules · Code', icon: 'shield', role: 'any', adv: true },
+  { mode: 'database', route: 'cluster', label: 'Cluster & nodes', icon: 'nodes', role: 'admin', adv: true },
+  { mode: 'database', route: 'presets', label: 'Presets', icon: 'compare', role: 'admin', adv: true },
+  { mode: 'host', route: 'hosting', label: 'Plans & billing', icon: 'globe', role: 'any' },
+  { mode: 'host', route: 'usage', label: 'Usage & quotas', icon: 'pulse', role: 'any' },
+  { mode: 'host', route: 'updates', label: 'Updates', icon: 'refresh', role: 'admin' },
+  { mode: 'host', route: 'logs', label: 'Logs', icon: 'list', role: 'any' },
+  { mode: 'both', route: 'owner', label: 'Owner', icon: 'shield', role: 'owner' },
 ];
-const HOST_NAV = [
-  { id: 'hosting', title: 'Plans & billing', icon: 'globe' },
-  { id: 'usage', title: 'Usage & quotas', icon: 'pulse' },
-  { id: 'updates', title: 'Updates', icon: 'refresh' },
-  { id: 'logs', title: 'Logs', icon: 'list' },
-  { id: 'hostapps', title: 'Apps', icon: 'rocket', soon: true },
-  { id: 'deploy', title: 'Deploy', icon: 'upload', soon: true },
-  { id: 'domains', title: 'Domains & SSL', icon: 'lock', soon: true },
-  { id: 'env', title: 'Env & Secrets', icon: 'key', soon: true },
-  { id: 'applogs', title: 'App logs', icon: 'file', soon: true },
-  { id: 'owner', title: 'Owner', icon: 'shield' },
-];
-const NAV = [...DATABASE_NAV, ...HOST_NAV];
-const PAGES = new Set([...NAV.map((n) => n.id), 'join', 'wizard', 'connect']);
-const PAGE_FILE = { hostapps: 'coming', deploy: 'coming', domains: 'coming', env: 'coming', applogs: 'coming' };
+const PAGES = new Set([...NAV.map((n) => n.route), 'join', 'wizard', 'connect']);
+
+function modeFor(route) {
+  const n = NAV.find((e) => e.route === route);
+  if (!n || n.mode === 'both') return '';
+  return n.mode === 'host' || n.mode === 'database' ? n.mode : '';
+}
+
+function entryAllowed(n) {
+  if (!n || !pageAllowed(n.route)) return false;
+  if (n.role === 'owner') return isOwner();
+  if (n.role === 'admin') return isHostAdmin() || isOwner();
+  return true;
+}
 
 const app = document.getElementById('app');
 let current = null; // {destroy}
@@ -142,7 +148,7 @@ export async function startShell(firstRun = false) {
   if (!connecting && (firstRun || (!wizard.done() && isHostAdmin() && state.dbs.length <= 1 && (!location.hash || location.hash === '#/')))) {
     location.hash = '#/wizard';
   }
-  applyConsoleModeForRoute(rawPage());
+  applyConsoleModeForRoute(modeFor(rawPage()));
   shell = buildShell();
   app.append(shell.root);
   window.removeEventListener('hashchange', route);
@@ -197,11 +203,12 @@ function buildShell() {
   function setSurface(next) {
     const target = next === 'host' ? 'host' : 'database';
     const raw = rawPage();
-    if (target === 'host' && (raw === '' || DATABASE_PAGES.has(raw))) {
+    const fam = modeFor(raw);
+    if (target === 'host' && (raw === '' || fam === 'database')) {
       location.hash = '#/hosting';
       return;
     }
-    if (target === 'database' && (raw === '' || HOST_PAGES.has(raw))) {
+    if (target === 'database' && (raw === '' || fam === 'host')) {
       location.hash = '#/dashboard';
       return;
     }
@@ -209,18 +216,17 @@ function buildShell() {
   }
   function refresh() {
     clear(nav);
-    const list = state.consoleMode === 'host' ? HOST_NAV : DATABASE_NAV;
-    const mk = (n) => h('a', { class: 'nav-item', href: '#/' + n.id, 'data-id': n.id, onclick: () => root.classList.remove('open') }, icon(n.icon, 18), h('span', null, n.title), n.soon ? h('span', { class: 'chip soon' }, 'Soon') : null);
-    const show = (n) => pageAllowed(n.id);
-    list.filter((n) => !n.adv && n.id !== 'owner' && show(n)).forEach((n) => nav.append(mk(n)));
+    const show = (n) => (n.mode === 'both' || n.mode === state.consoleMode) && entryAllowed(n);
+    const mk = (n) => h('a', { class: 'nav-item', href: '#/' + n.route, 'data-id': n.route, onclick: () => root.classList.remove('open') }, icon(n.icon, 18), h('span', null, n.label));
+    NAV.filter((n) => show(n) && !n.adv && n.route !== 'owner').forEach((n) => nav.append(mk(n)));
     if (state.consoleMode !== 'host') {
-      const adv = list.filter((n) => n.adv && show(n));
+      const adv = NAV.filter((n) => show(n) && n.adv);
       if (adv.length) {
         nav.append(h('div', { class: 'nav-sep' }, state.mode === 'advanced' ? 'Advanced' : h('a', { href: '#', onclick: (e) => { e.preventDefault(); setMode('advanced'); } }, 'Show advanced pages')));
         if (state.mode === 'advanced') adv.forEach((n) => nav.append(mk(n)));
       }
     }
-    const owner = list.find((n) => n.id === 'owner');
+    const owner = NAV.find((n) => n.route === 'owner');
     if (owner && show(owner)) nav.append(mk(owner));
     clear(dbSel);
     (state.dbs.length ? state.dbs : [state.db]).forEach((d) => dbSel.append(h('option', { value: d, selected: d === state.db }, d)));
@@ -258,7 +264,7 @@ let routeSeq = 0;
 async function route() {
   if (!shell) return;
   const raw = rawPage();
-  applyConsoleModeForRoute(raw);
+  applyConsoleModeForRoute(modeFor(raw));
   if (raw === '' && state.consoleMode === 'host') {
     location.hash = '#/hosting';
     return;
@@ -272,7 +278,8 @@ async function route() {
   current = null;
   const main = shell.main;
   mount(main, h('div', { class: 'loading' }, h('span', { class: 'spin' }), 'Loading…'));
-  if (known && !pageAllowed(id)) {
+  const entry = NAV.find((n) => n.route === id);
+  if (known && !(entry ? entryAllowed(entry) : pageAllowed(id))) {
     document.title = 'Not found · RedX Console';
     clear(main);
     main.append(h('div', { class: 'page', id: 'page-missing' },
@@ -281,10 +288,10 @@ async function route() {
       h('p', null, h('a', { href: '#/dashboard' }, 'Back to the dashboard'))));
     return;
   }
-  const titled = NAV.find((n) => n.id === id);
-  document.title = (titled ? titled.title : (id === 'connect' ? 'Connect an app' : 'RedX')) + ' · RedX Console';
+  const titled = NAV.find((n) => n.route === id);
+  document.title = (titled ? titled.label : (id === 'connect' ? 'Connect an app' : 'RedX')) + ' · RedX Console';
   try {
-    const mod = await import('./pages/' + (PAGE_FILE[id] || id) + '.js');
+    const mod = await import('./pages/' + id + '.js');
     if (seq !== routeSeq) return;
     const view = await mod.default({ args, query, state, navigate, page: id, refreshShell: () => shell.refresh() });
     if (seq !== routeSeq) { if (view && view.destroy) view.destroy(); return; }

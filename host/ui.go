@@ -418,10 +418,5 @@ func (h *Host) consolePages(pr *Principal) map[string]bool {
 		"owner":     owner,
 		"usage":     true,
 		"logs":      true,
-		"hostapps":  true,
-		"deploy":    true,
-		"domains":   true,
-		"env":       true,
-		"applogs":   true,
 	}
 }

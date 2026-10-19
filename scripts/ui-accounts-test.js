@@ -153,7 +153,8 @@ const OWNER = 'owner@example.com'; // placeholder; real owner addresses live in 
     await p.waitForSelector('.shell');
     const hiddenAccount = ['owner', 'updates', 'keys', 'devices', 'apps', 'backups', 'cluster', 'presets', 'raw', 'policy', 'watch'];
     for (const id of hiddenAccount) expect(await p.$(`.nav-item[data-id="${id}"]`) === null, 'regular account hides ' + id);
-    const hostOnly = ['hosting', 'usage', 'updates', 'logs', 'hostapps', 'deploy', 'domains', 'env', 'applogs'];
+    const hostOnly = ['hosting', 'usage', 'updates', 'logs'];
+    const notInNav = ['hostapps', 'deploy', 'domains', 'env', 'applogs'];
     expect(await p.getAttribute('#console-mode [data-surface="database"]', 'aria-pressed') === 'true', 'default mode is Database');
     expect(await p.evaluate(() => {
       const header = document.querySelector('header.top');
@@ -169,21 +170,17 @@ const OWNER = 'owner@example.com'; // placeholder; real owner addresses live in 
     await p.click('#console-mode [data-surface="host"]');
     await p.waitForSelector('.nav-item[data-id="hosting"]');
     expect(await p.getAttribute('#console-mode [data-surface="host"]', 'aria-pressed') === 'true', 'toggle selects Host');
-    for (const id of ['hosting', 'usage', 'logs', 'hostapps', 'deploy', 'domains', 'env', 'applogs']) {
+    for (const id of ['hosting', 'usage', 'logs']) {
       expect(await p.$(`.nav-item[data-id="${id}"]`) !== null, 'Host mode shows ' + id);
     }
+    for (const id of notInNav) expect(await p.$(`.nav-item[data-id="${id}"]`) === null, 'Host mode has no ' + id + ' entry');
+    expect(await p.$('#coming-soon') === null, 'Host mode has no Coming soon page');
     expect(await p.$('.nav-item[data-id="updates"]') === null, 'a regular account hides Updates in Host mode');
     expect(await p.$('.nav-item[data-id="owner"]') === null, 'a regular account hides Owner in Host mode');
     expect(await p.$('.nav-item[data-id="dashboard"]') === null, 'Host mode hides the database pages');
-    for (const id of ['hostapps', 'deploy', 'domains', 'env', 'applogs']) {
-      expect(await p.getAttribute(`.nav-item[data-id="${id}"]`, 'href') === '#/' + id, id + ' is a real nav link');
-      await p.click(`.nav-item[data-id="${id}"]`);
-      await p.waitForFunction((page) => {
-        const e = document.querySelector('#coming-soon');
-        return e && e.dataset.page === page && /Coming soon/.test(e.textContent) && !document.querySelector('.errbox') && !document.querySelector('#page-missing');
-      }, id);
-    }
-    expect(await p.$('.shell') !== null, 'Coming soon keeps the console shell');
+    await p.click('.nav-item[data-id="logs"]');
+    await p.waitForSelector('#logs-page');
+    expect(/activity/i.test(await p.textContent('#logs-page')) && await p.$('.errbox') === null && await p.$('#page-missing') === null, 'Logs shows this account\'s activity');
     await p.click('#console-mode [data-surface="database"]');
     await p.waitForSelector('.nav-item[data-id="dashboard"]');
     expect(await p.$('.nav-item[data-id="hosting"]') === null, 'toggle back to Database hides Host pages');
