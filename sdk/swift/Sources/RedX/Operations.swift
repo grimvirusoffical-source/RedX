@@ -127,6 +127,11 @@ public let operations: [String: Operation] = [
     "addHostedDomain": Operation(id: "addHostedDomain", group: "hosted", method: "POST", path: "/v1/hosted/apps/{id}/domains", shorthand: "", auth: "key", response: "json", request: "json", hostConfirm: "", summary: "Claim a custom domain. method is txt or http. A name another tenant holds is refused.", danger: .write),
     "deleteHostedDomain": Operation(id: "deleteHostedDomain", group: "hosted", method: "DELETE", path: "/v1/hosted/apps/{id}/domains/{domain}", shorthand: "", auth: "key", response: "json", request: "", hostConfirm: "", summary: "Drop a custom domain. The default hostname cannot be dropped.", danger: .write),
     "verifyHostedDomain": Operation(id: "verifyHostedDomain", group: "hosted", method: "POST", path: "/v1/hosted/apps/{id}/domains/{domain}/verify", shorthand: "", auth: "key", response: "json", request: "", hostConfirm: "", summary: "Check the TXT or HTTP challenge and mark the domain verified so it can be routed.", danger: .write),
+    "getHostedEnv": Operation(id: "getHostedEnv", group: "hosted", method: "GET", path: "/v1/hosted/apps/{id}/env", shorthand: "", auth: "key", response: "json", request: "", hostConfirm: "", summary: "Non-secret environment variables. Secrets are not included.", danger: .safe),
+    "putHostedEnv": Operation(id: "putHostedEnv", group: "hosted", method: "PUT", path: "/v1/hosted/apps/{id}/env", shorthand: "", auth: "key", response: "json", request: "json", hostConfirm: "", summary: "Replace non-secret environment variables. REDX_KEY cannot be set here.", danger: .write),
+    "listHostedSecrets": Operation(id: "listHostedSecrets", group: "hosted", method: "GET", path: "/v1/hosted/apps/{id}/secrets", shorthand: "", auth: "key", response: "json", request: "", hostConfirm: "", summary: "Secret names. Values are always masked and never returned.", danger: .safe),
+    "putHostedSecret": Operation(id: "putHostedSecret", group: "hosted", method: "PUT", path: "/v1/hosted/apps/{id}/secrets/{name}", shorthand: "", auth: "key", response: "json", request: "json", hostConfirm: "", summary: "Set a secret. The value is encrypted at rest and the response shows only a mask.", danger: .write),
+    "deleteHostedSecret": Operation(id: "deleteHostedSecret", group: "hosted", method: "DELETE", path: "/v1/hosted/apps/{id}/secrets/{name}", shorthand: "", auth: "key", response: "json", request: "", hostConfirm: "", summary: "Delete a secret.", danger: .write),
     "getHostedUsage": Operation(id: "getHostedUsage", group: "hosted", method: "GET", path: "/v1/hosted/apps/{id}/usage", shorthand: "", auth: "key", response: "json", request: "", hostConfirm: "", summary: "Disk used by one app and the tier limits that apply.", danger: .safe),
     "getHostedHealth": Operation(id: "getHostedHealth", group: "hosted", method: "GET", path: "/v1/hosted/apps/{id}/health", shorthand: "", auth: "key", response: "json", request: "", hostConfirm: "", summary: "Probe the current release. A failed direct deploy is rolled back to the previous release.", danger: .safe),
     "hostedTLSAsk": Operation(id: "hostedTLSAsk", group: "hosted", method: "GET", path: "/v1/hosted/tls/ask", shorthand: "", auth: "none", response: "json", request: "", hostConfirm: "", summary: "Caddy on-demand TLS ask. 200 only for a verified app domain, and only from loopback or with X-RedX-Caddy-Ask.", danger: .safe),
@@ -738,6 +743,36 @@ extension RedXClient {
     @discardableResult
     public func verifyHostedDomain(id: String, domain: String) async throws -> RedXResult {
         try await call("verifyHostedDomain", params: ["id": id, "domain": domain])
+    }
+
+    /// Non-secret environment variables. Secrets are not included. (GET /v1/hosted/apps/{id}/env; auth key; danger safe)
+    @discardableResult
+    public func getHostedEnv(id: String) async throws -> RedXResult {
+        try await call("getHostedEnv", params: ["id": id])
+    }
+
+    /// Replace non-secret environment variables. REDX_KEY cannot be set here. (PUT /v1/hosted/apps/{id}/env; auth key; danger write)
+    @discardableResult
+    public func putHostedEnv(id: String, body: [String: Any]? = nil) async throws -> RedXResult {
+        try await call("putHostedEnv", params: ["id": id], body: body)
+    }
+
+    /// Secret names. Values are always masked and never returned. (GET /v1/hosted/apps/{id}/secrets; auth key; danger safe)
+    @discardableResult
+    public func listHostedSecrets(id: String) async throws -> RedXResult {
+        try await call("listHostedSecrets", params: ["id": id])
+    }
+
+    /// Set a secret. The value is encrypted at rest and the response shows only a mask. (PUT /v1/hosted/apps/{id}/secrets/{name}; auth key; danger write)
+    @discardableResult
+    public func putHostedSecret(id: String, name: String, body: [String: Any]? = nil) async throws -> RedXResult {
+        try await call("putHostedSecret", params: ["id": id, "name": name], body: body)
+    }
+
+    /// Delete a secret. (DELETE /v1/hosted/apps/{id}/secrets/{name}; auth key; danger write)
+    @discardableResult
+    public func deleteHostedSecret(id: String, name: String) async throws -> RedXResult {
+        try await call("deleteHostedSecret", params: ["id": id, "name": name])
     }
 
     /// Disk used by one app and the tier limits that apply. (GET /v1/hosted/apps/{id}/usage; auth key; danger safe)

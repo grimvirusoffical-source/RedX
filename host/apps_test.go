@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -557,6 +558,63 @@ func TestHostedDomainClaim(t *testing.T) {
 	n.H.Handler().ServeHTTP(rr, req)
 	if rr.Code != 403 {
 		t.Fatalf("remote ask: %d", rr.Code)
+	}
+}
+
+func TestHostedSecretIsolation(t *testing.T) {
+	f, iss := startFake(t)
+	n := startAcctNode(t, iss)
+	end := time.Now().Add(30 * 24 * time.Hour)
+	tokA, _ := signIn(t, n, f, regular)
+	if err := host.SetPlanForTest(n.H, hostedPlan(regular.Sub, "silver", "month", "active", end)); err != nil {
+		t.Fatal(err)
+	}
+	secret := "s3cret-value-9f3a-not-returned"
+	st, b, _ := do(t, "POST", n.URL+"/v1/hosted/apps", tokA, `{"name":"site","kind":"static"}`, "Content-Type", "application/json")
+	if st != 201 {
+		t.Fatalf("create: %d %s", st, b)
+	}
+	idA := appField(t, b, "id")
+	other := accountsfake.Identity{Sub: "rxa_OTHER000000000000000000001", Email: "other@example.com", EmailVerified: true, Username: "other_user", AMR: []string{"pwd"}}
+	tokB, _ := signIn(t, n, f, other)
+	if err := host.SetPlanForTest(n.H, hostedPlan(other.Sub, "gold", "month", "active", end)); err != nil {
+		t.Fatal(err)
+	}
+	st, b, _ = do(t, "POST", n.URL+"/v1/hosted/apps", tokB, `{"name":"shop","kind":"static"}`, "Content-Type", "application/json")
+	if st != 201 {
+		t.Fatalf("other: %d %s", st, b)
+	}
+	idB := appField(t, b, "id")
+	if st, b, _ = do(t, "PUT", n.URL+"/v1/hosted/apps/"+idB+"/secrets/TOKEN", tokA, `{"value":"`+secret+`"}`, "Content-Type", "application/json"); st != 404 || strings.Contains(b, secret) {
+		t.Fatalf("cross: %d %s", st, b)
+	}
+	st, b, _ = do(t, "PUT", n.URL+"/v1/hosted/apps/"+idA+"/secrets/TOKEN", tokA, `{"value":"`+secret+`"}`, "Content-Type", "application/json")
+	if st != 200 || !strings.Contains(b, "••••••••") || strings.Contains(b, secret) {
+		t.Fatalf("put: %d %s", st, b)
+	}
+	if st, b, _ = do(t, "GET", n.URL+"/v1/hosted/apps/"+idA+"/secrets", tokA, ""); st != 200 || strings.Contains(b, secret) {
+		t.Fatalf("list: %d %s", st, b)
+	}
+	raw, err := os.ReadFile(filepath.Join(n.Dir, "hosted", "apps.json"))
+	if err != nil || strings.Contains(string(raw), secret) {
+		t.Fatalf("apps.json: %v", err)
+	}
+	audit, err := os.ReadFile(n.H.Cfg.AuditLog)
+	if err != nil || strings.Contains(string(audit), secret) {
+		t.Fatalf("audit: %v", err)
+	}
+	envRaw, err := os.ReadFile(filepath.Join(n.Dir, "hosted", "apps", idA, "env"))
+	if err != nil || !strings.Contains(string(envRaw), "TOKEN="+secret) || strings.Contains(string(envRaw), "REDX_KEY=") || strings.Contains(string(envRaw), ":7777") {
+		t.Fatalf("env file: %v %s", err, envRaw)
+	}
+	arch := zipBytes(map[string]string{"index.html": "x"})
+	st, b, _ = do(t, "POST", n.URL+"/v1/hosted/apps/"+idA+"/archive", tokA, string(arch))
+	if st != 201 || strings.Contains(b, secret) {
+		t.Fatalf("deploy leaked: %d %s", st, b)
+	}
+	st, b, _ = do(t, "PUT", n.URL+"/v1/hosted/apps/"+idA+"/secrets/TOKEN", tokA, `{"value":"`+secret+`"}`, "Content-Type", "application/json")
+	if st != 200 || jsonOf(t, b)["needsRedeploy"] != true {
+		t.Fatalf("redeploy: %d %s", st, b)
 	}
 }
 

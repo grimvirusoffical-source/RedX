@@ -221,6 +221,16 @@ export interface RedXOperations {
   deleteHostedDomain(opts: { id: string; domain: string; headers?: Record<string, string> }): Promise<any>;
   /** Check the TXT or HTTP challenge and mark the domain verified so it can be routed. (POST /v1/hosted/apps/{id}/domains/{domain}/verify; auth key; danger write) */
   verifyHostedDomain(opts: { id: string; domain: string; headers?: Record<string, string> }): Promise<any>;
+  /** Non-secret environment variables. Secrets are not included. (GET /v1/hosted/apps/{id}/env; auth key; danger safe) */
+  getHostedEnv(opts: { id: string; headers?: Record<string, string> }): Promise<any>;
+  /** Replace non-secret environment variables. REDX_KEY cannot be set here. (PUT /v1/hosted/apps/{id}/env; auth key; danger write) */
+  putHostedEnv(opts: { id: string; body?: { vars?: Record<string, unknown> }; headers?: Record<string, string> }): Promise<any>;
+  /** Secret names. Values are always masked and never returned. (GET /v1/hosted/apps/{id}/secrets; auth key; danger safe) */
+  listHostedSecrets(opts: { id: string; headers?: Record<string, string> }): Promise<any>;
+  /** Set a secret. The value is encrypted at rest and the response shows only a mask. (PUT /v1/hosted/apps/{id}/secrets/{name}; auth key; danger write) */
+  putHostedSecret(opts: { id: string; name: string; body?: { value?: string }; headers?: Record<string, string> }): Promise<any>;
+  /** Delete a secret. (DELETE /v1/hosted/apps/{id}/secrets/{name}; auth key; danger write) */
+  deleteHostedSecret(opts: { id: string; name: string; headers?: Record<string, string> }): Promise<any>;
   /** Disk used by one app and the tier limits that apply. (GET /v1/hosted/apps/{id}/usage; auth key; danger safe) */
   getHostedUsage(opts: { id: string; headers?: Record<string, string> }): Promise<any>;
   /** Probe the current release. A failed direct deploy is rolled back to the previous release. (GET /v1/hosted/apps/{id}/health; auth key; danger safe) */

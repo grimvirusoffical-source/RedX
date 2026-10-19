@@ -138,6 +138,11 @@ namespace RedX
             ["addHostedDomain"] = new Operation { Id = "addHostedDomain", Group = "hosted", Method = "POST", Path = "/v1/hosted/apps/{id}/domains", Shorthand = "", Auth = "key", Response = "json", Request = "json", HostConfirm = "", Summary = "Claim a custom domain. method is txt or http. A name another tenant holds is refused.", Danger = DangerLevel.Write },
             ["deleteHostedDomain"] = new Operation { Id = "deleteHostedDomain", Group = "hosted", Method = "DELETE", Path = "/v1/hosted/apps/{id}/domains/{domain}", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "Drop a custom domain. The default hostname cannot be dropped.", Danger = DangerLevel.Write },
             ["verifyHostedDomain"] = new Operation { Id = "verifyHostedDomain", Group = "hosted", Method = "POST", Path = "/v1/hosted/apps/{id}/domains/{domain}/verify", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "Check the TXT or HTTP challenge and mark the domain verified so it can be routed.", Danger = DangerLevel.Write },
+            ["getHostedEnv"] = new Operation { Id = "getHostedEnv", Group = "hosted", Method = "GET", Path = "/v1/hosted/apps/{id}/env", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "Non-secret environment variables. Secrets are not included.", Danger = DangerLevel.Safe },
+            ["putHostedEnv"] = new Operation { Id = "putHostedEnv", Group = "hosted", Method = "PUT", Path = "/v1/hosted/apps/{id}/env", Shorthand = "", Auth = "key", Response = "json", Request = "json", HostConfirm = "", Summary = "Replace non-secret environment variables. REDX_KEY cannot be set here.", Danger = DangerLevel.Write },
+            ["listHostedSecrets"] = new Operation { Id = "listHostedSecrets", Group = "hosted", Method = "GET", Path = "/v1/hosted/apps/{id}/secrets", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "Secret names. Values are always masked and never returned.", Danger = DangerLevel.Safe },
+            ["putHostedSecret"] = new Operation { Id = "putHostedSecret", Group = "hosted", Method = "PUT", Path = "/v1/hosted/apps/{id}/secrets/{name}", Shorthand = "", Auth = "key", Response = "json", Request = "json", HostConfirm = "", Summary = "Set a secret. The value is encrypted at rest and the response shows only a mask.", Danger = DangerLevel.Write },
+            ["deleteHostedSecret"] = new Operation { Id = "deleteHostedSecret", Group = "hosted", Method = "DELETE", Path = "/v1/hosted/apps/{id}/secrets/{name}", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "Delete a secret.", Danger = DangerLevel.Write },
             ["getHostedUsage"] = new Operation { Id = "getHostedUsage", Group = "hosted", Method = "GET", Path = "/v1/hosted/apps/{id}/usage", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "Disk used by one app and the tier limits that apply.", Danger = DangerLevel.Safe },
             ["getHostedHealth"] = new Operation { Id = "getHostedHealth", Group = "hosted", Method = "GET", Path = "/v1/hosted/apps/{id}/health", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "Probe the current release. A failed direct deploy is rolled back to the previous release.", Danger = DangerLevel.Safe },
             ["hostedTLSAsk"] = new Operation { Id = "hostedTLSAsk", Group = "hosted", Method = "GET", Path = "/v1/hosted/tls/ask", Shorthand = "", Auth = "none", Response = "json", Request = "", HostConfirm = "", Summary = "Caddy on-demand TLS ask. 200 only for a verified app domain, and only from loopback or with X-RedX-Caddy-Ask.", Danger = DangerLevel.Safe },
@@ -546,6 +551,26 @@ namespace RedX
         /// <summary>Check the TXT or HTTP challenge and mark the domain verified so it can be routed. (POST /v1/hosted/apps/{id}/domains/{domain}/verify; auth key; danger write)</summary>
         public Task<RedXResult> VerifyHostedDomainAsync(string id, string domain, CancellationToken ct = default) =>
             CallAsync("verifyHostedDomain", new Dictionary<string, string> { ["id"] = id, ["domain"] = domain }, null, null, null, null, false, ct);
+
+        /// <summary>Non-secret environment variables. Secrets are not included. (GET /v1/hosted/apps/{id}/env; auth key; danger safe)</summary>
+        public Task<RedXResult> GetHostedEnvAsync(string id, CancellationToken ct = default) =>
+            CallAsync("getHostedEnv", new Dictionary<string, string> { ["id"] = id }, null, null, null, null, false, ct);
+
+        /// <summary>Replace non-secret environment variables. REDX_KEY cannot be set here. (PUT /v1/hosted/apps/{id}/env; auth key; danger write)</summary>
+        public Task<RedXResult> PutHostedEnvAsync(string id, object? body = null, CancellationToken ct = default) =>
+            CallAsync("putHostedEnv", new Dictionary<string, string> { ["id"] = id }, null, body, null, null, false, ct);
+
+        /// <summary>Secret names. Values are always masked and never returned. (GET /v1/hosted/apps/{id}/secrets; auth key; danger safe)</summary>
+        public Task<RedXResult> ListHostedSecretsAsync(string id, CancellationToken ct = default) =>
+            CallAsync("listHostedSecrets", new Dictionary<string, string> { ["id"] = id }, null, null, null, null, false, ct);
+
+        /// <summary>Set a secret. The value is encrypted at rest and the response shows only a mask. (PUT /v1/hosted/apps/{id}/secrets/{name}; auth key; danger write)</summary>
+        public Task<RedXResult> PutHostedSecretAsync(string id, string name, object? body = null, CancellationToken ct = default) =>
+            CallAsync("putHostedSecret", new Dictionary<string, string> { ["id"] = id, ["name"] = name }, null, body, null, null, false, ct);
+
+        /// <summary>Delete a secret. (DELETE /v1/hosted/apps/{id}/secrets/{name}; auth key; danger write)</summary>
+        public Task<RedXResult> DeleteHostedSecretAsync(string id, string name, CancellationToken ct = default) =>
+            CallAsync("deleteHostedSecret", new Dictionary<string, string> { ["id"] = id, ["name"] = name }, null, null, null, null, false, ct);
 
         /// <summary>Disk used by one app and the tier limits that apply. (GET /v1/hosted/apps/{id}/usage; auth key; danger safe)</summary>
         public Task<RedXResult> GetHostedUsageAsync(string id, CancellationToken ct = default) =>

@@ -111,6 +111,11 @@ var Operations = map[string]Operation{
 	"addHostedDomain":       {ID: "addHostedDomain", Group: "hosted", Method: "POST", Path: "/v1/hosted/apps/{id}/domains", Shorthand: "", Auth: "key", Danger: DangerWrite, Response: "json", Request: "json", HostConfirm: "", Summary: "Claim a custom domain. method is txt or http. A name another tenant holds is refused."},
 	"deleteHostedDomain":    {ID: "deleteHostedDomain", Group: "hosted", Method: "DELETE", Path: "/v1/hosted/apps/{id}/domains/{domain}", Shorthand: "", Auth: "key", Danger: DangerWrite, Response: "json", Request: "", HostConfirm: "", Summary: "Drop a custom domain. The default hostname cannot be dropped."},
 	"verifyHostedDomain":    {ID: "verifyHostedDomain", Group: "hosted", Method: "POST", Path: "/v1/hosted/apps/{id}/domains/{domain}/verify", Shorthand: "", Auth: "key", Danger: DangerWrite, Response: "json", Request: "", HostConfirm: "", Summary: "Check the TXT or HTTP challenge and mark the domain verified so it can be routed."},
+	"getHostedEnv":          {ID: "getHostedEnv", Group: "hosted", Method: "GET", Path: "/v1/hosted/apps/{id}/env", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Non-secret environment variables. Secrets are not included."},
+	"putHostedEnv":          {ID: "putHostedEnv", Group: "hosted", Method: "PUT", Path: "/v1/hosted/apps/{id}/env", Shorthand: "", Auth: "key", Danger: DangerWrite, Response: "json", Request: "json", HostConfirm: "", Summary: "Replace non-secret environment variables. REDX_KEY cannot be set here."},
+	"listHostedSecrets":     {ID: "listHostedSecrets", Group: "hosted", Method: "GET", Path: "/v1/hosted/apps/{id}/secrets", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Secret names. Values are always masked and never returned."},
+	"putHostedSecret":       {ID: "putHostedSecret", Group: "hosted", Method: "PUT", Path: "/v1/hosted/apps/{id}/secrets/{name}", Shorthand: "", Auth: "key", Danger: DangerWrite, Response: "json", Request: "json", HostConfirm: "", Summary: "Set a secret. The value is encrypted at rest and the response shows only a mask."},
+	"deleteHostedSecret":    {ID: "deleteHostedSecret", Group: "hosted", Method: "DELETE", Path: "/v1/hosted/apps/{id}/secrets/{name}", Shorthand: "", Auth: "key", Danger: DangerWrite, Response: "json", Request: "", HostConfirm: "", Summary: "Delete a secret."},
 	"getHostedUsage":        {ID: "getHostedUsage", Group: "hosted", Method: "GET", Path: "/v1/hosted/apps/{id}/usage", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Disk used by one app and the tier limits that apply."},
 	"getHostedHealth":       {ID: "getHostedHealth", Group: "hosted", Method: "GET", Path: "/v1/hosted/apps/{id}/health", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Probe the current release. A failed direct deploy is rolled back to the previous release."},
 	"hostedTLSAsk":          {ID: "hostedTLSAsk", Group: "hosted", Method: "GET", Path: "/v1/hosted/tls/ask", Shorthand: "", Auth: "none", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Caddy on-demand TLS ask. 200 only for a verified app domain, and only from loopback or with X-RedX-Caddy-Ask."},
@@ -874,6 +879,46 @@ func (c *Client) DeleteHostedDomain(ctx context.Context, id string, domain strin
 func (c *Client) VerifyHostedDomain(ctx context.Context, id string, domain string, a Args) (*Result, error) {
 	a.Params = withParams(a.Params, map[string]string{"id": id, "domain": domain})
 	return c.Call(ctx, "verifyHostedDomain", a)
+}
+
+// GetHostedEnv: Non-secret environment variables. Secrets are not included.
+//
+// GET /v1/hosted/apps/{id}/env, auth key, danger safe.
+func (c *Client) GetHostedEnv(ctx context.Context, id string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"id": id})
+	return c.Call(ctx, "getHostedEnv", a)
+}
+
+// PutHostedEnv: Replace non-secret environment variables. REDX_KEY cannot be set here.
+//
+// PUT /v1/hosted/apps/{id}/env, auth key, danger write.
+func (c *Client) PutHostedEnv(ctx context.Context, id string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"id": id})
+	return c.Call(ctx, "putHostedEnv", a)
+}
+
+// ListHostedSecrets: Secret names. Values are always masked and never returned.
+//
+// GET /v1/hosted/apps/{id}/secrets, auth key, danger safe.
+func (c *Client) ListHostedSecrets(ctx context.Context, id string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"id": id})
+	return c.Call(ctx, "listHostedSecrets", a)
+}
+
+// PutHostedSecret: Set a secret. The value is encrypted at rest and the response shows only a mask.
+//
+// PUT /v1/hosted/apps/{id}/secrets/{name}, auth key, danger write.
+func (c *Client) PutHostedSecret(ctx context.Context, id string, name string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"id": id, "name": name})
+	return c.Call(ctx, "putHostedSecret", a)
+}
+
+// DeleteHostedSecret: Delete a secret.
+//
+// DELETE /v1/hosted/apps/{id}/secrets/{name}, auth key, danger write.
+func (c *Client) DeleteHostedSecret(ctx context.Context, id string, name string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"id": id, "name": name})
+	return c.Call(ctx, "deleteHostedSecret", a)
 }
 
 // GetHostedUsage: Disk used by one app and the tier limits that apply.

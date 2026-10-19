@@ -85,6 +85,16 @@ func (h *Host) hostedRoute(w http.ResponseWriter, r *http.Request) {
 		h.hostedDelDomain(w, r, parts[1], parts[3])
 	case len(parts) == 5 && parts[2] == "domains" && parts[4] == "verify" && r.Method == http.MethodPost:
 		h.hostedVerifyDomain(w, r, parts[1], parts[3])
+	case len(parts) == 3 && parts[2] == "env" && r.Method == http.MethodGet:
+		h.hostedGetEnv(w, r, parts[1])
+	case len(parts) == 3 && parts[2] == "env" && r.Method == http.MethodPut:
+		h.hostedPutEnv(w, r, parts[1])
+	case len(parts) == 3 && parts[2] == "secrets" && r.Method == http.MethodGet:
+		h.hostedSecrets(w, r, parts[1])
+	case len(parts) == 4 && parts[2] == "secrets" && r.Method == http.MethodPut:
+		h.hostedPutSecret(w, r, parts[1], parts[3])
+	case len(parts) == 4 && parts[2] == "secrets" && r.Method == http.MethodDelete:
+		h.hostedDelSecret(w, r, parts[1], parts[3])
 	case len(parts) == 3 && parts[2] == "usage" && r.Method == http.MethodGet:
 		h.hostedUsage(w, r, parts[1])
 	case len(parts) == 3 && parts[2] == "health" && r.Method == http.MethodGet:

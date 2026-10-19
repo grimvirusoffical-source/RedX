@@ -113,6 +113,11 @@ OPERATIONS: Dict[str, Dict[str, Any]] = {
     "addHostedDomain": {"id": "addHostedDomain", "group": "hosted", "method": "POST", "path": "/v1/hosted/apps/{id}/domains", "shorthand": "", "auth": "key", "danger": "write", "danger_level": 1, "response": "json", "request": "json", "host_confirm": "", "summary": "Claim a custom domain. method is txt or http. A name another tenant holds is refused."},
     "deleteHostedDomain": {"id": "deleteHostedDomain", "group": "hosted", "method": "DELETE", "path": "/v1/hosted/apps/{id}/domains/{domain}", "shorthand": "", "auth": "key", "danger": "write", "danger_level": 1, "response": "json", "request": "", "host_confirm": "", "summary": "Drop a custom domain. The default hostname cannot be dropped."},
     "verifyHostedDomain": {"id": "verifyHostedDomain", "group": "hosted", "method": "POST", "path": "/v1/hosted/apps/{id}/domains/{domain}/verify", "shorthand": "", "auth": "key", "danger": "write", "danger_level": 1, "response": "json", "request": "", "host_confirm": "", "summary": "Check the TXT or HTTP challenge and mark the domain verified so it can be routed."},
+    "getHostedEnv": {"id": "getHostedEnv", "group": "hosted", "method": "GET", "path": "/v1/hosted/apps/{id}/env", "shorthand": "", "auth": "key", "danger": "safe", "danger_level": 0, "response": "json", "request": "", "host_confirm": "", "summary": "Non-secret environment variables. Secrets are not included."},
+    "putHostedEnv": {"id": "putHostedEnv", "group": "hosted", "method": "PUT", "path": "/v1/hosted/apps/{id}/env", "shorthand": "", "auth": "key", "danger": "write", "danger_level": 1, "response": "json", "request": "json", "host_confirm": "", "summary": "Replace non-secret environment variables. REDX_KEY cannot be set here."},
+    "listHostedSecrets": {"id": "listHostedSecrets", "group": "hosted", "method": "GET", "path": "/v1/hosted/apps/{id}/secrets", "shorthand": "", "auth": "key", "danger": "safe", "danger_level": 0, "response": "json", "request": "", "host_confirm": "", "summary": "Secret names. Values are always masked and never returned."},
+    "putHostedSecret": {"id": "putHostedSecret", "group": "hosted", "method": "PUT", "path": "/v1/hosted/apps/{id}/secrets/{name}", "shorthand": "", "auth": "key", "danger": "write", "danger_level": 1, "response": "json", "request": "json", "host_confirm": "", "summary": "Set a secret. The value is encrypted at rest and the response shows only a mask."},
+    "deleteHostedSecret": {"id": "deleteHostedSecret", "group": "hosted", "method": "DELETE", "path": "/v1/hosted/apps/{id}/secrets/{name}", "shorthand": "", "auth": "key", "danger": "write", "danger_level": 1, "response": "json", "request": "", "host_confirm": "", "summary": "Delete a secret."},
     "getHostedUsage": {"id": "getHostedUsage", "group": "hosted", "method": "GET", "path": "/v1/hosted/apps/{id}/usage", "shorthand": "", "auth": "key", "danger": "safe", "danger_level": 0, "response": "json", "request": "", "host_confirm": "", "summary": "Disk used by one app and the tier limits that apply."},
     "getHostedHealth": {"id": "getHostedHealth", "group": "hosted", "method": "GET", "path": "/v1/hosted/apps/{id}/health", "shorthand": "", "auth": "key", "danger": "safe", "danger_level": 0, "response": "json", "request": "", "host_confirm": "", "summary": "Probe the current release. A failed direct deploy is rolled back to the previous release."},
     "hostedTLSAsk": {"id": "hostedTLSAsk", "group": "hosted", "method": "GET", "path": "/v1/hosted/tls/ask", "shorthand": "", "auth": "none", "danger": "safe", "danger_level": 0, "response": "json", "request": "", "host_confirm": "", "summary": "Caddy on-demand TLS ask. 200 only for a verified app domain, and only from loopback or with X-RedX-Caddy-Ask."},
@@ -529,6 +534,26 @@ class Operations:
     def verify_hosted_domain(self, id: str, domain: str, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
         """Check the TXT or HTTP challenge and mark the domain verified so it can be routed. (POST /v1/hosted/apps/{id}/domains/{domain}/verify; auth key; danger write)"""
         return self.call("verifyHostedDomain", id=id, domain=domain, confirm=confirm, headers=headers)
+
+    def get_hosted_env(self, id: str, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Non-secret environment variables. Secrets are not included. (GET /v1/hosted/apps/{id}/env; auth key; danger safe)"""
+        return self.call("getHostedEnv", id=id, confirm=confirm, headers=headers)
+
+    def put_hosted_env(self, id: str, *, body: Any = None, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Replace non-secret environment variables. REDX_KEY cannot be set here. (PUT /v1/hosted/apps/{id}/env; auth key; danger write)"""
+        return self.call("putHostedEnv", id=id, body=body, confirm=confirm, headers=headers)
+
+    def list_hosted_secrets(self, id: str, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Secret names. Values are always masked and never returned. (GET /v1/hosted/apps/{id}/secrets; auth key; danger safe)"""
+        return self.call("listHostedSecrets", id=id, confirm=confirm, headers=headers)
+
+    def put_hosted_secret(self, id: str, name: str, *, body: Any = None, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Set a secret. The value is encrypted at rest and the response shows only a mask. (PUT /v1/hosted/apps/{id}/secrets/{name}; auth key; danger write)"""
+        return self.call("putHostedSecret", id=id, name=name, body=body, confirm=confirm, headers=headers)
+
+    def delete_hosted_secret(self, id: str, name: str, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Delete a secret. (DELETE /v1/hosted/apps/{id}/secrets/{name}; auth key; danger write)"""
+        return self.call("deleteHostedSecret", id=id, name=name, confirm=confirm, headers=headers)
 
     def get_hosted_usage(self, id: str, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
         """Disk used by one app and the tier limits that apply. (GET /v1/hosted/apps/{id}/usage; auth key; danger safe)"""

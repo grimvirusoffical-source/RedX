@@ -3446,6 +3446,94 @@
     "x-rottenapple-level": "L1"
    }
   },
+  "/v1/hosted/apps/{id}/env": {
+   "get": {
+    "operationId": "getHostedEnv",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Non-secret environment variables. Secrets are not included.",
+    "tags": [
+     "hosted"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "safe",
+    "x-redx-danger-level": 0,
+    "x-rottenapple-level": "L1"
+   },
+   "put": {
+    "operationId": "putHostedEnv",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "vars": {
+          "type": "object"
+         }
+        },
+        "type": "object"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Replace non-secret environment variables. REDX_KEY cannot be set here.",
+    "tags": [
+     "hosted"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "write",
+    "x-redx-danger-level": 1,
+    "x-rottenapple-level": "L1"
+   }
+  },
   "/v1/hosted/apps/{id}/health": {
    "get": {
     "operationId": "getHostedHealth",
@@ -3575,6 +3663,148 @@
     "x-redx-danger": "admin",
     "x-redx-danger-level": 2,
     "x-rottenapple-level": "developer-tool"
+   }
+  },
+  "/v1/hosted/apps/{id}/secrets": {
+   "get": {
+    "operationId": "listHostedSecrets",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Secret names. Values are always masked and never returned.",
+    "tags": [
+     "hosted"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "safe",
+    "x-redx-danger-level": 0,
+    "x-rottenapple-level": "L1"
+   }
+  },
+  "/v1/hosted/apps/{id}/secrets/{name}": {
+   "delete": {
+    "operationId": "deleteHostedSecret",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Delete a secret.",
+    "tags": [
+     "hosted"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "write",
+    "x-redx-danger-level": 1,
+    "x-rottenapple-level": "L1"
+   },
+   "put": {
+    "operationId": "putHostedSecret",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "value": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Set a secret. The value is encrypted at rest and the response shows only a mask.",
+    "tags": [
+     "hosted"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "write",
+    "x-redx-danger-level": 1,
+    "x-rottenapple-level": "L1"
    }
   },
   "/v1/hosted/apps/{id}/start": {

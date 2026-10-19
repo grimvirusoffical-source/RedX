@@ -9,6 +9,7 @@ const HOST_NAV = [
   { id: 'hostapps', title: 'Apps', icon: 'rocket' },
   { id: 'hostdeploy', title: 'Deploy', icon: 'upload' },
   { id: 'hostdomains', title: 'Domains', icon: 'globe' },
+  { id: 'hostsecrets', title: 'Env & Secrets', icon: 'lock' },
 ];
 const NAV = [
   { id: 'dashboard', title: 'Dashboard', icon: 'home' },
