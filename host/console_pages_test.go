@@ -19,6 +19,15 @@ func pageOn(p map[string]interface{}, id string) bool {
 	return v
 }
 
+func hostSurface(p map[string]interface{}) bool {
+	for _, id := range []string{"usage", "logs", "hostapps", "deploy", "domains", "env", "applogs"} {
+		if !pageOn(p, id) {
+			return false
+		}
+	}
+	return true
+}
+
 func TestConsolePagesFollowServerGates(t *testing.T) {
 	f, iss := startFake(t)
 	n := startAcctNode(t, iss)
@@ -29,7 +38,7 @@ func TestConsolePagesFollowServerGates(t *testing.T) {
 		t.Fatalf("whoami leaks another owner email: %s", b)
 	}
 	p := pagesOf(t, b)
-	if pageOn(p, "owner") || pageOn(p, "updates") || pageOn(p, "keys") || !pageOn(p, "hosting") {
+	if pageOn(p, "owner") || pageOn(p, "updates") || pageOn(p, "keys") || !pageOn(p, "hosting") || !hostSurface(p) {
 		t.Fatalf("regular pages: %s", b)
 	}
 	if jsonOf(t, b)["owner"] != false || jsonOf(t, b)["accounts"] != true {
@@ -56,7 +65,7 @@ func TestConsolePagesFollowServerGates(t *testing.T) {
 	rk, _ := mkKey(t, n, map[string]interface{}{"scope": "read", "db": "default", "label": "limited"})
 	_, b, _ = do(t, "GET", n.URL+"/v1/ui/whoami", rk, "")
 	p = pagesOf(t, b)
-	if pageOn(p, "owner") || pageOn(p, "keys") || pageOn(p, "updates") || pageOn(p, "backups") || !pageOn(p, "watch") || !pageOn(p, "hosting") {
+	if pageOn(p, "owner") || pageOn(p, "keys") || pageOn(p, "updates") || pageOn(p, "backups") || !pageOn(p, "watch") || !pageOn(p, "hosting") || !hostSurface(p) {
 		t.Fatalf("read key pages: %s", b)
 	}
 	if jsonOf(t, b)["owner"] != false {

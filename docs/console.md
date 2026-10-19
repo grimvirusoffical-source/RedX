@@ -68,12 +68,17 @@ rest. The sidebar lists only the pages `GET /v1/ui/whoami` marks with `pages.<id
 `Esc` closes dialogs. The theme switcher (moon / monitor / sun) is in the top bar; layout is responsive down to phone width.
 See *Appearance* below.
 
+The header centre is a **Database / Host** switch. **Database** is the default and lists the database pages below, including Help. **Host** replaces that list with Plans & billing, Usage & quotas, Updates, Logs, and the placeholders Apps, Deploy, Domains & SSL, Env & Secrets, and App logs. Each placeholder is a real page that says **Coming soon**. The last choice is remembered for the signed-in user. `?mode=host` or `?mode=database` selects that mode (hash routes stay, for example `/?mode=host#/hosting`). Opening a host page selects Host. Owner and other role-gated pages stay hidden unless this session is allowed to open them.
+
 | Page | What you can do | Terminal equivalent shown |
 |---|---|---|
 | **Dashboard** | live requests/s and latency sparklines, databases, keys, uptime, cluster role, recent audit events, *Get started* checklist | `redx stats`, `redx doctor`, `curl .../v1/admin/status` |
 | **Databases** | create (name validated), list files per database, delete with typed-name confirmation (`DELETE /v1/db/{name}?confirm=name`) | `redx db create`, `redx db list` (dropping is `curl -X DELETE ...?confirm=NAME`) |
-| **Hosting** | plans and prices from the host, monthly or annual, current plan and access (`full`, `readonly`, `suspended`, `none`), usage against the tier quotas, create a hosted database (logical name and physical name), and this account's own database activity | `GET /v1/billing/plans`, `GET /v1/billing/me`, `GET /v1/hosting/activity` |
-| **Updates** *(host admin and owner)* | installed version and sequence, manifest signature, update source (Host, GitHub, or Both), plan then apply, canary and blue-green health, snapshots and restore, public signing keys, live status | `redx update` |
+| **Plans & billing** *(Host)* | plans and prices from the host, monthly or annual, current plan and access (`full`, `readonly`, `suspended`, `none`), create a hosted database (logical name and physical name) | `GET /v1/billing/plans`, `GET /v1/billing/me` |
+| **Usage & quotas** *(Host)* | storage, monthly traffic, and host on/off switches against this plan's quotas | `GET /v1/billing/me` |
+| **Logs** *(Host)* | this account's own database activity: request counts, errors, recent denied requests | `GET /v1/hosting/activity` |
+| **Updates** *(Host, host admin and owner)* | installed version and sequence, manifest signature, update source (Host, GitHub, or Both), plan then apply, canary and blue-green health, snapshots and restore, public signing keys, live status | `redx update` |
+| **Apps, Deploy, Domains & SSL, Env & Secrets, App logs** *(Host)* | shown in the Host nav; each page says Coming soon | |
 | **Data Explorer** | file/box tree with counts, paginated table, filter builder that **writes the BoxQL for you**, record editor (Box text or JSON), TTL and sliding TTL, new record (next free ID), delete, *Open in Studio* | `redx get/set/del`, `redx bx` |
 | **BoxQL Studio** | own editor with syntax highlighting, context-aware autocomplete (verbs, files, boxes, fields, options), `$param` inputs, `Ctrl+Enter`, **Explain**, Table / JSON / Box-text results, history, saved queries, cheat-sheet, snippets, errors with `line:col` squiggles | `redx bx '...' --param/--sparam` |
 | **Live Watch** *(Advanced)* | WebSocket to `bx/watch` or a topic, pause, clear, download, 500-event cap, auto-reconnect | `redx bx '{Watch[]} = ...'` / `websocat` |
