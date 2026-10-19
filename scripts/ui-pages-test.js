@@ -73,6 +73,7 @@ const PAGES = ['dashboard', 'databases', 'data', 'studio', 'keys', 'devices', 'b
       await p.goto(`${url}/#/connect?${qs}`, { waitUntil: 'networkidle' });
       await p.waitForTimeout(300);
       const txt = await p.evaluate(() => document.querySelector('main').innerText);
+      if (!/expires in \d+:\d\d/.test(txt)) fail(`[${where}] the expiry countdown is not filled at once`);
       for (const want of ['Gendragoon', 'verified', 'Workspace name', 'read and change data in this workspace only', 'see your other databases', 'manage keys', 'Approve', 'Deny']) {
         if (!txt.toLowerCase().includes(want.toLowerCase())) fail(`[${where}] consent page lacks "${want}"`);
       }

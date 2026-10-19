@@ -45,12 +45,15 @@ export default async function render({ query, navigate }) {
   root.append(card);
   const left = h('b');
   const exp = Date.parse(s.expires_at);
-  const tick = setInterval(() => {
+  let shown = false; // the countdown stops at 0 and when the page is left (the element leaves the document)
+  const update = () => {
     const sec = Math.max(0, Math.round((exp - Date.now()) / 1000));
     left.textContent = Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
-    if (!sec) clearInterval(tick);
-  }, 1000);
-  left.textContent = '…';
+    if (left.isConnected) shown = true;
+    if (!sec || (shown && !left.isConnected)) clearInterval(tick);
+  };
+  const tick = setInterval(update, 1000);
+  update(); // filled at once, not after the first second
   const wsIn = h('input', { class: 'input', value: s.defaults.workspace, 'aria-label': 'Workspace name', readonly: s.defaults.workspace_fixed || undefined, spellcheck: 'false' });
   const replace = h('input', { type: 'checkbox', 'aria-label': 'Replace the existing key' });
   const confirmIn = h('input', { class: 'input', placeholder: p.id, 'aria-label': 'Type the app id to confirm', autocomplete: 'off' });
