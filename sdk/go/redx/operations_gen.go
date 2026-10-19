@@ -107,6 +107,10 @@ var Operations = map[string]Operation{
 	"promoteHostedApp":      {ID: "promoteHostedApp", Group: "hosted", Method: "POST", Path: "/v1/hosted/apps/{id}/promote", Shorthand: "", Auth: "key", Danger: DangerAdmin, Response: "json", Request: "", HostConfirm: "", Summary: "Promote the canary or blue-green standby to current."},
 	"startHostedApp":        {ID: "startHostedApp", Group: "hosted", Method: "POST", Path: "/v1/hosted/apps/{id}/start", Shorthand: "", Auth: "key", Danger: DangerWrite, Response: "json", Request: "", HostConfirm: "", Summary: "Start an app. A state change counts as one host_switch_quota switch."},
 	"stopHostedApp":         {ID: "stopHostedApp", Group: "hosted", Method: "POST", Path: "/v1/hosted/apps/{id}/stop", Shorthand: "", Auth: "key", Danger: DangerWrite, Response: "json", Request: "", HostConfirm: "", Summary: "Stop an app. A state change counts as one host_switch_quota switch."},
+	"listHostedDomains":     {ID: "listHostedDomains", Group: "hosted", Method: "GET", Path: "/v1/hosted/apps/{id}/domains", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Default hostname and custom domains, with the DNS records for unverified names."},
+	"addHostedDomain":       {ID: "addHostedDomain", Group: "hosted", Method: "POST", Path: "/v1/hosted/apps/{id}/domains", Shorthand: "", Auth: "key", Danger: DangerWrite, Response: "json", Request: "json", HostConfirm: "", Summary: "Claim a custom domain. method is txt or http. A name another tenant holds is refused."},
+	"deleteHostedDomain":    {ID: "deleteHostedDomain", Group: "hosted", Method: "DELETE", Path: "/v1/hosted/apps/{id}/domains/{domain}", Shorthand: "", Auth: "key", Danger: DangerWrite, Response: "json", Request: "", HostConfirm: "", Summary: "Drop a custom domain. The default hostname cannot be dropped."},
+	"verifyHostedDomain":    {ID: "verifyHostedDomain", Group: "hosted", Method: "POST", Path: "/v1/hosted/apps/{id}/domains/{domain}/verify", Shorthand: "", Auth: "key", Danger: DangerWrite, Response: "json", Request: "", HostConfirm: "", Summary: "Check the TXT or HTTP challenge and mark the domain verified so it can be routed."},
 	"getHostedUsage":        {ID: "getHostedUsage", Group: "hosted", Method: "GET", Path: "/v1/hosted/apps/{id}/usage", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Disk used by one app and the tier limits that apply."},
 	"getHostedHealth":       {ID: "getHostedHealth", Group: "hosted", Method: "GET", Path: "/v1/hosted/apps/{id}/health", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Probe the current release. A failed direct deploy is rolled back to the previous release."},
 	"hostedTLSAsk":          {ID: "hostedTLSAsk", Group: "hosted", Method: "GET", Path: "/v1/hosted/tls/ask", Shorthand: "", Auth: "none", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Caddy on-demand TLS ask. 200 only for a verified app domain, and only from loopback or with X-RedX-Caddy-Ask."},
@@ -838,6 +842,38 @@ func (c *Client) StartHostedApp(ctx context.Context, id string, a Args) (*Result
 func (c *Client) StopHostedApp(ctx context.Context, id string, a Args) (*Result, error) {
 	a.Params = withParams(a.Params, map[string]string{"id": id})
 	return c.Call(ctx, "stopHostedApp", a)
+}
+
+// ListHostedDomains: Default hostname and custom domains, with the DNS records for unverified names.
+//
+// GET /v1/hosted/apps/{id}/domains, auth key, danger safe.
+func (c *Client) ListHostedDomains(ctx context.Context, id string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"id": id})
+	return c.Call(ctx, "listHostedDomains", a)
+}
+
+// AddHostedDomain: Claim a custom domain. method is txt or http. A name another tenant holds is refused.
+//
+// POST /v1/hosted/apps/{id}/domains, auth key, danger write.
+func (c *Client) AddHostedDomain(ctx context.Context, id string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"id": id})
+	return c.Call(ctx, "addHostedDomain", a)
+}
+
+// DeleteHostedDomain: Drop a custom domain. The default hostname cannot be dropped.
+//
+// DELETE /v1/hosted/apps/{id}/domains/{domain}, auth key, danger write.
+func (c *Client) DeleteHostedDomain(ctx context.Context, id string, domain string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"id": id, "domain": domain})
+	return c.Call(ctx, "deleteHostedDomain", a)
+}
+
+// VerifyHostedDomain: Check the TXT or HTTP challenge and mark the domain verified so it can be routed.
+//
+// POST /v1/hosted/apps/{id}/domains/{domain}/verify, auth key, danger write.
+func (c *Client) VerifyHostedDomain(ctx context.Context, id string, domain string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"id": id, "domain": domain})
+	return c.Call(ctx, "verifyHostedDomain", a)
 }
 
 // GetHostedUsage: Disk used by one app and the tier limits that apply.

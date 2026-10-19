@@ -3263,6 +3263,189 @@
     "x-rottenapple-level": "L1"
    }
   },
+  "/v1/hosted/apps/{id}/domains": {
+   "get": {
+    "operationId": "listHostedDomains",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Default hostname and custom domains, with the DNS records for unverified names.",
+    "tags": [
+     "hosted"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "safe",
+    "x-redx-danger-level": 0,
+    "x-rottenapple-level": "L1"
+   },
+   "post": {
+    "operationId": "addHostedDomain",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "domain": {
+          "type": "string"
+         },
+         "method": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Claim a custom domain. method is txt or http. A name another tenant holds is refused.",
+    "tags": [
+     "hosted"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "write",
+    "x-redx-danger-level": 1,
+    "x-rottenapple-level": "L1"
+   }
+  },
+  "/v1/hosted/apps/{id}/domains/{domain}": {
+   "delete": {
+    "operationId": "deleteHostedDomain",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "domain",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Drop a custom domain. The default hostname cannot be dropped.",
+    "tags": [
+     "hosted"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "write",
+    "x-redx-danger-level": 1,
+    "x-rottenapple-level": "L1"
+   }
+  },
+  "/v1/hosted/apps/{id}/domains/{domain}/verify": {
+   "post": {
+    "operationId": "verifyHostedDomain",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "domain",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Check the TXT or HTTP challenge and mark the domain verified so it can be routed.",
+    "tags": [
+     "hosted"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "write",
+    "x-redx-danger-level": 1,
+    "x-rottenapple-level": "L1"
+   }
+  },
   "/v1/hosted/apps/{id}/health": {
    "get": {
     "operationId": "getHostedHealth",

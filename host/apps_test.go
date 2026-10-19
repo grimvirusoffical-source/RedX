@@ -454,6 +454,112 @@ func TestHostedHealthRollback(t *testing.T) {
 	}
 }
 
+func TestHostedDomainQuotaAndCNAME(t *testing.T) {
+	f, iss := startFake(t)
+	n := startAcctNode(t, iss)
+	end := time.Now().Add(30 * 24 * time.Hour)
+	tok, _ := signIn(t, n, f, regular)
+	if err := host.SetPlanForTest(n.H, hostedPlan(regular.Sub, "basic", "month", "active", end)); err != nil {
+		t.Fatal(err)
+	}
+	st, b, _ := do(t, "POST", n.URL+"/v1/hosted/apps", tok, `{"name":"site","kind":"static"}`, "Content-Type", "application/json")
+	if st != 201 {
+		t.Fatalf("create: %d %s", st, b)
+	}
+	id := appField(t, b, "id")
+	def := appField(t, b, "host")
+	st, b, _ = do(t, "POST", n.URL+"/v1/hosted/apps/"+id+"/domains", tok, `{"domain":"one.example.com","method":"cname"}`, "Content-Type", "application/json")
+	if st != 201 {
+		t.Fatalf("cname add: %d %s", st, b)
+	}
+	st, b, _ = do(t, "POST", n.URL+"/v1/hosted/apps/"+id+"/domains", tok, `{"domain":"two.example.com"}`, "Content-Type", "application/json")
+	if st != 402 || codeOf(t, b) != "quota_exceeded" || jsonOf(t, b)["limit"] != "domain_quota" {
+		t.Fatalf("domain quota: %d %s", st, b)
+	}
+	host.SetHostedCNAMEForTest(n.H, func(name string) (string, error) {
+		if name == "one.example.com" {
+			return def + ".", nil
+		}
+		return "", os.ErrNotExist
+	})
+	st, b, _ = do(t, "POST", n.URL+"/v1/hosted/apps/"+id+"/domains/one.example.com/verify", tok, "")
+	if st != 200 || !strings.Contains(b, `"verified":true`) {
+		t.Fatalf("cname verify: %d %s", st, b)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/v1/hosted/tls/ask?domain=one.example.com", nil)
+	req.RemoteAddr = "127.0.0.1:9"
+	rr := httptest.NewRecorder()
+	n.H.Handler().ServeHTTP(rr, req)
+	if rr.Code != 200 {
+		t.Fatalf("verified cname ask: %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHostedDomainClaim(t *testing.T) {
+	f, iss := startFake(t)
+	n := startAcctNode(t, iss)
+	n.H.Cfg.AppsLimits = map[string]host.AppLimit{"basic": {Domains: 8}}
+	end := time.Now().Add(30 * 24 * time.Hour)
+	tokA, _ := signIn(t, n, f, regular)
+	if err := host.SetPlanForTest(n.H, hostedPlan(regular.Sub, "basic", "month", "active", end)); err != nil {
+		t.Fatal(err)
+	}
+	st, b, _ := do(t, "POST", n.URL+"/v1/hosted/apps", tokA, `{"name":"site","kind":"static"}`, "Content-Type", "application/json")
+	if st != 201 {
+		t.Fatalf("create: %d %s", st, b)
+	}
+	idA := appField(t, b, "id")
+	other := accountsfake.Identity{Sub: "rxa_OTHER000000000000000000001", Email: "other@example.com", EmailVerified: true, Username: "other_user", AMR: []string{"pwd"}}
+	tokB, _ := signIn(t, n, f, other)
+	if err := host.SetPlanForTest(n.H, hostedPlan(other.Sub, "gold", "month", "active", end)); err != nil {
+		t.Fatal(err)
+	}
+	st, b, _ = do(t, "POST", n.URL+"/v1/hosted/apps", tokB, `{"name":"shop","kind":"static"}`, "Content-Type", "application/json")
+	if st != 201 {
+		t.Fatalf("other: %d %s", st, b)
+	}
+	idB := appField(t, b, "id")
+	if st, b, _ = do(t, "POST", n.URL+"/v1/hosted/apps/"+idB+"/domains", tokA, `{"domain":"stolen.example.com"}`, "Content-Type", "application/json"); st != 404 {
+		t.Fatalf("cross domain: %d %s", st, b)
+	}
+	st, b, _ = do(t, "POST", n.URL+"/v1/hosted/apps/"+idA+"/domains", tokA, `{"domain":"shop.example.com","method":"txt"}`, "Content-Type", "application/json")
+	dom, _ := jsonOf(t, b)["domain"].(map[string]interface{})
+	if st != 201 || dom == nil || dom["verified"] != false {
+		t.Fatalf("add: %d %s", st, b)
+	}
+	token, _ := dom["token"].(string)
+	st, b, _ = do(t, "POST", n.URL+"/v1/hosted/apps/"+idB+"/domains", tokB, `{"domain":"shop.example.com"}`, "Content-Type", "application/json")
+	if st != 409 || codeOf(t, b) != "domain_taken" {
+		t.Fatalf("claim: %d %s", st, b)
+	}
+	if st, b, _ = do(t, "POST", n.URL+"/v1/hosted/apps/"+idA+"/domains", tokA, `{"domain":"evil.host.rottenapplestore.org"}`, "Content-Type", "application/json"); st != 400 {
+		t.Fatalf("zone: %d %s", st, b)
+	}
+	host.SetHostedDNSForTest(n.H, func(name string) ([]string, error) {
+		if name == "_redx-challenge.shop.example.com" {
+			return []string{token}, nil
+		}
+		return nil, os.ErrNotExist
+	})
+	st, b, _ = do(t, "POST", n.URL+"/v1/hosted/apps/"+idA+"/domains/shop.example.com/verify", tokA, "")
+	if st != 200 || !strings.Contains(b, `"verified":true`) {
+		t.Fatalf("verify: %d %s", st, b)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/v1/hosted/tls/ask?domain=shop.example.com", nil)
+	req.RemoteAddr = "127.0.0.1:9"
+	rr := httptest.NewRecorder()
+	n.H.Handler().ServeHTTP(rr, req)
+	if rr.Code != 200 {
+		t.Fatalf("ask: %d %s", rr.Code, rr.Body.String())
+	}
+	req.RemoteAddr = "203.0.113.5:443"
+	rr = httptest.NewRecorder()
+	n.H.Handler().ServeHTTP(rr, req)
+	if rr.Code != 403 {
+		t.Fatalf("remote ask: %d", rr.Code)
+	}
+}
+
 func TestHostedPodmanIntegration(t *testing.T) {
 	if os.Getenv("REDX_APPS_PODMAN_TEST") != "1" {
 		t.Skip("container runtime integration is skipped unless REDX_APPS_PODMAN_TEST=1 (rootless podman on PATH)")

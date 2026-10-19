@@ -1280,6 +1280,50 @@
    "response": "json"
   },
   {
+   "id": "listHostedDomains",
+   "group": "hosted",
+   "method": "GET",
+   "path": "/v1/hosted/apps/{id}/domains",
+   "auth": "key",
+   "danger": "safe",
+   "summary": "Default hostname and custom domains, with the DNS records for unverified names.",
+   "response": "json"
+  },
+  {
+   "id": "addHostedDomain",
+   "group": "hosted",
+   "method": "POST",
+   "path": "/v1/hosted/apps/{id}/domains",
+   "auth": "key",
+   "danger": "write",
+   "summary": "Claim a custom domain. method is txt or http. A name another tenant holds is refused.",
+   "response": "json",
+   "body": {
+    "domain": "string",
+    "method": "string"
+   }
+  },
+  {
+   "id": "deleteHostedDomain",
+   "group": "hosted",
+   "method": "DELETE",
+   "path": "/v1/hosted/apps/{id}/domains/{domain}",
+   "auth": "key",
+   "danger": "write",
+   "summary": "Drop a custom domain. The default hostname cannot be dropped.",
+   "response": "json"
+  },
+  {
+   "id": "verifyHostedDomain",
+   "group": "hosted",
+   "method": "POST",
+   "path": "/v1/hosted/apps/{id}/domains/{domain}/verify",
+   "auth": "key",
+   "danger": "write",
+   "summary": "Check the TXT or HTTP challenge and mark the domain verified so it can be routed.",
+   "response": "json"
+  },
+  {
    "id": "getHostedUsage",
    "group": "hosted",
    "method": "GET",

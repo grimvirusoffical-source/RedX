@@ -77,6 +77,14 @@ func (h *Host) hostedRoute(w http.ResponseWriter, r *http.Request) {
 		h.hostedPower(w, r, parts[1], true)
 	case len(parts) == 3 && parts[2] == "stop" && r.Method == http.MethodPost:
 		h.hostedPower(w, r, parts[1], false)
+	case len(parts) == 3 && parts[2] == "domains" && r.Method == http.MethodGet:
+		h.hostedDomains(w, r, parts[1])
+	case len(parts) == 3 && parts[2] == "domains" && r.Method == http.MethodPost:
+		h.hostedAddDomain(w, r, parts[1])
+	case len(parts) == 4 && parts[2] == "domains" && r.Method == http.MethodDelete:
+		h.hostedDelDomain(w, r, parts[1], parts[3])
+	case len(parts) == 5 && parts[2] == "domains" && parts[4] == "verify" && r.Method == http.MethodPost:
+		h.hostedVerifyDomain(w, r, parts[1], parts[3])
 	case len(parts) == 3 && parts[2] == "usage" && r.Method == http.MethodGet:
 		h.hostedUsage(w, r, parts[1])
 	case len(parts) == 3 && parts[2] == "health" && r.Method == http.MethodGet:

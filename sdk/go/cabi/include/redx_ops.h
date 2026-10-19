@@ -106,6 +106,10 @@
 #define REDX_OP_PROMOTE_HOSTED_APP "promoteHostedApp" /* POST /v1/hosted/apps/{id}/promote, admin */
 #define REDX_OP_START_HOSTED_APP "startHostedApp" /* POST /v1/hosted/apps/{id}/start, write */
 #define REDX_OP_STOP_HOSTED_APP "stopHostedApp" /* POST /v1/hosted/apps/{id}/stop, write */
+#define REDX_OP_LIST_HOSTED_DOMAINS "listHostedDomains" /* GET /v1/hosted/apps/{id}/domains, safe */
+#define REDX_OP_ADD_HOSTED_DOMAIN "addHostedDomain" /* POST /v1/hosted/apps/{id}/domains, write */
+#define REDX_OP_DELETE_HOSTED_DOMAIN "deleteHostedDomain" /* DELETE /v1/hosted/apps/{id}/domains/{domain}, write */
+#define REDX_OP_VERIFY_HOSTED_DOMAIN "verifyHostedDomain" /* POST /v1/hosted/apps/{id}/domains/{domain}/verify, write */
 #define REDX_OP_GET_HOSTED_USAGE "getHostedUsage" /* GET /v1/hosted/apps/{id}/usage, safe */
 #define REDX_OP_GET_HOSTED_HEALTH "getHostedHealth" /* GET /v1/hosted/apps/{id}/health, safe */
 #define REDX_OP_HOSTED_T_L_S_ASK "hostedTLSAsk" /* GET /v1/hosted/tls/ask, safe */

@@ -71,6 +71,7 @@ async function renderOne(root, id) {
     const app = await api('GET', '/v1/hosted/apps/' + enc(id));
     const links = [
       ['hostdeploy/' + enc(id), 'Deploy', 'upload'],
+      ['hostdomains/' + enc(id), 'Domains', 'globe'],
     ];
     mount(body,
       planBanners(app),
