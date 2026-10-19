@@ -109,6 +109,10 @@ OPERATIONS: Dict[str, Dict[str, Any]] = {
     "promoteHostedApp": {"id": "promoteHostedApp", "group": "hosted", "method": "POST", "path": "/v1/hosted/apps/{id}/promote", "shorthand": "", "auth": "key", "danger": "admin", "danger_level": 2, "response": "json", "request": "", "host_confirm": "", "summary": "Promote the canary or blue-green standby to current."},
     "startHostedApp": {"id": "startHostedApp", "group": "hosted", "method": "POST", "path": "/v1/hosted/apps/{id}/start", "shorthand": "", "auth": "key", "danger": "write", "danger_level": 1, "response": "json", "request": "", "host_confirm": "", "summary": "Start an app. A state change counts as one host_switch_quota switch."},
     "stopHostedApp": {"id": "stopHostedApp", "group": "hosted", "method": "POST", "path": "/v1/hosted/apps/{id}/stop", "shorthand": "", "auth": "key", "danger": "write", "danger_level": 1, "response": "json", "request": "", "host_confirm": "", "summary": "Stop an app. A state change counts as one host_switch_quota switch."},
+    "listHostedDomains": {"id": "listHostedDomains", "group": "hosted", "method": "GET", "path": "/v1/hosted/apps/{id}/domains", "shorthand": "", "auth": "key", "danger": "safe", "danger_level": 0, "response": "json", "request": "", "host_confirm": "", "summary": "Default hostname and custom domains, with the DNS records for unverified names."},
+    "addHostedDomain": {"id": "addHostedDomain", "group": "hosted", "method": "POST", "path": "/v1/hosted/apps/{id}/domains", "shorthand": "", "auth": "key", "danger": "write", "danger_level": 1, "response": "json", "request": "json", "host_confirm": "", "summary": "Claim a custom domain. method is txt or http. A name another tenant holds is refused."},
+    "deleteHostedDomain": {"id": "deleteHostedDomain", "group": "hosted", "method": "DELETE", "path": "/v1/hosted/apps/{id}/domains/{domain}", "shorthand": "", "auth": "key", "danger": "write", "danger_level": 1, "response": "json", "request": "", "host_confirm": "", "summary": "Drop a custom domain. The default hostname cannot be dropped."},
+    "verifyHostedDomain": {"id": "verifyHostedDomain", "group": "hosted", "method": "POST", "path": "/v1/hosted/apps/{id}/domains/{domain}/verify", "shorthand": "", "auth": "key", "danger": "write", "danger_level": 1, "response": "json", "request": "", "host_confirm": "", "summary": "Check the TXT or HTTP challenge and mark the domain verified so it can be routed."},
     "getHostedUsage": {"id": "getHostedUsage", "group": "hosted", "method": "GET", "path": "/v1/hosted/apps/{id}/usage", "shorthand": "", "auth": "key", "danger": "safe", "danger_level": 0, "response": "json", "request": "", "host_confirm": "", "summary": "Disk used by one app and the tier limits that apply."},
     "getHostedHealth": {"id": "getHostedHealth", "group": "hosted", "method": "GET", "path": "/v1/hosted/apps/{id}/health", "shorthand": "", "auth": "key", "danger": "safe", "danger_level": 0, "response": "json", "request": "", "host_confirm": "", "summary": "Probe the current release. A failed direct deploy is rolled back to the previous release."},
     "hostedTLSAsk": {"id": "hostedTLSAsk", "group": "hosted", "method": "GET", "path": "/v1/hosted/tls/ask", "shorthand": "", "auth": "none", "danger": "safe", "danger_level": 0, "response": "json", "request": "", "host_confirm": "", "summary": "Caddy on-demand TLS ask. 200 only for a verified app domain, and only from loopback or with X-RedX-Caddy-Ask."},
@@ -509,6 +513,22 @@ class Operations:
     def stop_hosted_app(self, id: str, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
         """Stop an app. A state change counts as one host_switch_quota switch. (POST /v1/hosted/apps/{id}/stop; auth key; danger write)"""
         return self.call("stopHostedApp", id=id, confirm=confirm, headers=headers)
+
+    def list_hosted_domains(self, id: str, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Default hostname and custom domains, with the DNS records for unverified names. (GET /v1/hosted/apps/{id}/domains; auth key; danger safe)"""
+        return self.call("listHostedDomains", id=id, confirm=confirm, headers=headers)
+
+    def add_hosted_domain(self, id: str, *, body: Any = None, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Claim a custom domain. method is txt or http. A name another tenant holds is refused. (POST /v1/hosted/apps/{id}/domains; auth key; danger write)"""
+        return self.call("addHostedDomain", id=id, body=body, confirm=confirm, headers=headers)
+
+    def delete_hosted_domain(self, id: str, domain: str, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Drop a custom domain. The default hostname cannot be dropped. (DELETE /v1/hosted/apps/{id}/domains/{domain}; auth key; danger write)"""
+        return self.call("deleteHostedDomain", id=id, domain=domain, confirm=confirm, headers=headers)
+
+    def verify_hosted_domain(self, id: str, domain: str, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Check the TXT or HTTP challenge and mark the domain verified so it can be routed. (POST /v1/hosted/apps/{id}/domains/{domain}/verify; auth key; danger write)"""
+        return self.call("verifyHostedDomain", id=id, domain=domain, confirm=confirm, headers=headers)
 
     def get_hosted_usage(self, id: str, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
         """Disk used by one app and the tier limits that apply. (GET /v1/hosted/apps/{id}/usage; auth key; danger safe)"""

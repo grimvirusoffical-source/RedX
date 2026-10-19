@@ -213,6 +213,14 @@ export interface RedXOperations {
   startHostedApp(opts: { id: string; headers?: Record<string, string> }): Promise<any>;
   /** Stop an app. A state change counts as one host_switch_quota switch. (POST /v1/hosted/apps/{id}/stop; auth key; danger write) */
   stopHostedApp(opts: { id: string; headers?: Record<string, string> }): Promise<any>;
+  /** Default hostname and custom domains, with the DNS records for unverified names. (GET /v1/hosted/apps/{id}/domains; auth key; danger safe) */
+  listHostedDomains(opts: { id: string; headers?: Record<string, string> }): Promise<any>;
+  /** Claim a custom domain. method is txt or http. A name another tenant holds is refused. (POST /v1/hosted/apps/{id}/domains; auth key; danger write) */
+  addHostedDomain(opts: { id: string; body?: { domain?: string; method?: string }; headers?: Record<string, string> }): Promise<any>;
+  /** Drop a custom domain. The default hostname cannot be dropped. (DELETE /v1/hosted/apps/{id}/domains/{domain}; auth key; danger write) */
+  deleteHostedDomain(opts: { id: string; domain: string; headers?: Record<string, string> }): Promise<any>;
+  /** Check the TXT or HTTP challenge and mark the domain verified so it can be routed. (POST /v1/hosted/apps/{id}/domains/{domain}/verify; auth key; danger write) */
+  verifyHostedDomain(opts: { id: string; domain: string; headers?: Record<string, string> }): Promise<any>;
   /** Disk used by one app and the tier limits that apply. (GET /v1/hosted/apps/{id}/usage; auth key; danger safe) */
   getHostedUsage(opts: { id: string; headers?: Record<string, string> }): Promise<any>;
   /** Probe the current release. A failed direct deploy is rolled back to the previous release. (GET /v1/hosted/apps/{id}/health; auth key; danger safe) */

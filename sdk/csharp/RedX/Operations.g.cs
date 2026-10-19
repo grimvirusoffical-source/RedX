@@ -134,6 +134,10 @@ namespace RedX
             ["promoteHostedApp"] = new Operation { Id = "promoteHostedApp", Group = "hosted", Method = "POST", Path = "/v1/hosted/apps/{id}/promote", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "Promote the canary or blue-green standby to current.", Danger = DangerLevel.Admin },
             ["startHostedApp"] = new Operation { Id = "startHostedApp", Group = "hosted", Method = "POST", Path = "/v1/hosted/apps/{id}/start", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "Start an app. A state change counts as one host_switch_quota switch.", Danger = DangerLevel.Write },
             ["stopHostedApp"] = new Operation { Id = "stopHostedApp", Group = "hosted", Method = "POST", Path = "/v1/hosted/apps/{id}/stop", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "Stop an app. A state change counts as one host_switch_quota switch.", Danger = DangerLevel.Write },
+            ["listHostedDomains"] = new Operation { Id = "listHostedDomains", Group = "hosted", Method = "GET", Path = "/v1/hosted/apps/{id}/domains", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "Default hostname and custom domains, with the DNS records for unverified names.", Danger = DangerLevel.Safe },
+            ["addHostedDomain"] = new Operation { Id = "addHostedDomain", Group = "hosted", Method = "POST", Path = "/v1/hosted/apps/{id}/domains", Shorthand = "", Auth = "key", Response = "json", Request = "json", HostConfirm = "", Summary = "Claim a custom domain. method is txt or http. A name another tenant holds is refused.", Danger = DangerLevel.Write },
+            ["deleteHostedDomain"] = new Operation { Id = "deleteHostedDomain", Group = "hosted", Method = "DELETE", Path = "/v1/hosted/apps/{id}/domains/{domain}", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "Drop a custom domain. The default hostname cannot be dropped.", Danger = DangerLevel.Write },
+            ["verifyHostedDomain"] = new Operation { Id = "verifyHostedDomain", Group = "hosted", Method = "POST", Path = "/v1/hosted/apps/{id}/domains/{domain}/verify", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "Check the TXT or HTTP challenge and mark the domain verified so it can be routed.", Danger = DangerLevel.Write },
             ["getHostedUsage"] = new Operation { Id = "getHostedUsage", Group = "hosted", Method = "GET", Path = "/v1/hosted/apps/{id}/usage", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "Disk used by one app and the tier limits that apply.", Danger = DangerLevel.Safe },
             ["getHostedHealth"] = new Operation { Id = "getHostedHealth", Group = "hosted", Method = "GET", Path = "/v1/hosted/apps/{id}/health", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "Probe the current release. A failed direct deploy is rolled back to the previous release.", Danger = DangerLevel.Safe },
             ["hostedTLSAsk"] = new Operation { Id = "hostedTLSAsk", Group = "hosted", Method = "GET", Path = "/v1/hosted/tls/ask", Shorthand = "", Auth = "none", Response = "json", Request = "", HostConfirm = "", Summary = "Caddy on-demand TLS ask. 200 only for a verified app domain, and only from loopback or with X-RedX-Caddy-Ask.", Danger = DangerLevel.Safe },
@@ -526,6 +530,22 @@ namespace RedX
         /// <summary>Stop an app. A state change counts as one host_switch_quota switch. (POST /v1/hosted/apps/{id}/stop; auth key; danger write)</summary>
         public Task<RedXResult> StopHostedAppAsync(string id, CancellationToken ct = default) =>
             CallAsync("stopHostedApp", new Dictionary<string, string> { ["id"] = id }, null, null, null, null, false, ct);
+
+        /// <summary>Default hostname and custom domains, with the DNS records for unverified names. (GET /v1/hosted/apps/{id}/domains; auth key; danger safe)</summary>
+        public Task<RedXResult> ListHostedDomainsAsync(string id, CancellationToken ct = default) =>
+            CallAsync("listHostedDomains", new Dictionary<string, string> { ["id"] = id }, null, null, null, null, false, ct);
+
+        /// <summary>Claim a custom domain. method is txt or http. A name another tenant holds is refused. (POST /v1/hosted/apps/{id}/domains; auth key; danger write)</summary>
+        public Task<RedXResult> AddHostedDomainAsync(string id, object? body = null, CancellationToken ct = default) =>
+            CallAsync("addHostedDomain", new Dictionary<string, string> { ["id"] = id }, null, body, null, null, false, ct);
+
+        /// <summary>Drop a custom domain. The default hostname cannot be dropped. (DELETE /v1/hosted/apps/{id}/domains/{domain}; auth key; danger write)</summary>
+        public Task<RedXResult> DeleteHostedDomainAsync(string id, string domain, CancellationToken ct = default) =>
+            CallAsync("deleteHostedDomain", new Dictionary<string, string> { ["id"] = id, ["domain"] = domain }, null, null, null, null, false, ct);
+
+        /// <summary>Check the TXT or HTTP challenge and mark the domain verified so it can be routed. (POST /v1/hosted/apps/{id}/domains/{domain}/verify; auth key; danger write)</summary>
+        public Task<RedXResult> VerifyHostedDomainAsync(string id, string domain, CancellationToken ct = default) =>
+            CallAsync("verifyHostedDomain", new Dictionary<string, string> { ["id"] = id, ["domain"] = domain }, null, null, null, null, false, ct);
 
         /// <summary>Disk used by one app and the tier limits that apply. (GET /v1/hosted/apps/{id}/usage; auth key; danger safe)</summary>
         public Task<RedXResult> GetHostedUsageAsync(string id, CancellationToken ct = default) =>

@@ -8,6 +8,7 @@ import { state, subscribe, setMode, setTheme, setDb, applyTheme, loadWho, loadDb
 const HOST_NAV = [
   { id: 'hostapps', title: 'Apps', icon: 'rocket' },
   { id: 'hostdeploy', title: 'Deploy', icon: 'upload' },
+  { id: 'hostdomains', title: 'Domains', icon: 'globe' },
 ];
 const NAV = [
   { id: 'dashboard', title: 'Dashboard', icon: 'home' },
