@@ -21,10 +21,6 @@ const emit = () => subs.forEach((f) => f(state));
 export function setDb(db) { state.db = db; lsSet('redx.db', db); emit(); }
 export function setMode(m) { state.mode = m; lsSet('redx.mode', m); emit(); }
 
-/** Database pages are the console as it stands today, including Help. Host pages replace that nav. */
-export const DATABASE_PAGES = new Set(['dashboard', 'databases', 'data', 'studio', 'keys', 'devices', 'apps', 'backups', 'settings', 'help', 'watch', 'raw', 'policy', 'cluster', 'presets']);
-export const HOST_PAGES = new Set(['hosting', 'usage', 'updates', 'logs', 'hostapps', 'deploy', 'domains', 'env', 'applogs']);
-
 /** Signed-in identity for the remembered console mode. An account uses its id, then its email. */
 export function userKey() {
   const w = state.who;
@@ -72,14 +68,13 @@ export function setConsoleMode(m) {
 }
 
 /**
- * Pick the mode for a hash page. A host page selects Host and a database page selects Database.
+ * forced is 'host' or 'database' when the open page belongs to that mode.
  * Otherwise ?mode= wins, then this user's stored choice, then Database. The choice is saved.
  */
-export function applyConsoleModeForRoute(page) {
+export function applyConsoleModeForRoute(forced) {
   const q = modeQuery();
   let mode;
-  if (HOST_PAGES.has(page)) mode = 'host';
-  else if (DATABASE_PAGES.has(page)) mode = 'database';
+  if (forced === 'host' || forced === 'database') mode = forced;
   else if (q) mode = q;
   else mode = readConsoleMode();
   state.consoleMode = mode;

@@ -20,7 +20,7 @@ func pageOn(p map[string]interface{}, id string) bool {
 }
 
 func hostSurface(p map[string]interface{}) bool {
-	for _, id := range []string{"usage", "logs", "hostapps", "deploy", "domains", "env", "applogs"} {
+	for _, id := range []string{"usage", "logs"} {
 		if !pageOn(p, id) {
 			return false
 		}

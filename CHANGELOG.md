@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-* Console: the header centre switches **Database** and **Host**. Database is the default and lists the database pages and Help. Host lists Plans & billing, Usage & quotas, Updates, Logs, and Coming soon pages for Apps, Deploy, Domains & SSL, Env & Secrets, and App logs. The choice is remembered per signed-in user; `?mode=host` or `?mode=database` overrides it, and opening a host page selects Host.
+* Console: the header centre switches **Database** and **Host**. Database is the default and lists the database pages and Help. Host lists Plans & billing, Usage & quotas, Updates, and Logs (this account's activity). The owner audit log stays on the Owner page. The choice is remembered per signed-in user; `?mode=host` or `?mode=database` overrides it, and opening a host page selects Host.
 * Console: the sidebar and the router follow `pages` from `GET /v1/ui/whoami`. A page the server would refuse is not shown, and its address is Page not found. Hosting (`#/hosting`) is there for every signed-in session. Updates (`#/updates`) is there for host admins and owners. The owner audit log on the Owner page filters and pages through `GET /v1/owner/audit`. Hosting shows this account's own database activity (`GET /v1/hosting/activity`).
 * Updates: source `both` accepts a Host or GitHub manifest. Sequence stays one counter for the app across both sources, and the signature rules are unchanged. Choosing the source is still owner-only while Accounts is on.
 * An owner email that is signed in but not verified (or missing 2FA or the owner scope) is told, on that session only: "Owner access needs a verified email and 2FA. Verify your email, then sign in again."
