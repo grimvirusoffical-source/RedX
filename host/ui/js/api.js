@@ -29,6 +29,8 @@ export async function api(method, path, opts = {}) {
   const headers = { ...(opts.headers || {}) };
   const key = opts.key !== undefined ? opts.key : session.key;
   if (key) headers.Authorization = 'Bearer ' + key;
+  // Dangerous ops need X-RedX-Confirm: <operation-id> (server-enforced since 0.4.5).
+  if (opts.confirm) headers['X-RedX-Confirm'] = opts.confirm;
   let body;
   if (opts.json !== undefined) { body = JSON.stringify(opts.json); headers['Content-Type'] = 'application/json'; }
   else if (opts.text !== undefined) { body = opts.text; headers['Content-Type'] = opts.type || 'text/plain'; }

@@ -38,7 +38,7 @@ export default async function render() {
     warn();
     const make = async () => {
       try {
-        const r = await api('POST', '/v1/cluster/join-token', { json: { kind: 'code', ttl_seconds: 600 } });
+        const r = await api('POST', '/v1/cluster/join-token', { json: { kind: 'code', ttl_seconds: 600 }, confirm: 'createJoinToken' });
         code = { code: r.code, expires: Date.now() + r.expires_in_seconds * 1000 };
         paintCode();
       } catch (e) { toast(e.status === 409 ? 'Only the leader can create join codes. Open the console on the leader.' : e.message, 'error', 6000); }
@@ -89,7 +89,7 @@ export default async function render() {
     const make = async () => {
       clearInterval(tick2);
       try {
-        const r = await api('POST', '/v1/keys/pairing', { json: { db: db.value, scope: scope.value, label: label.value || 'device', ttl: ttl.value } });
+        const r = await api('POST', '/v1/keys/pairing', { json: { db: db.value, scope: scope.value, label: label.value || 'device', ttl: ttl.value }, confirm: 'createPairingCode' });
         const L = `${addr.replace(/\/$/, '')}/#/login?code=${r.code}`;
         const expires = Date.now() + r.expires_in_seconds * 1000;
         const canvas = h('canvas', { class: 'qr-box', 'aria-label': 'QR code of the one-time sign-in link' });

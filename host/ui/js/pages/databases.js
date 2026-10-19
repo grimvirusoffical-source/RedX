@@ -49,7 +49,7 @@ export default async function render() {
   async function drop(d) {
     if (!(await confirmTyped('Delete database "' + d + '"?', 'Every file in this database is deleted for good, and the deletion is copied to follower nodes. There is no undo. Make a backup first if you might need it.', d, 'Delete forever'))) return;
     try {
-      await api('DELETE', `/v1/db/${enc(d)}?confirm=${enc(d)}`);
+      await api('DELETE', `/v1/db/${enc(d)}?confirm=${enc(d)}`, { confirm: 'deleteDatabase' });
       toast('Deleted ' + d, 'ok');
       await loadDbs();
       await load();

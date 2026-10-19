@@ -44,7 +44,7 @@ export default async function render() {
   async function revoke(c) {
     if (!await confirmDialog('Revoke ' + c.display, 'The app loses access to ' + c.workspace + ' at once (its key ' + c.key_id + ' stops working). The workspace and its data stay.', { danger: true, ok: 'Revoke' })) return;
     try {
-      await api('DELETE', '/v1/connect/apps/' + enc(c.id));
+      await api('DELETE', '/v1/connect/apps/' + enc(c.id), { confirm: 'connectRevokeApp' });
       toast('Revoked', 'ok');
       load();
     } catch (e) { toast(e.message, 'error', 6000); }

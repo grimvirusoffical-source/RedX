@@ -39,8 +39,17 @@ func req(t *testing.T, method, url, key string, args ...interface{}) (int, []byt
 	if key != "" {
 		r.Header.Set("Authorization", "Bearer "+key)
 	}
+	hasConfirm := false
 	for i := 0; i+1 < len(hdr); i += 2 {
+		if strings.EqualFold(hdr[i], host.ConfirmHeader) {
+			hasConfirm = true
+		}
 		r.Header.Set(hdr[i], hdr[i+1])
+	}
+	if !hasConfirm {
+		if op := host.MatchDangerous(method, r.URL.Path); op != nil {
+			r.Header.Set(host.ConfirmHeader, op.ID)
+		}
 	}
 	resp, err := http.DefaultClient.Do(r)
 	if err != nil {

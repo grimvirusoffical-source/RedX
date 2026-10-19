@@ -80,7 +80,9 @@ export default async function render(ctx) {
         const t = editor.getValue();
         try {
           const url = endpoint(db, f.name, f.type);
-          await api('PUT', url, { text: t, type: 'text/plain' });
+          const putOpts = { text: t, type: 'text/plain' };
+          if (f.type === 'sec') putOpts.confirm = 'putPolicy';
+          await api('PUT', url, putOpts);
           current.orig = t;
           current.isNew = false;
           toast('Saved ' + f.name, 'ok');
@@ -95,7 +97,7 @@ export default async function render(ctx) {
       async function loadList2() { const r = await listFiles(db); files = r.files.filter((x) => x.records === 'raw' || x.records === 'raw-readonly'); paintList(); }
       async function del() {
         if (!(await confirmDialog('Remove ' + f.name + '?', 'The ' + (f.type === 'sec' ? 'security policy' : f.type === 'pulse' ? 'rules' : 'definition') + ' stops applying immediately.', { danger: true, ok: 'Remove' }))) return;
-        try { await api('DELETE', endpoint(db, f.name, f.type)); toast('Removed', 'ok'); current = null; editor = null; await loadList(); mount(main); } catch (e) { toast(e.message, 'error'); }
+        try { const delOpts = f.type === 'sec' ? { confirm: 'deletePolicy' } : {}; await api('DELETE', endpoint(db, f.name, f.type), delOpts); toast('Removed', 'ok'); current = null; editor = null; await loadList(); mount(main); } catch (e) { toast(e.message, 'error'); }
       }
       mount(main, h('div', { class: 'card' },
         h('div', { class: 'row gap wrap', style: { marginBottom: '10px' } }, h('h3', { style: { margin: 0 } }, f.name), typeChip(f.type), h('div', { class: 'grow' }), meta.modified ? h('span', { class: 'muted small' }, 'changed ' + ago(meta.modified)) : null),

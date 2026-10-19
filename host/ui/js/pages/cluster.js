@@ -27,7 +27,7 @@ export default async function render() {
   async function promote(c) {
     const ok = await confirmTyped('Promote this node to leader?', 'The old leader may still be running. If it is, two leaders will accept writes and their data will diverge. Writes the old leader acknowledged but had not yet replicated are lost. Only promote after you are sure the old leader is down or cut off. Other followers must then be pointed at this node.', 'promote', 'Promote to leader');
     if (!ok) return;
-    try { const r = await api('POST', '/v1/cluster/promote'); toast('Promoted. ' + (r.note || ''), 'ok', 9000); load(); } catch (e) { toast(e.message, 'error', 7000); }
+    try { const r = await api('POST', '/v1/cluster/promote', { confirm: 'promote' }); toast('Promoted. ' + (r.note || ''), 'ok', 9000); load(); } catch (e) { toast(e.message, 'error', 7000); }
   }
   await load(true);
   timer = setInterval(load, 4000);

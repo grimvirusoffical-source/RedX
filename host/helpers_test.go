@@ -113,12 +113,23 @@ func do(t *testing.T, method, url, key, body string, hdr ...string) (int, string
 	if key != "" {
 		req.Header.Set("Authorization", "Bearer "+key)
 	}
+	hasConfirm := false
 	for i := 0; i+1 < len(hdr); i += 2 {
 		if strings.EqualFold(hdr[i], "Host") {
 			req.Host = hdr[i+1] // net/http ignores a Host entry in Header
 			continue
 		}
+		if strings.EqualFold(hdr[i], host.ConfirmHeader) {
+			hasConfirm = true
+		}
 		req.Header.Set(hdr[i], hdr[i+1])
+	}
+	// Tests that exercise a dangerous op get the confirm header for free, unless they
+	// already set X-RedX-Confirm (pass an empty value to assert the 428 path).
+	if !hasConfirm {
+		if op := host.MatchDangerous(method, req.URL.Path); op != nil {
+			req.Header.Set(host.ConfirmHeader, op.ID)
+		}
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

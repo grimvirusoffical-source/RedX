@@ -62,6 +62,11 @@ func (h *Host) routes() http.Handler {
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Cache-Control", "no-store")
 		p := r.URL.Path
+		// Dangerous operations (createKey, deleteDatabase, promote, …) need an explicit
+		// confirmation regardless of key scope. Checked before any handler runs.
+		if strings.HasPrefix(p, "/v1/") && requireDangerConfirm(w, r) {
+			return
+		}
 		switch {
 		case isUIPath(p):
 			h.serveUI(w, r)

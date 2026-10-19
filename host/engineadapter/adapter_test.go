@@ -49,6 +49,9 @@ func do(t *testing.T, method, url, key, body string) (int, string) {
 	t.Helper()
 	req, _ := http.NewRequest(method, url, strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+key)
+	if op := host.MatchDangerous(method, req.URL.Path); op != nil {
+		req.Header.Set(host.ConfirmHeader, op.ID)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)

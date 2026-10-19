@@ -109,7 +109,7 @@
     "confirm": "string"
    },
    "hostConfirm": "db",
-   "notes": "The host also wants the database name repeated as ?confirm=<db>; SDKs add it when the call is confirmed."
+   "notes": "The host also wants the database name repeated as ?confirm=<db>; SDKs add it when the call is confirmed.; Server requires header X-RedX-Confirm: deleteDatabase (or ?confirm=deleteDatabase); HTTP 428 + code confirm_required otherwise. Host also accepts ?confirm=<db> (existing deleteDatabase guard)."
   },
   {
    "id": "validate",
@@ -227,7 +227,8 @@
     "roles": "array",
     "rate_rps": "number",
     "rate_burst": "integer"
-   }
+   },
+   "notes": "Server requires header X-RedX-Confirm: createKey (or ?confirm=createKey); HTTP 428 + code confirm_required otherwise."
   },
   {
    "id": "revokeKey",
@@ -237,7 +238,8 @@
    "auth": "admin",
    "danger": "dangerous",
    "summary": "Revoke a key at once.",
-   "response": "json"
+   "response": "json",
+   "notes": "Server requires header X-RedX-Confirm: revokeKey (or ?confirm=revokeKey); HTTP 428 + code confirm_required otherwise."
   },
   {
    "id": "rotateKey",
@@ -250,7 +252,8 @@
    "response": "json",
    "body": {
     "grace": "string"
-   }
+   },
+   "notes": "Server requires header X-RedX-Confirm: rotateKey (or ?confirm=rotateKey); HTTP 428 + code confirm_required otherwise."
   },
   {
    "id": "createPairingCode",
@@ -266,7 +269,8 @@
     "scope": "string",
     "label": "string",
     "ttl": "string"
-   }
+   },
+   "notes": "Server requires header X-RedX-Confirm: createPairingCode (or ?confirm=createPairingCode); HTTP 428 + code confirm_required otherwise."
   },
   {
    "id": "pairExchange",
@@ -684,7 +688,8 @@
    "danger": "dangerous",
    "summary": "Replace the access policy (changes who can read what).",
    "response": "json",
-   "request": "text"
+   "request": "text",
+   "notes": "Server requires header X-RedX-Confirm: putPolicy (or ?confirm=putPolicy); HTTP 428 + code confirm_required otherwise."
   },
   {
    "id": "deletePolicy",
@@ -694,7 +699,8 @@
    "auth": "admin",
    "danger": "dangerous",
    "summary": "Remove the access policy.",
-   "response": "json"
+   "response": "json",
+   "notes": "Server requires header X-RedX-Confirm: deletePolicy (or ?confirm=deletePolicy); HTTP 428 + code confirm_required otherwise."
   },
   {
    "id": "listScripts",
@@ -762,7 +768,8 @@
    "body": {
     "ttl_seconds": "integer",
     "kind": "string"
-   }
+   },
+   "notes": "Server requires header X-RedX-Confirm: createJoinToken (or ?confirm=createJoinToken); HTTP 428 + code confirm_required otherwise."
   },
   {
    "id": "promote",
@@ -772,7 +779,8 @@
    "auth": "host-admin",
    "danger": "dangerous",
    "summary": "Make this follower the leader (fences the old leader; unreplicated writes are lost).",
-   "response": "json"
+   "response": "json",
+   "notes": "Server requires header X-RedX-Confirm: promote (or ?confirm=promote); HTTP 428 + code confirm_required otherwise."
   },
   {
    "id": "repoint",
@@ -787,7 +795,8 @@
     "url": "string",
     "join_token": "string",
     "pin_sha256": "string"
-   }
+   },
+   "notes": "Server requires header X-RedX-Confirm: repoint (or ?confirm=repoint); HTTP 428 + code confirm_required otherwise."
   },
   {
    "id": "connectStart",
@@ -840,7 +849,8 @@
     "scope": "string",
     "confirm": "string",
     "replace": "boolean"
-   }
+   },
+   "notes": "Server requires header X-RedX-Confirm: connectApprove (or ?confirm=connectApprove); HTTP 428 + code confirm_required otherwise."
   },
   {
    "id": "connectDeny",
@@ -901,7 +911,8 @@
    "auth": "host-admin",
    "danger": "dangerous",
    "summary": "Revoke a connected app's key.",
-   "response": "json"
+   "response": "json",
+   "notes": "Server requires header X-RedX-Confirm: connectRevokeApp (or ?confirm=connectRevokeApp); HTTP 428 + code confirm_required otherwise."
   }
  ],
  "paramEncoding": {
@@ -914,5 +925,12 @@
   "notes": "component: encodeURIComponent of the whole value (a RedX path like file:Box[ID=1].X becomes one segment). segments: a slash-separated pack or media path; each segment is encoded, the slashes stay."
  },
  "dbDefault": "When an operation has a {db} parameter and the caller gives none, SDKs use the client's database; with no client database they use the shorthand route if there is one (the host's default database), otherwise the database named default.",
- "hostConfirm": "hostConfirm names the parameter whose value a confirmed dangerous call repeats as ?confirm= (the host's own guard)."
+ "hostConfirm": "hostConfirm names the parameter whose value a confirmed dangerous call repeats as ?confirm= (the host's own guard).",
+ "confirm": {
+  "header": "X-RedX-Confirm",
+  "value": "operation id",
+  "status": 428,
+  "code": "confirm_required",
+  "summary": "Every danger=dangerous operation needs this confirmation regardless of key scope."
+ }
 }

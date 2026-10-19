@@ -80,7 +80,7 @@ export default async function render({ query, navigate }) {
   async function approve() {
     approveBtn.disabled = true;
     try {
-      const a = await api('POST', '/v1/connect/approve', { json: { request_id: s.request_id, workspace: wsIn.value.trim(), confirm: confirmIn.value.trim(), replace: replace.checked } });
+      const a = await api('POST', '/v1/connect/approve', { json: { request_id: s.request_id, workspace: wsIn.value.trim(), confirm: confirmIn.value.trim(), replace: replace.checked }, confirm: 'connectApprove' });
       sessionStorage.removeItem(SAVE);
       clearInterval(tick);
       denyBtn.disabled = true;

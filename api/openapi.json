@@ -245,6 +245,7 @@
   },
   "/v1/cluster/join-token": {
    "post": {
+    "description": "Server requires header X-RedX-Confirm: createJoinToken (or ?confirm=createJoinToken); HTTP 428 + code confirm_required otherwise.",
     "operationId": "createJoinToken",
     "requestBody": {
      "content": {
@@ -290,6 +291,7 @@
   },
   "/v1/cluster/leader": {
    "post": {
+    "description": "Server requires header X-RedX-Confirm: repoint (or ?confirm=repoint); HTTP 428 + code confirm_required otherwise.",
     "operationId": "repoint",
     "requestBody": {
      "content": {
@@ -338,6 +340,7 @@
   },
   "/v1/cluster/promote": {
    "post": {
+    "description": "Server requires header X-RedX-Confirm: promote (or ?confirm=promote); HTTP 428 + code confirm_required otherwise.",
     "operationId": "promote",
     "responses": {
      "200": {
@@ -394,6 +397,7 @@
   },
   "/v1/connect/approve": {
    "post": {
+    "description": "Server requires header X-RedX-Confirm: connectApprove (or ?confirm=connectApprove); HTTP 428 + code confirm_required otherwise.",
     "operationId": "connectApprove",
     "requestBody": {
      "content": {
@@ -476,6 +480,7 @@
   },
   "/v1/connect/apps/{id}": {
    "delete": {
+    "description": "Server requires header X-RedX-Confirm: connectRevokeApp (or ?confirm=connectRevokeApp); HTTP 428 + code confirm_required otherwise.",
     "operationId": "connectRevokeApp",
     "parameters": [
      {
@@ -751,7 +756,7 @@
   },
   "/v1/db/{db}": {
    "delete": {
-    "description": "The host also wants the database name repeated as ?confirm=\u003cdb\u003e; SDKs add it when the call is confirmed.",
+    "description": "The host also wants the database name repeated as ?confirm=\u003cdb\u003e; SDKs add it when the call is confirmed.; Server requires header X-RedX-Confirm: deleteDatabase (or ?confirm=deleteDatabase); HTTP 428 + code confirm_required otherwise. Host also accepts ?confirm=\u003cdb\u003e (existing deleteDatabase guard).",
     "operationId": "deleteDatabase",
     "parameters": [
      {
@@ -2624,6 +2629,7 @@
   },
   "/v1/db/{db}/sec": {
    "delete": {
+    "description": "Server requires header X-RedX-Confirm: deletePolicy (or ?confirm=deletePolicy); HTTP 428 + code confirm_required otherwise.",
     "operationId": "deletePolicy",
     "parameters": [
      {
@@ -2696,6 +2702,7 @@
     "x-rottenapple-level": "L1"
    },
    "put": {
+    "description": "Server requires header X-RedX-Confirm: putPolicy (or ?confirm=putPolicy); HTTP 428 + code confirm_required otherwise.",
     "operationId": "putPolicy",
     "parameters": [
      {
@@ -2916,6 +2923,7 @@
     "x-rottenapple-level": "L1"
    },
    "post": {
+    "description": "Server requires header X-RedX-Confirm: createKey (or ?confirm=createKey); HTTP 428 + code confirm_required otherwise.",
     "operationId": "createKey",
     "requestBody": {
      "content": {
@@ -2979,6 +2987,7 @@
   },
   "/v1/keys/pairing": {
    "post": {
+    "description": "Server requires header X-RedX-Confirm: createPairingCode (or ?confirm=createPairingCode); HTTP 428 + code confirm_required otherwise.",
     "operationId": "createPairingCode",
     "requestBody": {
      "content": {
@@ -3030,6 +3039,7 @@
   },
   "/v1/keys/{id}": {
    "delete": {
+    "description": "Server requires header X-RedX-Confirm: revokeKey (or ?confirm=revokeKey); HTTP 428 + code confirm_required otherwise.",
     "operationId": "revokeKey",
     "parameters": [
      {
@@ -3104,6 +3114,7 @@
   },
   "/v1/keys/{id}/rotate": {
    "post": {
+    "description": "Server requires header X-RedX-Confirm: rotateKey (or ?confirm=rotateKey); HTTP 428 + code confirm_required otherwise.",
     "operationId": "rotateKey",
     "parameters": [
      {

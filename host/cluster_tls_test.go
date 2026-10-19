@@ -37,6 +37,9 @@ func doTLS(t *testing.T, method, url, key, body string) (int, string) {
 	if key != "" {
 		req.Header.Set("Authorization", "Bearer "+key)
 	}
+	if op := host.MatchDangerous(method, req.URL.Path); op != nil {
+		req.Header.Set(host.ConfirmHeader, op.ID)
+	}
 	resp, err := insecureTestClient.Do(req)
 	if err != nil {
 		return 0, err.Error()

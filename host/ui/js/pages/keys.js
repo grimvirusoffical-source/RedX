@@ -46,13 +46,13 @@ export default async function render() {
   async function revoke(k) {
     const own = state.who && state.who.id === k.id;
     if (!(await confirmDialog('Revoke this key?', (own ? 'This is the key you are signed in with. You will be signed out. ' : '') + 'Anything using "' + (k.label || k.id) + '" stops working immediately. This cannot be undone.', { danger: true, ok: 'Revoke key' }))) return;
-    try { await api('DELETE', '/v1/keys/' + enc(k.id)); toast('Key revoked', 'ok'); load(); } catch (e) { toast(e.message, 'error'); }
+    try { await api('DELETE', '/v1/keys/' + enc(k.id), { confirm: 'revokeKey' }); toast('Key revoked', 'ok'); load(); } catch (e) { toast(e.message, 'error'); }
   }
   async function rotate(k) {
     const grace = h('select', { class: 'select' }, [['10m', '10 minutes'], ['1h', '1 hour'], ['24h', '1 day'], ['0', 'Retire it now']].map(([v, l]) => h('option', { value: v }, l)));
     const r = await dialog({ title: 'Rotate key', body: h('div', null, h('p', null, 'A new key with the same limits is created. The old key keeps working for the grace period, so you can update your app without downtime.'), field('Keep the old key working for', grace)), actions: [{ id: 'cancel', label: 'Cancel' }, { id: 'ok', label: 'Rotate', primary: true }] });
     if (r !== 'ok') return;
-    try { const res = await api('POST', `/v1/keys/${enc(k.id)}/rotate`, { json: { grace: grace.value } }); load(); showNewKey(res); } catch (e) { toast(e.message, 'error'); }
+    try { const res = await api('POST', `/v1/keys/${enc(k.id)}/rotate`, { json: { grace: grace.value }, confirm: 'rotateKey' }); load(); showNewKey(res); } catch (e) { toast(e.message, 'error'); }
   }
 
   async function createDialog() {
@@ -80,7 +80,7 @@ export default async function render() {
     if (roles.value.trim()) body.roles = roles.value.split(',').map((s) => s.trim()).filter(Boolean);
     if (rps.value !== '') body.rate_rps = Number(rps.value);
     if (burst.value !== '') body.rate_burst = Number(burst.value);
-    try { const res = await api('POST', '/v1/keys', { json: body }); gs.set('key'); load(); showNewKey(res); } catch (e) { toast(e.message, 'error', 7000); }
+    try { const res = await api('POST', '/v1/keys', { json: body, confirm: 'createKey' }); gs.set('key'); load(); showNewKey(res); } catch (e) { toast(e.message, 'error', 7000); }
   }
 
   async function showNewKey(res) {
@@ -90,7 +90,7 @@ export default async function render() {
     const pairOther = async () => {
       qrBox.hidden = false;
       try {
-        const r = await api('POST', '/v1/keys/pairing', { json: { db, scope: res.info.scope, prefix: res.info.prefix || '', label: (res.info.label || 'device') + ' (paired)' } });
+        const r = await api('POST', '/v1/keys/pairing', { json: { db, scope: res.info.scope, prefix: res.info.prefix || '', label: (res.info.label || 'device') + ' (paired)' }, confirm: 'createPairingCode' });
         const canvas = h('canvas', { class: 'qr-box', 'aria-label': 'QR code of a one-time sign-in link' });
         mount(qrBox, h('p', { class: 'muted small' }, 'Scan with the other device. This is a one-time pairing code (valid 5 minutes), not the key; the other device gets its own new key with the same access.'), canvas, h('div', { class: 'code-big' }, r.code));
         drawQR(canvas, `${location.origin}/#/login?code=${r.code}`, { scale: 5 });

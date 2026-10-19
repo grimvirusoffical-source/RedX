@@ -17,6 +17,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"redx/host"
 )
 
 // Client talks to one redxd.
@@ -73,6 +75,13 @@ func (c *Client) Raw(ctx context.Context, method, path string, body []byte, hdr 
 	}
 	for k, v := range hdr {
 		req.Header.Set(k, v)
+	}
+	// The CLI treats invoking a dangerous command as confirmation (the operator typed it).
+	if req.Header.Get(host.ConfirmHeader) == "" {
+		pathOnly := req.URL.Path
+		if op := host.MatchDangerous(method, pathOnly); op != nil {
+			req.Header.Set(host.ConfirmHeader, op.ID)
+		}
 	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
