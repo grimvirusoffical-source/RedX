@@ -267,6 +267,12 @@ func (c *Cluster) installSnapshot(ctx context.Context, leader string) error {
 	}
 	h.pause.Lock()
 	defer h.pause.Unlock()
+	c.mu.Lock()
+	still := c.st.Role == "follower" && c.st.LeaderURL == leader
+	c.mu.Unlock()
+	if !still || ctx.Err() != nil { // promoted or repointed while downloading: this snapshot no longer applies
+		return errors.New("snapshot: node was promoted or repointed meanwhile; discarded")
+	}
 	if err := h.Reg.CloseAll(); err != nil {
 		h.Logf("snapshot: closing dbs: %v", err)
 	}

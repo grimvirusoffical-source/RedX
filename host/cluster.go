@@ -1029,17 +1029,21 @@ func (c *Cluster) handleJoin(w http.ResponseWriter, r *http.Request) {
 // ---- promote / repoint ----
 
 func (c *Cluster) handlePromote(w http.ResponseWriter, r *http.Request, p *Principal) {
+	// Wait for a snapshot install in flight (it holds pause): promoting halfway through one would record the
+	// wrong parent history and let the install overwrite the new replication id.
+	c.h.pause.Lock()
+	unlock := func() { c.mu.Unlock(); c.h.pause.Unlock() }
 	c.mu.Lock()
 	if c.st.Role == "leader" {
 		if c.st.Fenced != nil { // deliberate take-over by an operator
 			c.st.Fenced = nil
 			_ = c.saveState()
-			c.mu.Unlock()
+			unlock()
 			c.h.Audit.Log(AuditEvent{Event: "node.unfence", KeyID: p.Key.ID, Remote: remoteIP(r)})
 			writeJSON(w, 200, map[string]interface{}{"role": "leader", "note": "fence cleared: this node accepts writes again. Repoint or stop the other leader now."})
 			return
 		}
-		c.mu.Unlock()
+		unlock()
 		writeErr(w, 409, "already the leader")
 		return
 	}
@@ -1057,7 +1061,7 @@ func (c *Cluster) handlePromote(w http.ResponseWriter, r *http.Request, p *Princ
 	_ = c.saveState()
 	c.members = map[string]*Member{}
 	nr := c.meta.ReplID
-	c.mu.Unlock()
+	unlock()
 	c.startFenceNotifier()
 	c.h.setFollowerMode(false) // re-arms engine expiry
 	c.h.Tracker.ResetSliding(time.Now())

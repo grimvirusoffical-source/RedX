@@ -275,8 +275,14 @@ func TestNoGoroutinesStarted(t *testing.T) {
 		p.Run(context.Background(), nil, RunOptions{Limits: Limits{MaxSteps: 1 << 30, MaxDuration: 2 * time.Millisecond}})
 		p.Run(context.Background(), nil, RunOptions{Limits: Limits{MaxSteps: 100}})
 	}
-	time.Sleep(20 * time.Millisecond)
-	if after := runtime.NumGoroutine(); after > before {
+	// a goroutine left over from an earlier test may still be exiting on a slow runner: wait up to 2 s for the
+	// count to settle. A goroutine started by Run would stay (the script never ends on its own).
+	after := runtime.NumGoroutine()
+	for i := 0; i < 100 && after > before; i++ {
+		time.Sleep(20 * time.Millisecond)
+		after = runtime.NumGoroutine()
+	}
+	if after > before {
 		t.Fatalf("goroutines: %d before, %d after", before, after)
 	}
 }
