@@ -143,6 +143,8 @@ namespace RedX
             ["listHostedSecrets"] = new Operation { Id = "listHostedSecrets", Group = "hosted", Method = "GET", Path = "/v1/hosted/apps/{id}/secrets", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "Secret names. Values are always masked and never returned.", Danger = DangerLevel.Safe },
             ["putHostedSecret"] = new Operation { Id = "putHostedSecret", Group = "hosted", Method = "PUT", Path = "/v1/hosted/apps/{id}/secrets/{name}", Shorthand = "", Auth = "key", Response = "json", Request = "json", HostConfirm = "", Summary = "Set a secret. The value is encrypted at rest and the response shows only a mask.", Danger = DangerLevel.Write },
             ["deleteHostedSecret"] = new Operation { Id = "deleteHostedSecret", Group = "hosted", Method = "DELETE", Path = "/v1/hosted/apps/{id}/secrets/{name}", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "Delete a secret.", Danger = DangerLevel.Write },
+            ["getHostedLogs"] = new Operation { Id = "getHostedLogs", Group = "hosted", Method = "GET", Path = "/v1/hosted/apps/{id}/logs", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "Runtime or access logs. q searches retained lines. stream=1 is a live tail, capped at 15 seconds, and is not opened by the console until asked.", Danger = DangerLevel.Safe },
+            ["downloadHostedLogs"] = new Operation { Id = "downloadHostedLogs", Group = "hosted", Method = "GET", Path = "/v1/hosted/apps/{id}/logs/download", Shorthand = "", Auth = "key", Response = "text", Request = "", HostConfirm = "", Summary = "Download runtime or access logs as text. Retention follows the plan.", Danger = DangerLevel.Safe },
             ["getHostedUsage"] = new Operation { Id = "getHostedUsage", Group = "hosted", Method = "GET", Path = "/v1/hosted/apps/{id}/usage", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "Disk used by one app and the tier limits that apply.", Danger = DangerLevel.Safe },
             ["getHostedHealth"] = new Operation { Id = "getHostedHealth", Group = "hosted", Method = "GET", Path = "/v1/hosted/apps/{id}/health", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "Probe the current release. A failed direct deploy is rolled back to the previous release.", Danger = DangerLevel.Safe },
             ["hostedTLSAsk"] = new Operation { Id = "hostedTLSAsk", Group = "hosted", Method = "GET", Path = "/v1/hosted/tls/ask", Shorthand = "", Auth = "none", Response = "json", Request = "", HostConfirm = "", Summary = "Caddy on-demand TLS ask. 200 only for a verified app domain, and only from loopback or with X-RedX-Caddy-Ask.", Danger = DangerLevel.Safe },
@@ -571,6 +573,14 @@ namespace RedX
         /// <summary>Delete a secret. (DELETE /v1/hosted/apps/{id}/secrets/{name}; auth key; danger write)</summary>
         public Task<RedXResult> DeleteHostedSecretAsync(string id, string name, CancellationToken ct = default) =>
             CallAsync("deleteHostedSecret", new Dictionary<string, string> { ["id"] = id, ["name"] = name }, null, null, null, null, false, ct);
+
+        /// <summary>Runtime or access logs. q searches retained lines. stream=1 is a live tail, capped at 15 seconds, and is not opened by the console until asked. (GET /v1/hosted/apps/{id}/logs; auth key; danger safe)</summary>
+        public Task<RedXResult> GetHostedLogsAsync(string id, IDictionary<string, object?>? query = null, CancellationToken ct = default) =>
+            CallAsync("getHostedLogs", new Dictionary<string, string> { ["id"] = id }, null, null, null, query, false, ct);
+
+        /// <summary>Download runtime or access logs as text. Retention follows the plan. (GET /v1/hosted/apps/{id}/logs/download; auth key; danger safe)</summary>
+        public Task<RedXResult> DownloadHostedLogsAsync(string id, IDictionary<string, object?>? query = null, CancellationToken ct = default) =>
+            CallAsync("downloadHostedLogs", new Dictionary<string, string> { ["id"] = id }, null, null, null, query, false, ct);
 
         /// <summary>Disk used by one app and the tier limits that apply. (GET /v1/hosted/apps/{id}/usage; auth key; danger safe)</summary>
         public Task<RedXResult> GetHostedUsageAsync(string id, CancellationToken ct = default) =>

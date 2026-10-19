@@ -118,6 +118,8 @@ OPERATIONS: Dict[str, Dict[str, Any]] = {
     "listHostedSecrets": {"id": "listHostedSecrets", "group": "hosted", "method": "GET", "path": "/v1/hosted/apps/{id}/secrets", "shorthand": "", "auth": "key", "danger": "safe", "danger_level": 0, "response": "json", "request": "", "host_confirm": "", "summary": "Secret names. Values are always masked and never returned."},
     "putHostedSecret": {"id": "putHostedSecret", "group": "hosted", "method": "PUT", "path": "/v1/hosted/apps/{id}/secrets/{name}", "shorthand": "", "auth": "key", "danger": "write", "danger_level": 1, "response": "json", "request": "json", "host_confirm": "", "summary": "Set a secret. The value is encrypted at rest and the response shows only a mask."},
     "deleteHostedSecret": {"id": "deleteHostedSecret", "group": "hosted", "method": "DELETE", "path": "/v1/hosted/apps/{id}/secrets/{name}", "shorthand": "", "auth": "key", "danger": "write", "danger_level": 1, "response": "json", "request": "", "host_confirm": "", "summary": "Delete a secret."},
+    "getHostedLogs": {"id": "getHostedLogs", "group": "hosted", "method": "GET", "path": "/v1/hosted/apps/{id}/logs", "shorthand": "", "auth": "key", "danger": "safe", "danger_level": 0, "response": "json", "request": "", "host_confirm": "", "summary": "Runtime or access logs. q searches retained lines. stream=1 is a live tail, capped at 15 seconds, and is not opened by the console until asked."},
+    "downloadHostedLogs": {"id": "downloadHostedLogs", "group": "hosted", "method": "GET", "path": "/v1/hosted/apps/{id}/logs/download", "shorthand": "", "auth": "key", "danger": "safe", "danger_level": 0, "response": "text", "request": "", "host_confirm": "", "summary": "Download runtime or access logs as text. Retention follows the plan."},
     "getHostedUsage": {"id": "getHostedUsage", "group": "hosted", "method": "GET", "path": "/v1/hosted/apps/{id}/usage", "shorthand": "", "auth": "key", "danger": "safe", "danger_level": 0, "response": "json", "request": "", "host_confirm": "", "summary": "Disk used by one app and the tier limits that apply."},
     "getHostedHealth": {"id": "getHostedHealth", "group": "hosted", "method": "GET", "path": "/v1/hosted/apps/{id}/health", "shorthand": "", "auth": "key", "danger": "safe", "danger_level": 0, "response": "json", "request": "", "host_confirm": "", "summary": "Probe the current release. A failed direct deploy is rolled back to the previous release."},
     "hostedTLSAsk": {"id": "hostedTLSAsk", "group": "hosted", "method": "GET", "path": "/v1/hosted/tls/ask", "shorthand": "", "auth": "none", "danger": "safe", "danger_level": 0, "response": "json", "request": "", "host_confirm": "", "summary": "Caddy on-demand TLS ask. 200 only for a verified app domain, and only from loopback or with X-RedX-Caddy-Ask."},
@@ -554,6 +556,14 @@ class Operations:
     def delete_hosted_secret(self, id: str, name: str, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
         """Delete a secret. (DELETE /v1/hosted/apps/{id}/secrets/{name}; auth key; danger write)"""
         return self.call("deleteHostedSecret", id=id, name=name, confirm=confirm, headers=headers)
+
+    def get_hosted_logs(self, id: str, *, query: Optional[Dict[str, Any]] = None, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Runtime or access logs. q searches retained lines. stream=1 is a live tail, capped at 15 seconds, and is not opened by the console until asked. (GET /v1/hosted/apps/{id}/logs; auth key; danger safe)"""
+        return self.call("getHostedLogs", id=id, query=query, confirm=confirm, headers=headers)
+
+    def download_hosted_logs(self, id: str, *, query: Optional[Dict[str, Any]] = None, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Download runtime or access logs as text. Retention follows the plan. (GET /v1/hosted/apps/{id}/logs/download; auth key; danger safe)"""
+        return self.call("downloadHostedLogs", id=id, query=query, confirm=confirm, headers=headers)
 
     def get_hosted_usage(self, id: str, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
         """Disk used by one app and the tier limits that apply. (GET /v1/hosted/apps/{id}/usage; auth key; danger safe)"""

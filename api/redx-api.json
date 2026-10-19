@@ -1380,6 +1380,34 @@
    "response": "json"
   },
   {
+   "id": "getHostedLogs",
+   "group": "hosted",
+   "method": "GET",
+   "path": "/v1/hosted/apps/{id}/logs",
+   "auth": "key",
+   "danger": "safe",
+   "summary": "Runtime or access logs. q searches retained lines. stream=1 is a live tail, capped at 15 seconds, and is not opened by the console until asked.",
+   "response": "json",
+   "query": {
+    "kind": "string",
+    "stream": "string",
+    "q": "string"
+   }
+  },
+  {
+   "id": "downloadHostedLogs",
+   "group": "hosted",
+   "method": "GET",
+   "path": "/v1/hosted/apps/{id}/logs/download",
+   "auth": "key",
+   "danger": "safe",
+   "summary": "Download runtime or access logs as text. Retention follows the plan.",
+   "response": "text",
+   "query": {
+    "kind": "string"
+   }
+  },
+  {
    "id": "getHostedUsage",
    "group": "hosted",
    "method": "GET",

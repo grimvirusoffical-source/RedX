@@ -73,6 +73,7 @@ async function renderOne(root, id) {
       ['hostdeploy/' + enc(id), 'Deploy', 'upload'],
       ['hostdomains/' + enc(id), 'Domains', 'globe'],
       ['hostsecrets/' + enc(id), 'Env & Secrets', 'lock'],
+      ['hostlogs/' + enc(id), 'App logs', 'list'],
     ];
     mount(body,
       planBanners(app),

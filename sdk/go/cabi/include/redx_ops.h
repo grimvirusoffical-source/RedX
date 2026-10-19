@@ -115,6 +115,8 @@
 #define REDX_OP_LIST_HOSTED_SECRETS "listHostedSecrets" /* GET /v1/hosted/apps/{id}/secrets, safe */
 #define REDX_OP_PUT_HOSTED_SECRET "putHostedSecret" /* PUT /v1/hosted/apps/{id}/secrets/{name}, write */
 #define REDX_OP_DELETE_HOSTED_SECRET "deleteHostedSecret" /* DELETE /v1/hosted/apps/{id}/secrets/{name}, write */
+#define REDX_OP_GET_HOSTED_LOGS "getHostedLogs" /* GET /v1/hosted/apps/{id}/logs, safe */
+#define REDX_OP_DOWNLOAD_HOSTED_LOGS "downloadHostedLogs" /* GET /v1/hosted/apps/{id}/logs/download, safe */
 #define REDX_OP_GET_HOSTED_USAGE "getHostedUsage" /* GET /v1/hosted/apps/{id}/usage, safe */
 #define REDX_OP_GET_HOSTED_HEALTH "getHostedHealth" /* GET /v1/hosted/apps/{id}/health, safe */
 #define REDX_OP_HOSTED_T_L_S_ASK "hostedTLSAsk" /* GET /v1/hosted/tls/ask, safe */

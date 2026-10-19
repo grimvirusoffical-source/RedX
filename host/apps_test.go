@@ -319,6 +319,9 @@ func TestHostedAppsPlanAndQuota(t *testing.T) {
 	if st, b, _ = do(t, "POST", n.URL+"/v1/hosted/apps/"+id+"/stop", tok, ""); st != 402 || codeOf(t, b) != "plan_required" {
 		t.Fatalf("suspended write: %d %s", st, b)
 	}
+	if st, b, _ = do(t, "GET", n.URL+"/v1/hosted/apps/"+id+"/logs", tok, ""); st != 402 || codeOf(t, b) != "plan_required" {
+		t.Fatalf("suspended logs: %d %s", st, b)
+	}
 }
 
 func TestHostedAppsRollout(t *testing.T) {
@@ -386,6 +389,9 @@ func TestHostedAppsRollout(t *testing.T) {
 	built, _ := json.Marshal(rt["buildArgs"])
 	if !strings.Contains(string(built), "Dockerfile") || !strings.Contains(string(built), "localhost/redx-") {
 		t.Fatalf("build args: %s", built)
+	}
+	if st, b, _ = do(t, "GET", n.URL+"/v1/hosted/apps/"+cid+"/logs/download?kind=runtime", n.Key, ""); st != 200 || !strings.Contains(b, "deploy ") {
+		t.Fatalf("logs: %d %s", st, b)
 	}
 }
 
@@ -493,6 +499,59 @@ func TestHostedDomainQuotaAndCNAME(t *testing.T) {
 	n.H.Handler().ServeHTTP(rr, req)
 	if rr.Code != 200 {
 		t.Fatalf("verified cname ask: %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHostedEnvRedeployAndLogs(t *testing.T) {
+	f, iss := startFake(t)
+	n := startAcctNode(t, iss)
+	end := time.Now().Add(30 * 24 * time.Hour)
+	tok, _ := signIn(t, n, f, regular)
+	if err := host.SetPlanForTest(n.H, hostedPlan(regular.Sub, "silver", "month", "active", end)); err != nil {
+		t.Fatal(err)
+	}
+	st, b, _ := do(t, "POST", n.URL+"/v1/hosted/apps", tok, `{"name":"site","kind":"static"}`, "Content-Type", "application/json")
+	if st != 201 {
+		t.Fatalf("create: %d %s", st, b)
+	}
+	id := appField(t, b, "id")
+	hostName := appField(t, b, "host")
+	st, b, _ = do(t, "PUT", n.URL+"/v1/hosted/apps/"+id+"/env", tok, `{"vars":{"COLOR":"blue"}}`, "Content-Type", "application/json")
+	if st != 200 || strings.Contains(b, "needsRedeploy\":true") {
+		t.Fatalf("env before deploy should not ask for a redeploy: %d %s", st, b)
+	}
+	arch := zipBytes(map[string]string{"index.html": "<h1>site</h1>"})
+	st, b, _ = do(t, "POST", n.URL+"/v1/hosted/apps/"+id+"/archive", tok, string(arch))
+	if st != 201 {
+		t.Fatalf("archive: %d %s", st, b)
+	}
+	st, b, _ = do(t, "PUT", n.URL+"/v1/hosted/apps/"+id+"/env", tok, `{"vars":{"COLOR":"red"}}`, "Content-Type", "application/json")
+	if st != 200 || jsonOf(t, b)["needsRedeploy"] != true || strings.Contains(b, "sk_") {
+		t.Fatalf("env change: %d %s", st, b)
+	}
+	st, b, _ = do(t, "POST", n.URL+"/v1/hosted/apps/"+id+"/start", tok, "")
+	if st != 200 || jsonOf(t, b)["needsRedeploy"] == true {
+		t.Fatalf("start applies env: %d %s", st, b)
+	}
+	st, b, _ = do(t, "GET", n.URL+"/index.html", "", "", "Host", hostName)
+	if st != 200 || !strings.Contains(b, "<h1>site</h1>") {
+		t.Fatalf("site: %d %s", st, b)
+	}
+	usage, ok := n.H.BillingUsage(regular.Sub)
+	if !ok || usage.TrafficBytes <= 0 {
+		t.Fatalf("traffic not counted: %+v %v", usage, ok)
+	}
+	st, b, _ = do(t, "GET", n.URL+"/v1/hosted/apps/"+id+"/logs?kind=access&q=index.html", tok, "")
+	if st != 200 || !strings.Contains(b, "index.html") {
+		t.Fatalf("search: %d %s", st, b)
+	}
+	st, b, _ = do(t, "GET", n.URL+"/v1/hosted/apps/"+id+"/logs?kind=access&q=no-such-line", tok, "")
+	if st != 200 || strings.Contains(b, "index.html") {
+		t.Fatalf("search miss: %d %s", st, b)
+	}
+	st, b, _ = do(t, "GET", n.URL+"/v1/hosted/apps/"+id+"/logs?kind=runtime&q=deploy", tok, "")
+	if st != 200 || !strings.Contains(b, "deploy") {
+		t.Fatalf("runtime search: %d %s", st, b)
 	}
 }
 

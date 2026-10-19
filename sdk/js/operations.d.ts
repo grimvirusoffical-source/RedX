@@ -231,6 +231,10 @@ export interface RedXOperations {
   putHostedSecret(opts: { id: string; name: string; body?: { value?: string }; headers?: Record<string, string> }): Promise<any>;
   /** Delete a secret. (DELETE /v1/hosted/apps/{id}/secrets/{name}; auth key; danger write) */
   deleteHostedSecret(opts: { id: string; name: string; headers?: Record<string, string> }): Promise<any>;
+  /** Runtime or access logs. q searches retained lines. stream=1 is a live tail, capped at 15 seconds, and is not opened by the console until asked. (GET /v1/hosted/apps/{id}/logs; auth key; danger safe) */
+  getHostedLogs(opts: { id: string; query?: { kind?: string; q?: string; stream?: string }; headers?: Record<string, string> }): Promise<any>;
+  /** Download runtime or access logs as text. Retention follows the plan. (GET /v1/hosted/apps/{id}/logs/download; auth key; danger safe) */
+  downloadHostedLogs(opts: { id: string; query?: { kind?: string }; headers?: Record<string, string> }): Promise<string>;
   /** Disk used by one app and the tier limits that apply. (GET /v1/hosted/apps/{id}/usage; auth key; danger safe) */
   getHostedUsage(opts: { id: string; headers?: Record<string, string> }): Promise<any>;
   /** Probe the current release. A failed direct deploy is rolled back to the previous release. (GET /v1/hosted/apps/{id}/health; auth key; danger safe) */

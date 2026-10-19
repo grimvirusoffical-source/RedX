@@ -132,6 +132,8 @@ public let operations: [String: Operation] = [
     "listHostedSecrets": Operation(id: "listHostedSecrets", group: "hosted", method: "GET", path: "/v1/hosted/apps/{id}/secrets", shorthand: "", auth: "key", response: "json", request: "", hostConfirm: "", summary: "Secret names. Values are always masked and never returned.", danger: .safe),
     "putHostedSecret": Operation(id: "putHostedSecret", group: "hosted", method: "PUT", path: "/v1/hosted/apps/{id}/secrets/{name}", shorthand: "", auth: "key", response: "json", request: "json", hostConfirm: "", summary: "Set a secret. The value is encrypted at rest and the response shows only a mask.", danger: .write),
     "deleteHostedSecret": Operation(id: "deleteHostedSecret", group: "hosted", method: "DELETE", path: "/v1/hosted/apps/{id}/secrets/{name}", shorthand: "", auth: "key", response: "json", request: "", hostConfirm: "", summary: "Delete a secret.", danger: .write),
+    "getHostedLogs": Operation(id: "getHostedLogs", group: "hosted", method: "GET", path: "/v1/hosted/apps/{id}/logs", shorthand: "", auth: "key", response: "json", request: "", hostConfirm: "", summary: "Runtime or access logs. q searches retained lines. stream=1 is a live tail, capped at 15 seconds, and is not opened by the console until asked.", danger: .safe),
+    "downloadHostedLogs": Operation(id: "downloadHostedLogs", group: "hosted", method: "GET", path: "/v1/hosted/apps/{id}/logs/download", shorthand: "", auth: "key", response: "text", request: "", hostConfirm: "", summary: "Download runtime or access logs as text. Retention follows the plan.", danger: .safe),
     "getHostedUsage": Operation(id: "getHostedUsage", group: "hosted", method: "GET", path: "/v1/hosted/apps/{id}/usage", shorthand: "", auth: "key", response: "json", request: "", hostConfirm: "", summary: "Disk used by one app and the tier limits that apply.", danger: .safe),
     "getHostedHealth": Operation(id: "getHostedHealth", group: "hosted", method: "GET", path: "/v1/hosted/apps/{id}/health", shorthand: "", auth: "key", response: "json", request: "", hostConfirm: "", summary: "Probe the current release. A failed direct deploy is rolled back to the previous release.", danger: .safe),
     "hostedTLSAsk": Operation(id: "hostedTLSAsk", group: "hosted", method: "GET", path: "/v1/hosted/tls/ask", shorthand: "", auth: "none", response: "json", request: "", hostConfirm: "", summary: "Caddy on-demand TLS ask. 200 only for a verified app domain, and only from loopback or with X-RedX-Caddy-Ask.", danger: .safe),
@@ -773,6 +775,18 @@ extension RedXClient {
     @discardableResult
     public func deleteHostedSecret(id: String, name: String) async throws -> RedXResult {
         try await call("deleteHostedSecret", params: ["id": id, "name": name])
+    }
+
+    /// Runtime or access logs. q searches retained lines. stream=1 is a live tail, capped at 15 seconds, and is not opened by the console until asked. (GET /v1/hosted/apps/{id}/logs; auth key; danger safe)
+    @discardableResult
+    public func getHostedLogs(id: String, query: [String: Any]? = nil) async throws -> RedXResult {
+        try await call("getHostedLogs", params: ["id": id], query: query)
+    }
+
+    /// Download runtime or access logs as text. Retention follows the plan. (GET /v1/hosted/apps/{id}/logs/download; auth key; danger safe)
+    @discardableResult
+    public func downloadHostedLogs(id: String, query: [String: Any]? = nil) async throws -> RedXResult {
+        try await call("downloadHostedLogs", params: ["id": id], query: query)
     }
 
     /// Disk used by one app and the tier limits that apply. (GET /v1/hosted/apps/{id}/usage; auth key; danger safe)

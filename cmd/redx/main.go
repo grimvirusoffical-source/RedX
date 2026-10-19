@@ -151,7 +151,7 @@ func usage() {
   redx app domain add ID NAME [--method txt|cname|http] | domain verify ID NAME | domain rm ID NAME
   redx app env show ID | env set ID KEY=VALUE ...
   redx app secret set ID NAME   (value on stdin) | secret rm ID NAME
-  redx app caddy
+  redx app logs ID [--kind runtime|access] [--out FILE] | caddy
   redx backup --out FILE [--offline]      redx restore FILE [--force]
   redx doctor [--config FILE]
   redx version | --version
