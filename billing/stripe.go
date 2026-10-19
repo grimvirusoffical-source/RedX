@@ -15,6 +15,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -52,7 +53,15 @@ type Error struct {
 	Message string `json:"message"`
 }
 
-func (e *Error) Error() string { return fmt.Sprintf("stripe %d %s: %s", e.Status, e.Code, e.Message) }
+func (e *Error) Error() string {
+	return fmt.Sprintf("stripe %d %s: %s", e.Status, e.Code, redact(e.Message))
+}
+
+// keyish matches anything that looks like a Stripe key, including Stripe's own masked echo of a bad
+// key ("sk_live_****…abcd"), so no part of a key ever reaches the log.
+var keyish = regexp.MustCompile(`(sk|rk|pk|whsec)_[A-Za-z0-9_*$]+`)
+
+func redact(s string) string { return keyish.ReplaceAllString(s, "$1_[redacted]") }
 
 func (c *Client) Do(ctx context.Context, method, path string, form url.Values, idem string, out interface{}) error {
 	u := c.Base + path

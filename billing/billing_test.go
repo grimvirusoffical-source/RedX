@@ -317,3 +317,10 @@ func TestConfigGuards(t *testing.T) {
 		t.Fatalf("live with the flag: %s", s.Reason())
 	}
 }
+
+func TestErrorRedactsKeys(t *testing.T) {
+	e := &Error{Status: 401, Message: "Invalid API Key provided: sk_live_*********abc$"}
+	if strings.Contains(e.Error(), "abc") || !strings.Contains(e.Error(), "[redacted]") {
+		t.Fatal(e.Error())
+	}
+}

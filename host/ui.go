@@ -96,9 +96,9 @@ const uiCSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 
 	"form-action 'self'; frame-ancestors 'none'"
 
 // billingCSP is uiCSP plus exactly what Stripe's Payment Element needs, for /ui/billing.html only.
-const billingCSP = "default-src 'none'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; " +
+const billingCSP = "default-src 'none'; script-src 'self' https://js.stripe.com https://*.js.stripe.com; style-src 'self' 'unsafe-inline'; " +
 	"img-src 'self' data: blob: https://*.stripe.com; font-src 'self'; connect-src 'self' https://api.stripe.com https://merchant-ui-api.stripe.com https://errors.stripe.com; " +
-	"frame-src https://js.stripe.com https://*.stripe.com https://hooks.stripe.com; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; " +
+	"frame-src https://js.stripe.com https://*.js.stripe.com https://*.stripe.com https://hooks.stripe.com; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; " +
 	"form-action 'self'; frame-ancestors 'none'"
 
 // isUIPath reports whether a request path is served by the console.

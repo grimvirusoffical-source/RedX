@@ -104,6 +104,7 @@ export async function mountCheckout({ root, theme, backend, item: key, preview =
     shell.append(h('section', { class: 'co-card co-pick' },
       h('div', { class: 'co-brand' }, logo(theme), h('span', { class: 'co-appname' }, theme.name)),
       h('h1', { class: 'co-plan' }, theme.pickTitle || 'Choose a plan'),
+      (key && !item) || !items.length ? h('div', { class: 'co-error', role: 'alert' }, !items.length ? 'Nothing is on sale right now. Please try again later.' : 'That plan is not on sale right now. Pick another one below.') : null,
       h('div', { class: 'co-grid' }, items.map((x) => h('a', { class: 'co-tile', href: `?${x.period === 'once' ? 'product' : 'plan'}=${encodeURIComponent(x.key)}${preview ? '&preview=1' : ''}` },
         h('strong', {}, x.name), h('span', { class: 'co-tile-price' }, money(x.amountCents, x.currency), ' ', h('small', {}, periodLabel(x.period))))))));
     return;

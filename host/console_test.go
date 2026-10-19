@@ -57,7 +57,7 @@ func TestConsoleStaticServingAndHeaders(t *testing.T) {
 		t.Fatal("sw.js must be allowed to control /")
 	}
 	// only the checkout page may load Stripe.js and frame Stripe's payment fields
-	if _, _, h := do(t, "GET", n.URL+"/ui/billing.html", "", ""); !strings.Contains(h.Get("Content-Security-Policy"), "script-src 'self' https://js.stripe.com;") ||
+	if _, _, h := do(t, "GET", n.URL+"/ui/billing.html", "", ""); !strings.Contains(h.Get("Content-Security-Policy"), "script-src 'self' https://js.stripe.com https://*.js.stripe.com;") ||
 		!strings.Contains(h.Get("Content-Security-Policy"), "frame-ancestors 'none'") || strings.Contains(h.Get("Content-Security-Policy"), "unsafe-eval") {
 		t.Fatalf("billing.html CSP: %s", h.Get("Content-Security-Policy"))
 	}
