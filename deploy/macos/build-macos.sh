@@ -5,7 +5,8 @@
 # UNSIGNED by default (ad-hoc signature only): Gatekeeper will say the app is from an unidentified developer
 # (right-click -> Open). Signing with a Developer ID is opt-in and nothing here notarizes:
 #   MACOS_SIGN_IDENTITY="Developer ID Application: ..."   signs every Mach-O (hardened runtime, timestamp)
-#   MACOS_INSTALLER_IDENTITY="Developer ID Installer: ..."  signs the .pkg
+#   MACOS_INSTALLER_IDENTITY="Developer ID Installer: ..."  signs the .pkg (productbuild --sign)
+# Identities come only from the environment (or a flag of the caller); none is written in this repository.
 set -euo pipefail
 VERSION="$1"; OUT="$2"; shift 2
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -87,9 +88,15 @@ for ARCH in "$@"; do
   CPL="$W/component.plist"
   pkgbuild --analyze --root "$PR" "$CPL"
   plutil -replace 0.BundleIsRelocatable -bool NO "$CPL"
-  PKGSIGN=()
-  [ -n "${MACOS_INSTALLER_IDENTITY:-}" ] && PKGSIGN=(--sign "$MACOS_INSTALLER_IDENTITY" --timestamp)
-  pkgbuild --root "$PR" --component-plist "$CPL" --identifier com.redx.pkg --version "${VERSION}" --install-location / ${PKGSIGN[@]+"${PKGSIGN[@]}"} "$OUT/${NAME}.pkg"
+  if [ -z "${MACOS_INSTALLER_IDENTITY:-}" ]; then
+    pkgbuild --root "$PR" --component-plist "$CPL" --identifier com.redx.pkg --version "${VERSION}" --install-location / "$OUT/${NAME}.pkg"
+  else
+    # Signed: build the component unsigned, then wrap and sign it with productbuild. (productsign cannot reach
+    # the installer key over a headless SSH session: errSecInteractionNotAllowed; productbuild --sign can.)
+    pkgbuild --root "$PR" --component-plist "$CPL" --identifier com.redx.pkg --version "${VERSION}" --install-location / "$W/component.pkg"
+    productbuild --sign "$MACOS_INSTALLER_IDENTITY" --timestamp --package "$W/component.pkg" "$OUT/${NAME}.pkg"
+    pkgutil --check-signature "$OUT/${NAME}.pkg"
+  fi
   rm -rf "$W"
   echo "built $OUT/${NAME}.dmg and .pkg"
 done

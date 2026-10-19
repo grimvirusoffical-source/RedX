@@ -58,6 +58,7 @@ instead of refused.
 
 macOS builds are ad-hoc signed only (still **unsigned** in the sense above). Signing with your own Apple Developer ID is
 opt-in: set `MACOS_SIGN_IDENTITY="Developer ID Application: …"` (and `MACOS_INSTALLER_IDENTITY="Developer ID Installer: …"`
-for the `.pkg`). Every Mach-O is then signed on its own, inside out (`Contents/Resources/bin/redx`, `Contents/MacOS/redxd`,
+for the `.pkg`; it is signed with `productbuild --sign`, which also works over a headless SSH session where `productsign`
+cannot use the installer key). Every Mach-O is then signed on its own, inside out (`Contents/Resources/bin/redx`, `Contents/MacOS/redxd`,
 then the app) with the hardened runtime, and the `/usr/local/bin` copies in the `.pkg` are the same signed binaries.
 Notarization is not done by these scripts.
