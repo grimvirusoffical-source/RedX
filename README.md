@@ -7,7 +7,7 @@ RedX is a database platform with its own file formats and its own query language
 * **BoxQL**, a query and command language written in the same grammar as the data files.
 * **`redx`**, a command-line client, and **SDKs** for JavaScript and Python.
 
-The current version is 0.4.4.
+The current version is 0.4.5.
 
 ## Features
 
@@ -29,7 +29,7 @@ Download the archive for your platform from the [releases page](https://github.c
 
 ```sh
 go build ./...
-VERSION=0.4.4 scripts/build.sh      # all platforms, archives in dist/
+VERSION=0.4.5 scripts/build.sh      # all platforms, archives in dist/
 ```
 
 ## Quick start

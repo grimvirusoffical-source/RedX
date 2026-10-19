@@ -110,7 +110,7 @@ cookies), `Content-Type: application/json`, and are refused (`403 csrf`) when th
  "key":"rx_live_…","key_id":"ab12cd34","scope":"write","prefix":"saves",
  "endpoints":{"base":"https://h:7777","path":"/v1/db/ra-com-acme-stardrift-1a2b3c4d/path/","bx":"/v1/db/ra-com-acme-stardrift-1a2b3c4d/bx",
               "subscribe":"wss://h:7777/v1/db/ra-com-acme-stardrift-1a2b3c4d/subscribe","revoke":"/v1/connect/revoke"},
- "host":{"node_id":"…","version":"0.4.4","tls_pin":"<hex>"},
+ "host":{"node_id":"…","version":"0.4.5","tls_pin":"<hex>"},
  "storage":{"mode":"local","provider":"","status":"local"},
  "warning":"this is the only time the key is shown"}
 ```

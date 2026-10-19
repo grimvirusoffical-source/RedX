@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.5 (unreleased)
+## 0.4.5 (2026-10-19)
 
 * Cluster: installing a full snapshot now swaps the databases directory atomically. A read racing the install could reopen the pre-snapshot databases and keep serving them, so a write discarded by the resync stayed readable (seen on Windows CI). Reads also wait while a snapshot is being swapped in.
 * C# and Swift SDKs: a stream reconnecting while the host restarts no longer gives up. A dial that failed while the host was starting, followed by a probe that reached the restarted host, was misread as a refusal (400) and ended the stream.

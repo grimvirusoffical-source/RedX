@@ -9,15 +9,15 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to stamp (e.g. 0.4.4)"
+        description: "Version to stamp (e.g. 0.4.5)"
         required: true
-        default: "0.4.4"
+        default: "0.4.5"
 
 permissions:
   contents: read
 
 env:
-  VERSION: ${{ inputs.version || '0.4.4' }}
+  VERSION: ${{ inputs.version || '0.4.5' }}
 
 jobs:
   linux-build:
