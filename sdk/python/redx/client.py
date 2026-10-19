@@ -9,10 +9,17 @@ The API key is kept out of repr(), error messages and pickles.
 """
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import json
 import queue
+import random
 import re
+import secrets
 import threading
+import time
+import warnings
 import urllib.error
 import urllib.request
 from typing import Any, Callable, Dict, Iterator, Optional
@@ -20,6 +27,7 @@ from urllib.parse import quote, urlencode, urlsplit
 
 from .boxtext import BoxTextError, from_box
 from . import ws as _ws
+from .operations import DANGER, OPERATIONS, SEGMENT_PARAMS, Operations
 
 _DB_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
 _KEY_SHAPE = re.compile(r"rx_live_[A-Za-z0-9]+")
@@ -28,12 +36,15 @@ _KEY_SHAPE = re.compile(r"rx_live_[A-Za-z0-9]+")
 class RedXError(Exception):
     """HTTP or client-side failure. status 0 = network/timeout/decoding problem."""
 
-    def __init__(self, status: int, message: str, retry_after: Optional[float] = None, body: Any = None):
+    def __init__(self, status: int, message: str, retry_after: Optional[float] = None, body: Any = None,
+                 code: Optional[str] = None):
         super().__init__(message)
         self.status = status
         self.message = message
         self.retry_after = retry_after
         self.body = body
+        # machine-readable: the host's "code", or "confirm_required" for an unconfirmed dangerous call
+        self.code = code if code is not None else (body.get("code") if isinstance(body, dict) else None)
 
     @property
     def unauthorized(self) -> bool:
@@ -178,7 +189,11 @@ class Subscription:
         self.close()
 
 
-class RedX:
+class RedX(Operations):
+    """Client for one host and key. Besides the methods below, every operation of the HTTP API
+    (api/redx-api.json) is a method in snake_case (create_database, pack_put, cluster_status, ...),
+    and call(op_id, ...) runs any of them by id. Dangerous operations need confirm=True."""
+
     def __init__(self, url: str, key: str, db: Optional[str] = None, timeout: float = 30.0):
         if not url:
             raise TypeError("url is required")
@@ -208,7 +223,7 @@ class RedX:
 
     def _request(self, method: str, path: str, *, body: Optional[bytes] = None,
                  headers: Optional[Dict[str, str]] = None, query: Optional[Dict[str, Any]] = None,
-                 auth: bool = True) -> str:
+                 auth: bool = True, raw: bool = False) -> Any:
         url = self.base_url + path
         if query:
             q = {k: ("true" if v is True else "false" if v is False else v) for k, v in query.items() if v is not None}
@@ -220,7 +235,8 @@ class RedX:
         req = urllib.request.Request(url, data=body, method=method, headers=h)
         try:
             with _OPENER.open(req, timeout=self.timeout) as r:
-                return r.read().decode("utf-8")
+                data = r.read()
+                return data if raw else data.decode("utf-8")
         except urllib.error.HTTPError as e:
             text = e.read(65536).decode("utf-8", "replace")
             msg, parsed = f"HTTP {e.code}", None
@@ -339,7 +355,8 @@ class RedX:
     def watch(self, q: str, handler: Optional[Callable[[dict], None]] = None, *,
               params: Optional[Dict[str, Any]] = None,
               on_error: Optional[Callable[[BaseException], None]] = None,
-              on_close: Optional[Callable[[int, str], None]] = None) -> Subscription:
+              on_close: Optional[Callable[[int, str], None]] = None,
+              reconnect: bool = False, on_reconnect: Optional[Callable[[], None]] = None) -> Subscription:
         """Watch a BoxQL ``{Watch[]}`` command, e.g. ``{Watch[]} = players:Player[Level > $min]``.
 
         Events are dicts {path, op, value (the whole changed record as Box text, fields you may not read
@@ -354,36 +371,55 @@ class RedX:
         qs = {"q": q}
         if params:
             qs["params"] = json.dumps(params)
-        return self._stream("/bx/watch", qs, handler, on_error, on_close)
+        return self._stream("/bx/watch", qs, handler, on_error, on_close, reconnect, on_reconnect)
 
     def create_key(self, *, scope: str, db: Optional[str] = None, prefix: Optional[str] = None,
                    label: Optional[str] = None, ttl: Optional[str] = None,
-                   rate_rps: Optional[float] = None, rate_burst: Optional[int] = None) -> dict:
-        """Create an API key (needs an admin key). The returned ``key`` is shown once; store it."""
+                   rate_rps: Optional[float] = None, rate_burst: Optional[int] = None,
+                   roles: Optional[list] = None, confirm: bool = False) -> dict:
+        """Create an API key (needs an admin key). The returned ``key`` is shown once; store it.
+
+        This is a dangerous operation: pass confirm=True (without it a DeprecationWarning is issued;
+        a later release will refuse)."""
+        if not confirm:
+            _unconfirmed("create_key")
         body: Dict[str, Any] = {"db": db or self.db or "default", "scope": scope}
         for k, v in (("prefix", prefix), ("label", label), ("ttl", ttl), ("rate_rps", rate_rps), ("rate_burst", rate_burst)):
             if v is not None:
                 body[k] = v
+        if roles is not None:
+            body["roles"] = roles
         return self._json("POST", "/v1/keys", body=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
 
-    def revoke_key(self, key_id: str) -> dict:
+    def revoke_key(self, key_id: str, *, confirm: bool = False) -> dict:
+        """Revoke a key (dangerous: pass confirm=True; see create_key)."""
+        if not confirm:
+            _unconfirmed("revoke_key")
         return self._json("DELETE", f"/v1/keys/{quote(key_id, safe='')}")
 
     def subscribe(self, path: str, handler: Optional[Callable[[dict], None]] = None, *,
                   on_error: Optional[Callable[[BaseException], None]] = None,
-                  on_close: Optional[Callable[[int, str], None]] = None) -> Subscription:
+                  on_close: Optional[Callable[[int, str], None]] = None,
+                  reconnect: bool = False, on_reconnect: Optional[Callable[[], None]] = None) -> Subscription:
         """Subscribe to changes matching ``path`` (a path pattern such as ``file.red-xai.db:Box[ID=*]``
         or ``file.red-xai.db:*``). Events are dicts {path, op: set|delete|expire, value (Box text), at, data}.
 
         With a handler it is called on the subscription's thread; without one, iterate the
         returned Subscription. Raises RedXError if the host refuses (401/403/429...).
         """
-        return self._stream("/subscribe", {"path": path}, handler, on_error, on_close)
+        return self._stream("/subscribe", {"path": path}, handler, on_error, on_close, reconnect, on_reconnect)
 
-    def _stream(self, sub_path: str, params: Dict[str, str], handler, on_error, on_close) -> Subscription:
+    def _stream(self, sub_path: str, params: Dict[str, str], handler, on_error, on_close,
+                reconnect: bool = False, on_reconnect=None, absolute: bool = False):
         if handler is not None and not callable(handler):
             raise TypeError("handler must be callable")
-        url = self.base_url + self._prefix() + sub_path + "?" + urlencode(params)
+        url = self.base_url + ("" if absolute else self._prefix()) + sub_path + "?" + urlencode(params)
+        if reconnect:
+            return ReconnectingSubscription(lambda h, e, c: Subscription(self._dial(url), h, e, c),
+                                            handler, on_error, on_close, on_reconnect)
+        return Subscription(self._dial(url), handler, on_error, on_close)
+
+    def _dial(self, url: str) -> "_ws.WebSocket":
         try:
             sock = _ws.connect(url, {"Authorization": f"Bearer {self.__key}"}, timeout=self.timeout)
         except _ws.HandshakeError as e:
@@ -398,4 +434,337 @@ class RedX:
             raise RedXError(e.status, _scrub(msg), float(ra) if ra else None, body) from None
         except OSError as e:
             raise RedXError(0, _scrub(f"request failed: {e}")) from None
-        return Subscription(sock, handler, on_error, on_close)
+        return sock
+
+    # -- every operation by id -------------------------------------------------
+    def call(self, op_id: str, *, db: Optional[str] = None, body: Any = None, query: Optional[Dict[str, Any]] = None,
+             confirm: bool = False, headers: Optional[Dict[str, str]] = None, **params: Any) -> Any:
+        """Run any operation of api/redx-api.json: call("pack_stat" | "packStat", pack="p", file="a/b").
+
+        Path parameters are keyword arguments and are escaped here. Returns parsed JSON, str (Box text) or
+        bytes (binary). Dangerous operations raise RedXError(code="confirm_required") without sending
+        anything unless confirm=True."""
+        op = OPERATIONS.get(op_id) or OPERATIONS.get(_camel(op_id))
+        if op is None:
+            raise TypeError(f"unknown operation {op_id!r}")
+        if op["response"] == "websocket":
+            raise TypeError(f"{op['id']} is a stream: use stream()")
+        _check_danger(op, confirm)
+        h = dict(headers or {})
+        data: Optional[bytes] = None
+        if op["request"] == "json":
+            data = json.dumps({} if body is None else body).encode()
+            h["Content-Type"] = "application/json"
+        elif op["request"] == "text":
+            if not isinstance(body, str):
+                raise TypeError(f"{op['id']} takes Box text (str) as body")
+            data = body.encode()
+            h["Content-Type"] = "text/x-redx-box"
+        elif op["request"] == "binary":
+            if body is None:
+                raise TypeError(f"{op['id']} needs a body (bytes)")
+            data = body.encode() if isinstance(body, str) else bytes(body)
+            h.setdefault("Content-Type", "application/octet-stream")
+            if not any(k.lower() == "x-redx-sha256" for k in h):
+                h["X-Redx-SHA256"] = hashlib.sha256(data).hexdigest()
+        q = dict(query or {})
+        if op["host_confirm"]:
+            v = (db or self.db or "default") if op["host_confirm"] == "db" else params.get(op["host_confirm"])
+            q.setdefault("confirm", v)
+        if op["response"] == "text":
+            h["Accept"] = "text/x-redx-box"
+        path = self._op_path(op, db, params)
+        res = self._request(op["method"], path, body=data, headers=h, query=q or None,
+                            auth=op["auth"] != "none", raw=op["response"] == "binary")
+        if op["response"] in ("binary", "text"):
+            return res
+        if res == "":
+            return {}
+        try:
+            return json.loads(res)
+        except ValueError:
+            raise RedXError(0, "server sent a non-JSON response") from None
+
+    def stream(self, op_id: str, handler: Optional[Callable[[dict], None]] = None, *, db: Optional[str] = None,
+               query: Optional[Dict[str, Any]] = None, on_error=None, on_close=None,
+               reconnect: bool = False, on_reconnect=None, **params: Any):
+        """Open any WebSocket operation (bxWatch, subscribe, rulesSubscribe) by id."""
+        op = OPERATIONS.get(op_id) or OPERATIONS.get(_camel(op_id))
+        if op is None or op["response"] != "websocket":
+            raise TypeError(f"{op_id} is not a stream operation")
+        q = {k: ("1" if v is True else "0" if v is False else str(v)) for k, v in (query or {}).items() if v is not None}
+        return self._stream(self._op_path(op, db, params), q, handler, on_error, on_close, reconnect, on_reconnect, absolute=True)
+
+    def _op_path(self, op: Dict[str, Any], db: Optional[str], params: Dict[str, Any]) -> str:
+        p = op["path"]
+        if "{db}" in p:
+            d = db or self.db
+            if d is not None and not _DB_NAME.match(d):
+                raise TypeError("invalid db name")
+            if not d and op["shorthand"]:
+                p = op["shorthand"]
+            else:
+                p = p.replace("{db}", d or "default")
+
+        def sub(m: "re.Match[str]") -> str:
+            n = m.group(1)
+            v = params.get(n)
+            if v is None or v == "":
+                if n == "folder":
+                    return ""
+                raise TypeError(f"{op['id']} needs {n}")
+            if n in SEGMENT_PARAMS:
+                return "/".join(quote(seg, safe="") for seg in str(v).split("/"))
+            return quote(str(v), safe="")
+
+        return re.sub(r"\{([a-z]+)\}", sub, p)
+
+    # -- convenience calls (same names in every RedX SDK) ----------------------
+    def tx(self, commands: list, params: Optional[Dict[str, Any]] = None) -> dict:
+        """Run several BoxQL commands all-or-nothing."""
+        if not commands:
+            raise TypeError("tx needs a non-empty list of commands")
+        return self.bx("{Tx[]} = [\n  " + ",\n  ".join(commands) + "\n]", params)
+
+    def upload_file(self, pack: str, file: str, data: bytes, *, db: Optional[str] = None) -> dict:
+        """Store data as file (slash-separated) in pack; the host verifies its SHA-256."""
+        return self.call("packPut", db=db, pack=pack, file=file, body=data)
+
+    def download_file(self, pack: str, file: str, *, db: Optional[str] = None, range: Optional[tuple] = None) -> bytes:
+        """Read a file of a pack; range=(start, end) inclusive (end may be None)."""
+        return self.call("packGet", db=db, pack=pack, file=file, headers=_range(range))
+
+    def upload_media(self, lib: str, name: str, data: bytes, *, db: Optional[str] = None, type: Optional[str] = None) -> dict:
+        return self.call("mediaPut", db=db, lib=lib, name=name, body=data, query={"type": type} if type else None)
+
+    def download_media(self, lib: str, name: str, *, db: Optional[str] = None, range: Optional[tuple] = None) -> bytes:
+        return self.call("mediaGet", db=db, lib=lib, name=name, headers=_range(range))
+
+
+class ReconnectingSubscription:
+    """A subscription that reconnects after an unexpected close, with exponential backoff (jittered).
+    Events that happened while disconnected are not replayed: re-read state in on_reconnect. A refusal
+    (400/401/403/404) ends it. Same interface as Subscription."""
+
+    def __init__(self, dial, handler, on_error, on_close, on_reconnect, min_s: float = 0.25, max_s: float = 10.0):
+        self._dial, self._handler, self._on_error = dial, handler, on_error
+        self._on_close, self._on_reconnect = on_close, on_reconnect
+        self._min, self._max = min_s, max_s
+        self._q: "queue.Queue[Any]" = queue.Queue()
+        self._stop = threading.Event()
+        self._done = threading.Event()
+        self.close_code: Optional[int] = None
+        self.close_reason = ""
+        self._cur = self._open()  # the first connect raises to the caller
+        self._t = threading.Thread(target=self._run, name="redx-reconnect", daemon=True)
+        self._t.start()
+
+    def _deliver(self, ev):
+        if self._handler:
+            try:
+                self._handler(ev)
+            except Exception as e:
+                self._err(e)
+        else:
+            self._q.put(ev)
+
+    def _err(self, e):
+        if self._on_error:
+            try:
+                self._on_error(e)
+            except Exception:
+                pass
+
+    def _open(self) -> Subscription:
+        return self._dial(self._deliver, self._on_error, None)
+
+    def _run(self):
+        delay = self._min
+        while True:
+            self._cur.wait_closed()
+            if self._stop.is_set():
+                self._finish(self._cur.close_code or 1000, self._cur.close_reason or "bye")
+                return
+            while True:
+                if self._stop.wait(delay / 2 + random.random() * delay / 2):
+                    self._finish(1000, "bye")
+                    return
+                delay = min(delay * 2, self._max)
+                try:
+                    self._cur = self._open()
+                except RedXError as e:
+                    if e.status in (400, 401, 403, 404):
+                        self._err(e)
+                        self._finish(0, e.message)
+                        return
+                    continue
+                if self._stop.is_set():
+                    self._cur.close()
+                    continue
+                delay = self._min
+                if self._on_reconnect:
+                    try:
+                        self._on_reconnect()
+                    except Exception as e:
+                        self._err(e)
+                break
+
+    def _finish(self, code, reason):
+        self.close_code, self.close_reason = code, reason
+        self._done.set()
+        self._q.put(None)
+        if self._on_close:
+            try:
+                self._on_close(code, reason)
+            except Exception:
+                pass
+
+    def __iter__(self) -> Iterator[dict]:
+        while True:
+            ev = self._q.get()
+            if ev is None:
+                self._q.put(None)
+                return
+            yield ev
+
+    def get(self, timeout: Optional[float] = None) -> Optional[dict]:
+        try:
+            ev = self._q.get(timeout=timeout)
+        except queue.Empty:
+            return None
+        if ev is None:
+            self._q.put(None)
+        return ev
+
+    def ping(self):
+        self._cur.ping()
+
+    def close(self, timeout: float = 2.0) -> None:
+        self._stop.set()
+        self._cur.close(timeout)
+        self._done.wait(timeout)
+
+    def wait_closed(self, timeout: Optional[float] = None) -> bool:
+        return self._done.wait(timeout)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+
+def _camel(name: str) -> str:
+    head, *rest = name.split("_")
+    return head + "".join(w[:1].upper() + w[1:] for w in rest)
+
+
+def _check_danger(op: Dict[str, Any], confirm: bool) -> None:
+    if op["danger"] == "dangerous" and confirm is not True:
+        raise RedXError(0, f"{op['id']} is a dangerous operation ({op['summary']}) and needs confirm=True",
+                        code="confirm_required")
+
+
+_warned: set = set()
+
+
+def _unconfirmed(name: str) -> None:
+    if name not in _warned:
+        _warned.add(name)
+        warnings.warn(f"{name}() without confirm=True is deprecated: it is a dangerous operation and will need "
+                      "confirm in a later release", DeprecationWarning, stacklevel=3)
+
+
+def _range(r: Optional[tuple]) -> Optional[Dict[str, str]]:
+    if not r:
+        return None
+    start, end = (r[0], r[1] if len(r) > 1 else None)
+    return {"Range": f"bytes={start}-{'' if end is None else end}"}
+
+
+def danger_of(op_id: str) -> str:
+    """The danger of an operation id: "safe", "write", "admin" or "dangerous"."""
+    op = OPERATIONS.get(op_id) or OPERATIONS.get(_camel(op_id))
+    if op is None:
+        raise TypeError(f"unknown operation {op_id!r}")
+    return op["danger"]
+
+
+# -- app side of the connect handshake (no key needed) ---------------------------
+
+def _b64url(b: bytes) -> str:
+    return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+
+
+def connect_request() -> Dict[str, str]:
+    """A fresh {"state", "verifier", "challenge"}; keep state and verifier secret until the exchange."""
+    verifier = _b64url(secrets.token_bytes(32))
+    return {"state": _b64url(secrets.token_bytes(24)), "verifier": verifier,
+            "challenge": _b64url(hashlib.sha256(verifier.encode()).digest())}
+
+
+_LINK_FIELDS = ("provider", "app", "workspace", "scope", "prefix", "label", "state", "callback", "host", "pin", "name")
+
+
+def connect_link(*, provider: str, state: str, challenge: str, console_url: Optional[str] = None, **fields: str) -> str:
+    """The link the owner opens: redx://connect?... or <console_url>/#/connect?..."""
+    if not provider or not state or not challenge:
+        raise TypeError("connect_link needs provider, state and challenge")
+    q = [("v", "1")]
+    vals = dict(fields, provider=provider, state=state)
+    for k in _LINK_FIELDS:
+        if vals.get(k):
+            q.append((k, str(vals[k])))
+    q += [("pkce_challenge", challenge), ("pkce_method", "S256")]
+    if console_url:
+        u = urlsplit(console_url)
+        return f"{u.scheme}://{u.netloc}/#/connect?{urlencode(q)}"
+    return "redx://connect?" + urlencode(q)
+
+
+def parse_callback(url: str, expected_state: str) -> Dict[str, str]:
+    """Read the callback URL; raises RedXError(code="state_mismatch") unless its state matches."""
+    from urllib.parse import parse_qs
+    qs = parse_qs(urlsplit(url).query)
+    g = lambda k: (qs.get(k) or [""])[0]  # noqa: E731
+    out = {"code": g("code"), "state": g("state"), "host": g("host"), "pin": g("pin")}
+    if not out["code"]:
+        raise RedXError(0, "callback carries no code", code="bad_callback")
+    if not hmac.compare_digest(out["state"].encode(), str(expected_state or "").encode()):
+        raise RedXError(0, "callback state does not match", code="state_mismatch")
+    return out
+
+
+def _anon_post(url: str, path: str, body: Dict[str, Any], timeout: float = 30.0) -> Any:
+    u = urlsplit(url)
+    req = urllib.request.Request(f"{u.scheme}://{u.netloc}{path}", data=json.dumps(body).encode(), method="POST",
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with _OPENER.open(req, timeout=timeout) as r:
+            return json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        parsed = None
+        try:
+            parsed = json.loads(e.read(65536).decode("utf-8", "replace"))
+        except ValueError:
+            pass
+        msg = parsed.get("error") if isinstance(parsed, dict) and parsed.get("error") else f"HTTP {e.code}"
+        raise RedXError(e.code, _scrub(msg), None, parsed) from None
+    except (urllib.error.URLError, OSError) as e:
+        raise RedXError(0, _scrub(f"request failed: {getattr(e, 'reason', e)}")) from None
+
+
+def exchange_connect_code(url: str, *, code: str, verifier: str, state: str, device_label: Optional[str] = None,
+                          provider_grant: Optional[str] = None, timeout: float = 30.0) -> Dict[str, Any]:
+    """Trade an approved connect code plus the PKCE verifier for the app's key (returned once)."""
+    body: Dict[str, Any] = {"code": code, "pkce_verifier": verifier, "state": state}
+    if device_label:
+        body["device_label"] = device_label
+    if provider_grant:
+        body["provider_grant"] = provider_grant
+    return _anon_post(url, "/v1/connect/exchange", body, timeout)
+
+
+def exchange_pairing_code(url: str, code: str, timeout: float = 30.0) -> Dict[str, Any]:
+    """Trade a sign-in (pairing) code for a key."""
+    return _anon_post(url, "/v1/pair/exchange", {"code": code}, timeout)
