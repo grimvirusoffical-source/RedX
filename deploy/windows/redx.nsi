@@ -36,7 +36,7 @@ VIProductVersion "${NUMVERSION}.0"
 VIAddVersionKey "ProductName" "RedX"
 VIAddVersionKey "FileDescription" "RedX database host installer"
 VIAddVersionKey "FileVersion" "${VERSION}"
-VIAddVersionKey "LegalCopyright" "RedX"
+VIAddVersionKey "LegalCopyright" "Copyright (c) 2026 Red-XAI LLC"
 
 !define MUI_ICON "${ICON}"
 !define MUI_UNICON "${ICON}"

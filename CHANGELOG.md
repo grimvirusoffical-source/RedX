@@ -1,7 +1,8 @@
 # Changelog
 
-## Unreleased (0.4.4)
+## 0.4.4
 
+* The LICENSE copyright holder is now Red-XAI LLC; the Windows installer's LegalCopyright says the same.
 * Connect: added the `quicklaunch` provider (QuickLaunch developer tool) and a strict loopback callback rule: `http://127.0.0.1`, `http://[::1]` or `http://localhost` on any port with exactly the registered path; everything else is refused.
 * The console Help page has an About card with the ownership notice, also in the README.
 * Subscriptions (`/v1/subscribe`) are armed before the WebSocket handshake completes, so a write made right after `subscribe()` returns is always delivered.
