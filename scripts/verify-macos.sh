@@ -38,7 +38,14 @@ pkill -x redxd; sleep 1
 sudo installer -pkg "$PKG" -target / >/dev/null && ok "pkg installs" || bad "pkg install"
 [ -d /Applications/RedX.app ] && ok "/Applications/RedX.app" || bad "app not installed by pkg"
 /usr/local/bin/redx --version && ok "/usr/local/bin/redx works" || bad "cli from pkg"
-# ad-hoc signature present?
+# every Mach-O carries a valid signature (ad-hoc unless a Developer ID was used), in every architecture slice
+for b in /Applications/RedX.app/Contents/MacOS/RedX /Applications/RedX.app/Contents/MacOS/redxd \
+         /Applications/RedX.app/Contents/Resources/bin/redx /usr/local/bin/redx /usr/local/bin/redxd; do
+  for a in $(lipo -archs "$b"); do
+    codesign --verify --strict -a "$a" "$b" 2>/dev/null && ok "signed ($a): $b" || bad "no valid signature ($a): $b"
+  done
+done
+codesign --verify --strict --deep /Applications/RedX.app && ok "app bundle signature valid" || bad "app bundle signature"
 codesign -dv /Applications/RedX.app 2>&1 | head -3 || true
 rm -rf "$HOME/Applications/RedX.app"
 [ $fail = 0 ] && echo "macOS installers verified" || { echo "FAILED"; exit 1; }
