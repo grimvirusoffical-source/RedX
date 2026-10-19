@@ -122,6 +122,22 @@ namespace RedX
             ["updateAppRollback"] = new Operation { Id = "updateAppRollback", Group = "updates", Method = "POST", Path = "/v1/updates/apps/{app}/rollback", Shorthand = "", Auth = "host-admin", Response = "json", Request = "json", HostConfirm = "", Summary = "Restore one snapshot for an app.", Danger = DangerLevel.Dangerous },
             ["updatePublish"] = new Operation { Id = "updatePublish", Group = "updates", Method = "POST", Path = "/v1/updates/apps/{app}/publish", Shorthand = "", Auth = "host-admin", Response = "json", Request = "json", HostConfirm = "", Summary = "Sign a host and/or github manifest for an app already in hosted_apps. A github target creates the release.", Danger = DangerLevel.Dangerous },
             ["updateGitHubWebhook"] = new Operation { Id = "updateGitHubWebhook", Group = "updates", Method = "POST", Path = "/v1/updates/github/webhook", Shorthand = "", Auth = "none", Response = "json", Request = "", HostConfirm = "", Summary = "GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest. No webhook secret configured is 404.", Danger = DangerLevel.Write },
+            ["listHostedApps"] = new Operation { Id = "listHostedApps", Group = "hosted", Method = "GET", Path = "/v1/hosted/apps", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "Hosted apps the caller may see. Tenants see their own. Owners and host-admin keys see every app.", Danger = DangerLevel.Safe },
+            ["createHostedApp"] = new Operation { Id = "createHostedApp", Group = "hosted", Method = "POST", Path = "/v1/hosted/apps", Shorthand = "", Auth = "key", Response = "json", Request = "json", HostConfirm = "", Summary = "Create a tenant app. kind is static, container or process. db is the tenant's logical database name.", Danger = DangerLevel.Write },
+            ["getHostedApp"] = new Operation { Id = "getHostedApp", Group = "hosted", Method = "GET", Path = "/v1/hosted/apps/{id}", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "One hosted app: deploys, domains, masked secrets, limits and the sandbox runtime spec.", Danger = DangerLevel.Safe },
+            ["deleteHostedApp"] = new Operation { Id = "deleteHostedApp", Group = "hosted", Method = "DELETE", Path = "/v1/hosted/apps/{id}", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "Delete a hosted app, its releases and its scoped database key.", Danger = DangerLevel.Dangerous },
+            ["deployHostedApp"] = new Operation { Id = "deployHostedApp", Group = "hosted", Method = "POST", Path = "/v1/hosted/apps/{id}/deploy", Shorthand = "", Auth = "key", Response = "json", Request = "json", HostConfirm = "", Summary = "Deploy from github, image or dockerfile. strategy is direct, canary or blue_green.", Danger = DangerLevel.Write },
+            ["uploadHostedArchive"] = new Operation { Id = "uploadHostedArchive", Group = "hosted", Method = "POST", Path = "/v1/hosted/apps/{id}/archive", Shorthand = "", Auth = "key", Response = "json", Request = "binary", HostConfirm = "", Summary = "Deploy a static site or build context from a zip, tar or tar.gz body.", Danger = DangerLevel.Write },
+            ["listHostedDeploys"] = new Operation { Id = "listHostedDeploys", Group = "hosted", Method = "GET", Path = "/v1/hosted/apps/{id}/deploys", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "Deploy history for one app.", Danger = DangerLevel.Safe },
+            ["getHostedManifest"] = new Operation { Id = "getHostedManifest", Group = "hosted", Method = "GET", Path = "/v1/hosted/apps/{id}/deploys/{deploy}/manifest", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "Signed redx.update-manifest/v1 bytes for a deploy. X-RedX-Signature is ed25519 over those exact bytes.", Danger = DangerLevel.Safe },
+            ["rollbackHostedApp"] = new Operation { Id = "rollbackHostedApp", Group = "hosted", Method = "POST", Path = "/v1/hosted/apps/{id}/rollback", Shorthand = "", Auth = "key", Response = "json", Request = "json", HostConfirm = "", Summary = "Make a previous deploy current. Pass deploy or snapshot.", Danger = DangerLevel.Admin },
+            ["promoteHostedApp"] = new Operation { Id = "promoteHostedApp", Group = "hosted", Method = "POST", Path = "/v1/hosted/apps/{id}/promote", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "Promote the canary or blue-green standby to current.", Danger = DangerLevel.Admin },
+            ["startHostedApp"] = new Operation { Id = "startHostedApp", Group = "hosted", Method = "POST", Path = "/v1/hosted/apps/{id}/start", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "Start an app. A state change counts as one host_switch_quota switch.", Danger = DangerLevel.Write },
+            ["stopHostedApp"] = new Operation { Id = "stopHostedApp", Group = "hosted", Method = "POST", Path = "/v1/hosted/apps/{id}/stop", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "Stop an app. A state change counts as one host_switch_quota switch.", Danger = DangerLevel.Write },
+            ["getHostedUsage"] = new Operation { Id = "getHostedUsage", Group = "hosted", Method = "GET", Path = "/v1/hosted/apps/{id}/usage", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "Disk used by one app and the tier limits that apply.", Danger = DangerLevel.Safe },
+            ["getHostedHealth"] = new Operation { Id = "getHostedHealth", Group = "hosted", Method = "GET", Path = "/v1/hosted/apps/{id}/health", Shorthand = "", Auth = "key", Response = "json", Request = "", HostConfirm = "", Summary = "Probe the current release. A failed direct deploy is rolled back to the previous release.", Danger = DangerLevel.Safe },
+            ["hostedTLSAsk"] = new Operation { Id = "hostedTLSAsk", Group = "hosted", Method = "GET", Path = "/v1/hosted/tls/ask", Shorthand = "", Auth = "none", Response = "json", Request = "", HostConfirm = "", Summary = "Caddy on-demand TLS ask. 200 only for a verified app domain, and only from loopback or with X-RedX-Caddy-Ask.", Danger = DangerLevel.Safe },
+            ["hostedCaddy"] = new Operation { Id = "hostedCaddy", Group = "hosted", Method = "GET", Path = "/v1/hosted/caddy", Shorthand = "", Auth = "key", Response = "text", Request = "", HostConfirm = "", Summary = "Caddyfile fragment for on-demand TLS. Owner or host-admin only.", Danger = DangerLevel.Safe },
         };
     }
 
@@ -462,6 +478,70 @@ namespace RedX
         /// <summary>GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest. No webhook secret configured is 404. (POST /v1/updates/github/webhook; auth none; danger write)</summary>
         public Task<RedXResult> UpdateGitHubWebhookAsync(CancellationToken ct = default) =>
             CallAsync("updateGitHubWebhook", null, null, null, null, null, false, ct);
+
+        /// <summary>Hosted apps the caller may see. Tenants see their own. Owners and host-admin keys see every app. (GET /v1/hosted/apps; auth key; danger safe)</summary>
+        public Task<RedXResult> ListHostedAppsAsync(CancellationToken ct = default) =>
+            CallAsync("listHostedApps", null, null, null, null, null, false, ct);
+
+        /// <summary>Create a tenant app. kind is static, container or process. db is the tenant's logical database name. (POST /v1/hosted/apps; auth key; danger write)</summary>
+        public Task<RedXResult> CreateHostedAppAsync(object? body = null, CancellationToken ct = default) =>
+            CallAsync("createHostedApp", null, null, body, null, null, false, ct);
+
+        /// <summary>One hosted app: deploys, domains, masked secrets, limits and the sandbox runtime spec. (GET /v1/hosted/apps/{id}; auth key; danger safe)</summary>
+        public Task<RedXResult> GetHostedAppAsync(string id, CancellationToken ct = default) =>
+            CallAsync("getHostedApp", new Dictionary<string, string> { ["id"] = id }, null, null, null, null, false, ct);
+
+        /// <summary>Delete a hosted app, its releases and its scoped database key. (DELETE /v1/hosted/apps/{id}; auth key; danger dangerous)</summary>
+        public Task<RedXResult> DeleteHostedAppAsync(string id, bool confirm = false, CancellationToken ct = default) =>
+            CallAsync("deleteHostedApp", new Dictionary<string, string> { ["id"] = id }, null, null, null, null, confirm, ct);
+
+        /// <summary>Deploy from github, image or dockerfile. strategy is direct, canary or blue_green. (POST /v1/hosted/apps/{id}/deploy; auth key; danger write)</summary>
+        public Task<RedXResult> DeployHostedAppAsync(string id, object? body = null, CancellationToken ct = default) =>
+            CallAsync("deployHostedApp", new Dictionary<string, string> { ["id"] = id }, null, body, null, null, false, ct);
+
+        /// <summary>Deploy a static site or build context from a zip, tar or tar.gz body. (POST /v1/hosted/apps/{id}/archive; auth key; danger write)</summary>
+        public Task<RedXResult> UploadHostedArchiveAsync(string id, byte[] body, IDictionary<string, object?>? query = null, CancellationToken ct = default) =>
+            CallAsync("uploadHostedArchive", new Dictionary<string, string> { ["id"] = id }, null, null, body, query, false, ct);
+
+        /// <summary>Deploy history for one app. (GET /v1/hosted/apps/{id}/deploys; auth key; danger safe)</summary>
+        public Task<RedXResult> ListHostedDeploysAsync(string id, CancellationToken ct = default) =>
+            CallAsync("listHostedDeploys", new Dictionary<string, string> { ["id"] = id }, null, null, null, null, false, ct);
+
+        /// <summary>Signed redx.update-manifest/v1 bytes for a deploy. X-RedX-Signature is ed25519 over those exact bytes. (GET /v1/hosted/apps/{id}/deploys/{deploy}/manifest; auth key; danger safe)</summary>
+        public Task<RedXResult> GetHostedManifestAsync(string id, string deploy, CancellationToken ct = default) =>
+            CallAsync("getHostedManifest", new Dictionary<string, string> { ["id"] = id, ["deploy"] = deploy }, null, null, null, null, false, ct);
+
+        /// <summary>Make a previous deploy current. Pass deploy or snapshot. (POST /v1/hosted/apps/{id}/rollback; auth key; danger admin)</summary>
+        public Task<RedXResult> RollbackHostedAppAsync(string id, object? body = null, CancellationToken ct = default) =>
+            CallAsync("rollbackHostedApp", new Dictionary<string, string> { ["id"] = id }, null, body, null, null, false, ct);
+
+        /// <summary>Promote the canary or blue-green standby to current. (POST /v1/hosted/apps/{id}/promote; auth key; danger admin)</summary>
+        public Task<RedXResult> PromoteHostedAppAsync(string id, CancellationToken ct = default) =>
+            CallAsync("promoteHostedApp", new Dictionary<string, string> { ["id"] = id }, null, null, null, null, false, ct);
+
+        /// <summary>Start an app. A state change counts as one host_switch_quota switch. (POST /v1/hosted/apps/{id}/start; auth key; danger write)</summary>
+        public Task<RedXResult> StartHostedAppAsync(string id, CancellationToken ct = default) =>
+            CallAsync("startHostedApp", new Dictionary<string, string> { ["id"] = id }, null, null, null, null, false, ct);
+
+        /// <summary>Stop an app. A state change counts as one host_switch_quota switch. (POST /v1/hosted/apps/{id}/stop; auth key; danger write)</summary>
+        public Task<RedXResult> StopHostedAppAsync(string id, CancellationToken ct = default) =>
+            CallAsync("stopHostedApp", new Dictionary<string, string> { ["id"] = id }, null, null, null, null, false, ct);
+
+        /// <summary>Disk used by one app and the tier limits that apply. (GET /v1/hosted/apps/{id}/usage; auth key; danger safe)</summary>
+        public Task<RedXResult> GetHostedUsageAsync(string id, CancellationToken ct = default) =>
+            CallAsync("getHostedUsage", new Dictionary<string, string> { ["id"] = id }, null, null, null, null, false, ct);
+
+        /// <summary>Probe the current release. A failed direct deploy is rolled back to the previous release. (GET /v1/hosted/apps/{id}/health; auth key; danger safe)</summary>
+        public Task<RedXResult> GetHostedHealthAsync(string id, CancellationToken ct = default) =>
+            CallAsync("getHostedHealth", new Dictionary<string, string> { ["id"] = id }, null, null, null, null, false, ct);
+
+        /// <summary>Caddy on-demand TLS ask. 200 only for a verified app domain, and only from loopback or with X-RedX-Caddy-Ask. (GET /v1/hosted/tls/ask; auth none; danger safe)</summary>
+        public Task<RedXResult> HostedTLSAskAsync(IDictionary<string, object?>? query = null, CancellationToken ct = default) =>
+            CallAsync("hostedTLSAsk", null, null, null, null, query, false, ct);
+
+        /// <summary>Caddyfile fragment for on-demand TLS. Owner or host-admin only. (GET /v1/hosted/caddy; auth key; danger safe)</summary>
+        public Task<RedXResult> HostedCaddyAsync(CancellationToken ct = default) =>
+            CallAsync("hostedCaddy", null, null, null, null, null, false, ct);
 
     }
 }

@@ -111,6 +111,22 @@ public let operations: [String: Operation] = [
     "updateAppRollback": Operation(id: "updateAppRollback", group: "updates", method: "POST", path: "/v1/updates/apps/{app}/rollback", shorthand: "", auth: "host-admin", response: "json", request: "json", hostConfirm: "", summary: "Restore one snapshot for an app.", danger: .dangerous),
     "updatePublish": Operation(id: "updatePublish", group: "updates", method: "POST", path: "/v1/updates/apps/{app}/publish", shorthand: "", auth: "host-admin", response: "json", request: "json", hostConfirm: "", summary: "Sign a host and/or github manifest for an app already in hosted_apps. A github target creates the release.", danger: .dangerous),
     "updateGitHubWebhook": Operation(id: "updateGitHubWebhook", group: "updates", method: "POST", path: "/v1/updates/github/webhook", shorthand: "", auth: "none", response: "json", request: "", hostConfirm: "", summary: "GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest. No webhook secret configured is 404.", danger: .write),
+    "listHostedApps": Operation(id: "listHostedApps", group: "hosted", method: "GET", path: "/v1/hosted/apps", shorthand: "", auth: "key", response: "json", request: "", hostConfirm: "", summary: "Hosted apps the caller may see. Tenants see their own. Owners and host-admin keys see every app.", danger: .safe),
+    "createHostedApp": Operation(id: "createHostedApp", group: "hosted", method: "POST", path: "/v1/hosted/apps", shorthand: "", auth: "key", response: "json", request: "json", hostConfirm: "", summary: "Create a tenant app. kind is static, container or process. db is the tenant's logical database name.", danger: .write),
+    "getHostedApp": Operation(id: "getHostedApp", group: "hosted", method: "GET", path: "/v1/hosted/apps/{id}", shorthand: "", auth: "key", response: "json", request: "", hostConfirm: "", summary: "One hosted app: deploys, domains, masked secrets, limits and the sandbox runtime spec.", danger: .safe),
+    "deleteHostedApp": Operation(id: "deleteHostedApp", group: "hosted", method: "DELETE", path: "/v1/hosted/apps/{id}", shorthand: "", auth: "key", response: "json", request: "", hostConfirm: "", summary: "Delete a hosted app, its releases and its scoped database key.", danger: .dangerous),
+    "deployHostedApp": Operation(id: "deployHostedApp", group: "hosted", method: "POST", path: "/v1/hosted/apps/{id}/deploy", shorthand: "", auth: "key", response: "json", request: "json", hostConfirm: "", summary: "Deploy from github, image or dockerfile. strategy is direct, canary or blue_green.", danger: .write),
+    "uploadHostedArchive": Operation(id: "uploadHostedArchive", group: "hosted", method: "POST", path: "/v1/hosted/apps/{id}/archive", shorthand: "", auth: "key", response: "json", request: "binary", hostConfirm: "", summary: "Deploy a static site or build context from a zip, tar or tar.gz body.", danger: .write),
+    "listHostedDeploys": Operation(id: "listHostedDeploys", group: "hosted", method: "GET", path: "/v1/hosted/apps/{id}/deploys", shorthand: "", auth: "key", response: "json", request: "", hostConfirm: "", summary: "Deploy history for one app.", danger: .safe),
+    "getHostedManifest": Operation(id: "getHostedManifest", group: "hosted", method: "GET", path: "/v1/hosted/apps/{id}/deploys/{deploy}/manifest", shorthand: "", auth: "key", response: "json", request: "", hostConfirm: "", summary: "Signed redx.update-manifest/v1 bytes for a deploy. X-RedX-Signature is ed25519 over those exact bytes.", danger: .safe),
+    "rollbackHostedApp": Operation(id: "rollbackHostedApp", group: "hosted", method: "POST", path: "/v1/hosted/apps/{id}/rollback", shorthand: "", auth: "key", response: "json", request: "json", hostConfirm: "", summary: "Make a previous deploy current. Pass deploy or snapshot.", danger: .admin),
+    "promoteHostedApp": Operation(id: "promoteHostedApp", group: "hosted", method: "POST", path: "/v1/hosted/apps/{id}/promote", shorthand: "", auth: "key", response: "json", request: "", hostConfirm: "", summary: "Promote the canary or blue-green standby to current.", danger: .admin),
+    "startHostedApp": Operation(id: "startHostedApp", group: "hosted", method: "POST", path: "/v1/hosted/apps/{id}/start", shorthand: "", auth: "key", response: "json", request: "", hostConfirm: "", summary: "Start an app. A state change counts as one host_switch_quota switch.", danger: .write),
+    "stopHostedApp": Operation(id: "stopHostedApp", group: "hosted", method: "POST", path: "/v1/hosted/apps/{id}/stop", shorthand: "", auth: "key", response: "json", request: "", hostConfirm: "", summary: "Stop an app. A state change counts as one host_switch_quota switch.", danger: .write),
+    "getHostedUsage": Operation(id: "getHostedUsage", group: "hosted", method: "GET", path: "/v1/hosted/apps/{id}/usage", shorthand: "", auth: "key", response: "json", request: "", hostConfirm: "", summary: "Disk used by one app and the tier limits that apply.", danger: .safe),
+    "getHostedHealth": Operation(id: "getHostedHealth", group: "hosted", method: "GET", path: "/v1/hosted/apps/{id}/health", shorthand: "", auth: "key", response: "json", request: "", hostConfirm: "", summary: "Probe the current release. A failed direct deploy is rolled back to the previous release.", danger: .safe),
+    "hostedTLSAsk": Operation(id: "hostedTLSAsk", group: "hosted", method: "GET", path: "/v1/hosted/tls/ask", shorthand: "", auth: "none", response: "json", request: "", hostConfirm: "", summary: "Caddy on-demand TLS ask. 200 only for a verified app domain, and only from loopback or with X-RedX-Caddy-Ask.", danger: .safe),
+    "hostedCaddy": Operation(id: "hostedCaddy", group: "hosted", method: "GET", path: "/v1/hosted/caddy", shorthand: "", auth: "key", response: "text", request: "", hostConfirm: "", summary: "Caddyfile fragment for on-demand TLS. Owner or host-admin only.", danger: .safe),
 ]
 
 extension RedXClient {
@@ -622,6 +638,102 @@ extension RedXClient {
     @discardableResult
     public func updateGitHubWebhook() async throws -> RedXResult {
         try await call("updateGitHubWebhook", params: [:])
+    }
+
+    /// Hosted apps the caller may see. Tenants see their own. Owners and host-admin keys see every app. (GET /v1/hosted/apps; auth key; danger safe)
+    @discardableResult
+    public func listHostedApps() async throws -> RedXResult {
+        try await call("listHostedApps", params: [:])
+    }
+
+    /// Create a tenant app. kind is static, container or process. db is the tenant's logical database name. (POST /v1/hosted/apps; auth key; danger write)
+    @discardableResult
+    public func createHostedApp(body: [String: Any]? = nil) async throws -> RedXResult {
+        try await call("createHostedApp", params: [:], body: body)
+    }
+
+    /// One hosted app: deploys, domains, masked secrets, limits and the sandbox runtime spec. (GET /v1/hosted/apps/{id}; auth key; danger safe)
+    @discardableResult
+    public func getHostedApp(id: String) async throws -> RedXResult {
+        try await call("getHostedApp", params: ["id": id])
+    }
+
+    /// Delete a hosted app, its releases and its scoped database key. (DELETE /v1/hosted/apps/{id}; auth key; danger dangerous)
+    @discardableResult
+    public func deleteHostedApp(id: String, confirm: Bool = false) async throws -> RedXResult {
+        try await call("deleteHostedApp", params: ["id": id], confirm: confirm)
+    }
+
+    /// Deploy from github, image or dockerfile. strategy is direct, canary or blue_green. (POST /v1/hosted/apps/{id}/deploy; auth key; danger write)
+    @discardableResult
+    public func deployHostedApp(id: String, body: [String: Any]? = nil) async throws -> RedXResult {
+        try await call("deployHostedApp", params: ["id": id], body: body)
+    }
+
+    /// Deploy a static site or build context from a zip, tar or tar.gz body. (POST /v1/hosted/apps/{id}/archive; auth key; danger write)
+    @discardableResult
+    public func uploadHostedArchive(id: String, body: Data, query: [String: Any]? = nil) async throws -> RedXResult {
+        try await call("uploadHostedArchive", params: ["id": id], rawBody: body, query: query)
+    }
+
+    /// Deploy history for one app. (GET /v1/hosted/apps/{id}/deploys; auth key; danger safe)
+    @discardableResult
+    public func listHostedDeploys(id: String) async throws -> RedXResult {
+        try await call("listHostedDeploys", params: ["id": id])
+    }
+
+    /// Signed redx.update-manifest/v1 bytes for a deploy. X-RedX-Signature is ed25519 over those exact bytes. (GET /v1/hosted/apps/{id}/deploys/{deploy}/manifest; auth key; danger safe)
+    @discardableResult
+    public func getHostedManifest(id: String, deploy: String) async throws -> RedXResult {
+        try await call("getHostedManifest", params: ["id": id, "deploy": deploy])
+    }
+
+    /// Make a previous deploy current. Pass deploy or snapshot. (POST /v1/hosted/apps/{id}/rollback; auth key; danger admin)
+    @discardableResult
+    public func rollbackHostedApp(id: String, body: [String: Any]? = nil) async throws -> RedXResult {
+        try await call("rollbackHostedApp", params: ["id": id], body: body)
+    }
+
+    /// Promote the canary or blue-green standby to current. (POST /v1/hosted/apps/{id}/promote; auth key; danger admin)
+    @discardableResult
+    public func promoteHostedApp(id: String) async throws -> RedXResult {
+        try await call("promoteHostedApp", params: ["id": id])
+    }
+
+    /// Start an app. A state change counts as one host_switch_quota switch. (POST /v1/hosted/apps/{id}/start; auth key; danger write)
+    @discardableResult
+    public func startHostedApp(id: String) async throws -> RedXResult {
+        try await call("startHostedApp", params: ["id": id])
+    }
+
+    /// Stop an app. A state change counts as one host_switch_quota switch. (POST /v1/hosted/apps/{id}/stop; auth key; danger write)
+    @discardableResult
+    public func stopHostedApp(id: String) async throws -> RedXResult {
+        try await call("stopHostedApp", params: ["id": id])
+    }
+
+    /// Disk used by one app and the tier limits that apply. (GET /v1/hosted/apps/{id}/usage; auth key; danger safe)
+    @discardableResult
+    public func getHostedUsage(id: String) async throws -> RedXResult {
+        try await call("getHostedUsage", params: ["id": id])
+    }
+
+    /// Probe the current release. A failed direct deploy is rolled back to the previous release. (GET /v1/hosted/apps/{id}/health; auth key; danger safe)
+    @discardableResult
+    public func getHostedHealth(id: String) async throws -> RedXResult {
+        try await call("getHostedHealth", params: ["id": id])
+    }
+
+    /// Caddy on-demand TLS ask. 200 only for a verified app domain, and only from loopback or with X-RedX-Caddy-Ask. (GET /v1/hosted/tls/ask; auth none; danger safe)
+    @discardableResult
+    public func hostedTLSAsk(query: [String: Any]? = nil) async throws -> RedXResult {
+        try await call("hostedTLSAsk", params: [:], query: query)
+    }
+
+    /// Caddyfile fragment for on-demand TLS. Owner or host-admin only. (GET /v1/hosted/caddy; auth key; danger safe)
+    @discardableResult
+    public func hostedCaddy() async throws -> RedXResult {
+        try await call("hostedCaddy", params: [:])
     }
 
 }
