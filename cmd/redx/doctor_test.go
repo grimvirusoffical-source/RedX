@@ -164,3 +164,30 @@ func TestDoctorReportsDaemonServedCert(t *testing.T) {
 		t.Fatalf("doctor should report the daemon's expiring certificate:\n%s", out)
 	}
 }
+
+// A valid certificate given as flags must not fail "config valid" for the key doctor was not given;
+// with --tls-key the pair is checked.
+func TestDoctorCertFlagsWithoutAndWithKey(t *testing.T) {
+	t.Setenv("REDX_DATA_DIR", "")
+	now := time.Now()
+	dir := t.TempDir()
+	cert := writeTestCert(t, dir, now.Add(-24*time.Hour), now.Add(200*24*time.Hour))
+	missing := filepath.Join(dir, "not-created-yet")
+	out, _, _ := runCLI(t, "http://127.0.0.1:1", "", "doctor", "--offline", "--data-dir", missing, "--tls", "files", "--tls-cert", cert)
+	if strings.Contains(out, "config valid") || !strings.Contains(out, "--tls-key") {
+		t.Fatalf("cert-only flags must not fail the config check:\n%s", out)
+	}
+	if l := tlsCertLine(out); !strings.Contains(l, "ok") {
+		t.Fatalf("valid cert should be ok: %q\n%s", l, out)
+	}
+	out, _, _ = runCLI(t, "http://127.0.0.1:1", "", "doctor", "--offline", "--data-dir", missing, "--tls-cert", cert, "--tls-key", filepath.Join(dir, "k.pem"))
+	if !strings.Contains(out, "matches the certificate") || strings.Contains(out, "config valid") {
+		t.Fatalf("cert + key flags:\n%s", out)
+	}
+	other := t.TempDir()
+	writeTestCert(t, other, now.Add(-24*time.Hour), now.Add(200*24*time.Hour))
+	out, _, _ = runCLI(t, "http://127.0.0.1:1", "", "doctor", "--offline", "--data-dir", missing, "--tls-cert", cert, "--tls-key", filepath.Join(other, "k.pem"))
+	if !strings.Contains(out, "do not load as a pair") {
+		t.Fatalf("mismatched key must be reported:\n%s", out)
+	}
+}

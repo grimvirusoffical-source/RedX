@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"net"
@@ -24,6 +25,7 @@ func cmdDoctor(args []string) {
 	cfgFile := fs.String("config", os.Getenv("REDX_CONFIG"), "redxd config file to validate")
 	tlsMode := fs.String("tls", "", "the redxd --tls value, if you pass it as a flag (off|auto|files)")
 	tlsCert := fs.String("tls-cert", "", "the redxd --tls-cert file, if you pass it as a flag")
+	tlsKey := fs.String("tls-key", "", "the redxd --tls-key file, if you pass it as a flag (checked against the certificate)")
 	parse(fs, args)
 	var res []check
 	add := func(name, status, detail string) { res = append(res, check{name, status, detail}) }
@@ -89,8 +91,26 @@ func cmdDoctor(args []string) {
 			cfg.TLS = "files"
 		}
 	}
-	if err := cfg.Validate(); err != nil {
+	if *tlsKey != "" {
+		cfg.TLSKey = *tlsKey
+	}
+	// Only the certificate was handed to doctor: check it, and do not fail the config for the missing key.
+	certOnly := cfg.TLS == "files" && cfg.TLSCert != "" && cfg.TLSKey == "" && *tlsCert != ""
+	vcfg := cfg
+	if certOnly {
+		vcfg.TLSKey = cfg.TLSCert
+	}
+	if err := vcfg.Validate(); err != nil {
 		add("config valid", "FAIL", err.Error())
+	}
+	if certOnly {
+		add("tls key", "info", "not checked: pass --tls-key FILE to check that the key matches the certificate")
+	} else if cfg.TLS == "files" && cfg.TLSCert != "" && cfg.TLSKey != "" {
+		if _, err := tls.LoadX509KeyPair(cfg.TLSCert, cfg.TLSKey); err != nil {
+			add("tls key", "FAIL", "certificate and key do not load as a pair: "+err.Error())
+		} else {
+			add("tls key", "ok", "matches the certificate")
+		}
 	}
 
 	// data dir
