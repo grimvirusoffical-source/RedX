@@ -95,6 +95,10 @@ func (h *Host) hostedRoute(w http.ResponseWriter, r *http.Request) {
 		h.hostedPutSecret(w, r, parts[1], parts[3])
 	case len(parts) == 4 && parts[2] == "secrets" && r.Method == http.MethodDelete:
 		h.hostedDelSecret(w, r, parts[1], parts[3])
+	case len(parts) == 3 && parts[2] == "logs" && r.Method == http.MethodGet:
+		h.hostedLogs(w, r, parts[1], false)
+	case len(parts) == 4 && parts[2] == "logs" && parts[3] == "download" && r.Method == http.MethodGet:
+		h.hostedLogs(w, r, parts[1], true)
 	case len(parts) == 3 && parts[2] == "usage" && r.Method == http.MethodGet:
 		h.hostedUsage(w, r, parts[1])
 	case len(parts) == 3 && parts[2] == "health" && r.Method == http.MethodGet:

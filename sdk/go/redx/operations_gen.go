@@ -116,6 +116,8 @@ var Operations = map[string]Operation{
 	"listHostedSecrets":     {ID: "listHostedSecrets", Group: "hosted", Method: "GET", Path: "/v1/hosted/apps/{id}/secrets", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Secret names. Values are always masked and never returned."},
 	"putHostedSecret":       {ID: "putHostedSecret", Group: "hosted", Method: "PUT", Path: "/v1/hosted/apps/{id}/secrets/{name}", Shorthand: "", Auth: "key", Danger: DangerWrite, Response: "json", Request: "json", HostConfirm: "", Summary: "Set a secret. The value is encrypted at rest and the response shows only a mask."},
 	"deleteHostedSecret":    {ID: "deleteHostedSecret", Group: "hosted", Method: "DELETE", Path: "/v1/hosted/apps/{id}/secrets/{name}", Shorthand: "", Auth: "key", Danger: DangerWrite, Response: "json", Request: "", HostConfirm: "", Summary: "Delete a secret."},
+	"getHostedLogs":         {ID: "getHostedLogs", Group: "hosted", Method: "GET", Path: "/v1/hosted/apps/{id}/logs", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Runtime or access logs. q searches retained lines. stream=1 is a live tail, capped at 15 seconds, and is not opened by the console until asked."},
+	"downloadHostedLogs":    {ID: "downloadHostedLogs", Group: "hosted", Method: "GET", Path: "/v1/hosted/apps/{id}/logs/download", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "text", Request: "", HostConfirm: "", Summary: "Download runtime or access logs as text. Retention follows the plan."},
 	"getHostedUsage":        {ID: "getHostedUsage", Group: "hosted", Method: "GET", Path: "/v1/hosted/apps/{id}/usage", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Disk used by one app and the tier limits that apply."},
 	"getHostedHealth":       {ID: "getHostedHealth", Group: "hosted", Method: "GET", Path: "/v1/hosted/apps/{id}/health", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Probe the current release. A failed direct deploy is rolled back to the previous release."},
 	"hostedTLSAsk":          {ID: "hostedTLSAsk", Group: "hosted", Method: "GET", Path: "/v1/hosted/tls/ask", Shorthand: "", Auth: "none", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Caddy on-demand TLS ask. 200 only for a verified app domain, and only from loopback or with X-RedX-Caddy-Ask."},
@@ -919,6 +921,22 @@ func (c *Client) PutHostedSecret(ctx context.Context, id string, name string, a 
 func (c *Client) DeleteHostedSecret(ctx context.Context, id string, name string, a Args) (*Result, error) {
 	a.Params = withParams(a.Params, map[string]string{"id": id, "name": name})
 	return c.Call(ctx, "deleteHostedSecret", a)
+}
+
+// GetHostedLogs: Runtime or access logs. q searches retained lines. stream=1 is a live tail, capped at 15 seconds, and is not opened by the console until asked.
+//
+// GET /v1/hosted/apps/{id}/logs, auth key, danger safe.
+func (c *Client) GetHostedLogs(ctx context.Context, id string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"id": id})
+	return c.Call(ctx, "getHostedLogs", a)
+}
+
+// DownloadHostedLogs: Download runtime or access logs as text. Retention follows the plan.
+//
+// GET /v1/hosted/apps/{id}/logs/download, auth key, danger safe.
+func (c *Client) DownloadHostedLogs(ctx context.Context, id string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"id": id})
+	return c.Call(ctx, "downloadHostedLogs", a)
 }
 
 // GetHostedUsage: Disk used by one app and the tier limits that apply.

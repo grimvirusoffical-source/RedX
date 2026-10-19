@@ -41,6 +41,8 @@ func cmdApp(args []string) {
 		appEnv(rest)
 	case "secret":
 		appSecret(rest)
+	case "logs":
+		appLogs(rest)
 	case "caddy":
 		appCaddy(rest)
 	default:
