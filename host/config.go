@@ -93,8 +93,12 @@ type Config struct {
 	// never stored in the config. Env REDX_GITHUB_WEBHOOK_SECRET overrides the file.
 	GithubWebhookSecretFile string `toml:"github_webhook_secret_file"`
 	// GithubRepo is owner/name used when publishing a release (env REDX_GITHUB_REPO, token REDX_GITHUB_TOKEN).
+	// It must also appear in GithubRepos, mapped to the app being published.
 	GithubRepo string `toml:"github_repo"`
-	// HostedApps are store slugs this host is allowed to serve as source "host".
+	// GithubRepos is owner/repo=app. A webhook is accepted only when the repository is listed,
+	// and the app id is the mapped value, not the repository name.
+	GithubRepos []string `toml:"github_repos"`
+	// HostedApps are store slugs this host is allowed to publish and serve as source "host".
 	HostedApps []string `toml:"hosted_apps"`
 
 	ConfigFile string `toml:"-"`
@@ -181,6 +185,7 @@ func (c *Config) RegisterFlags(fs *flag.FlagSet) {
 	fs.StringVar(&c.GithubWebhookSecretFile, "github-webhook-secret-file", c.GithubWebhookSecretFile, "path to the GitHub webhook HMAC secret (mode 0600)")
 	fs.StringVar(&c.GithubRepo, "github-repo", c.GithubRepo, "owner/name used when publishing a GitHub release")
 	fs.Var((*csv)(&c.HostedApps), "hosted-apps", "comma separated app ids hosted on this Red-XAI host")
+	fs.Var((*csv)(&c.GithubRepos), "github-repos", "comma separated owner/repo=app allowlist for update publish and webhooks")
 }
 
 type csv []string
@@ -277,6 +282,9 @@ func (c *Config) ApplyEnv(get func(string) string) error {
 	}
 	if v := get("REDX_HOSTED_APPS"); v != "" {
 		_ = (*csv)(&c.HostedApps).Set(v)
+	}
+	if v := get("REDX_GITHUB_REPOS"); v != "" {
+		_ = (*csv)(&c.GithubRepos).Set(v)
 	}
 	if v := get("REDX_KEYSTORE_ENCRYPT"); v != "" {
 		b, err := strconv.ParseBool(v)
@@ -386,6 +394,11 @@ func (c *Config) Validate() error {
 	if c.ArgonTime == 0 {
 		c.ArgonTime = 2
 	}
+	for _, e := range c.GithubRepos {
+		if _, _, ok := parseRepoAllow(e); !ok {
+			return fmt.Errorf("github_repos entry %q must be owner/repo=app", e)
+		}
+	}
 	return c.validateAccounts()
 }
 
@@ -408,7 +421,7 @@ func LoadConfig(args []string, getenv func(string) string, fs *flag.FlagSet) (Co
 	cf := pre.String("config", "", "")
 	pf := pre.String("preset", "", "")
 	ddFlag := pre.String("data-dir", "", "")
-	for _, n := range []string{"listen", "node-id", "role", "peers", "advertise", "tls", "tls-cert", "tls-key", "default-db", "master-key-file", "code-allowed-boxes", "log-level", "bootstrap", "join", "update-signing-key-file", "github-webhook-secret-file", "github-repo", "hosted-apps"} {
+	for _, n := range []string{"listen", "node-id", "role", "peers", "advertise", "tls", "tls-cert", "tls-key", "default-db", "master-key-file", "code-allowed-boxes", "log-level", "bootstrap", "join", "update-signing-key-file", "github-webhook-secret-file", "github-repo", "github-repos", "hosted-apps"} {
 		pre.String(n, "", "")
 	}
 	pre.Bool("keystore-encrypt", false, "")

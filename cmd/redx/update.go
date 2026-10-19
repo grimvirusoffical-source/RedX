@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"strings"
 	"text/tabwriter"
+
+	"redx/host"
 )
 
 func cmdUpdate(args []string) {
@@ -16,6 +19,7 @@ func cmdUpdate(args []string) {
 	version := fs.String("version", "", "manifest version to apply")
 	source := fs.String("source", "", "host or github")
 	canary := fs.Int("canary", -1, "canary percent; sets the strategy to canary")
+	yes := fs.Bool("yes", false, "apply, promote, roll back or restore without prompting")
 	fs.Usage = func() {
 		fmt.Fprint(fs.Output(), `redx update — host updates
 
@@ -45,17 +49,17 @@ func cmdUpdate(args []string) {
 		if len(pos) < 2 {
 			die("update apply needs an app")
 		}
-		updateApply(&g, pos[1], *version, *source, *canary)
+		updateApply(&g, pos[1], *version, *source, *canary, *yes)
 	case "promote":
 		if len(pos) != 2 {
 			die("update promote needs a rollout id")
 		}
-		updatePromote(&g, pos[1])
+		updatePromote(&g, pos[1], *yes)
 	case "rollback":
 		if len(pos) != 2 {
 			die("update rollback needs a rollout id")
 		}
-		updateRollback(&g, pos[1])
+		updateRollback(&g, pos[1], *yes)
 	case "snapshots":
 		if len(pos) != 2 {
 			die("update snapshots needs an app")
@@ -65,7 +69,7 @@ func cmdUpdate(args []string) {
 		if len(pos) != 3 {
 			die("update restore needs an app and a snapshot id")
 		}
-		updateRestore(&g, pos[1], pos[2])
+		updateRestore(&g, pos[1], pos[2], *yes)
 	case "source":
 		if len(pos) != 3 {
 			die("update source needs an app and host|github|both")
@@ -78,7 +82,7 @@ func cmdUpdate(args []string) {
 	}
 }
 
-func updateCall(g *globals, method, path string, in, out interface{}) {
+func updateCall(g *globals, method, path string, in, out interface{}, extra map[string]string) {
 	c, cancel := ctx()
 	defer cancel()
 	var body []byte
@@ -89,6 +93,9 @@ func updateCall(g *globals, method, path string, in, out interface{}) {
 	}
 	if id := updateConfirm(method, path); id != "" {
 		hdr["X-RedX-Confirm"] = id
+	}
+	for k, v := range extra {
+		hdr[k] = v
 	}
 	st, _, b, err := g.client().Raw(c, method, path, body, hdr)
 	if err != nil {
@@ -102,6 +109,41 @@ func updateCall(g *globals, method, path string, in, out interface{}) {
 			die("%v", err)
 		}
 	}
+}
+
+func confirmUpdate(g *globals, yes bool, method, path, prompt string, in interface{}) string {
+	plan := map[string]interface{}{}
+	if in != nil {
+		b, _ := json.Marshal(in)
+		_ = json.Unmarshal(b, &plan)
+	}
+	plan["plan"] = true
+	var issued struct {
+		Confirm string `json:"confirm"`
+		Version string `json:"version"`
+		App     string `json:"app"`
+	}
+	updateCall(g, method, path, plan, &issued, nil)
+	if issued.Confirm == "" {
+		die("server did not issue a confirmation")
+	}
+	if !yes {
+		if !stdinIsTerm() {
+			die("refusing %s without --yes", prompt)
+		}
+		fmt.Fprintf(os.Stderr, "%s? [y/N] ", prompt)
+		line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+		line = strings.TrimSpace(strings.ToLower(line))
+		if line != "y" && line != "yes" {
+			die("cancelled")
+		}
+	}
+	return issued.Confirm
+}
+
+func stdinIsTerm() bool {
+	fi, err := os.Stdin.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
 
 func updateConfirm(method, path string) string {
@@ -188,7 +230,7 @@ func updateStatus(g *globals, pos []string) {
 	}
 	if len(pos) == 1 {
 		var doc updateStatusDoc
-		updateCall(g, "GET", "/v1/updates/apps/"+pos[0], nil, &doc)
+		updateCall(g, "GET", "/v1/updates/apps/"+pos[0], nil, &doc, nil)
 		if g.asJSON {
 			updatePrint(g, doc)
 			return
@@ -199,7 +241,7 @@ func updateStatus(g *globals, pos []string) {
 	var doc struct {
 		Apps []updateStatusDoc `json:"apps"`
 	}
-	updateCall(g, "GET", "/v1/updates/apps", nil, &doc)
+	updateCall(g, "GET", "/v1/updates/apps", nil, &doc, nil)
 	if g.asJSON {
 		updatePrint(g, doc)
 		return
@@ -236,7 +278,7 @@ func updateCheck(g *globals) {
 	var doc struct {
 		Apps []updateStatusDoc `json:"apps"`
 	}
-	updateCall(g, "GET", "/v1/updates/apps", nil, &doc)
+	updateCall(g, "GET", "/v1/updates/apps", nil, &doc, nil)
 	if g.asJSON {
 		updatePrint(g, doc)
 		return
@@ -260,10 +302,10 @@ func updateCheck(g *globals) {
 	}
 }
 
-func updateApply(g *globals, app, version, source string, canary int) {
+func updateApply(g *globals, app, version, source string, canary int, yes bool) {
 	if version == "" || source == "" {
 		var doc updateStatusDoc
-		updateCall(g, "GET", "/v1/updates/apps/"+app, nil, &doc)
+		updateCall(g, "GET", "/v1/updates/apps/"+app, nil, &doc, nil)
 		if source == "" {
 			if doc.Hosted && doc.SourcePref != "github" && doc.Latest.Host != nil {
 				source = "host"
@@ -301,7 +343,8 @@ func updateApply(g *globals, app, version, source string, canary int) {
 		RolloutID  string `json:"rollout_id"`
 		SnapshotID string `json:"snapshot_id"`
 	}
-	updateCall(g, "POST", "/v1/updates/apps/"+app+"/apply", body, &out)
+	tok := confirmUpdate(g, yes, "POST", "/v1/updates/apps/"+app+"/apply", "apply "+version+" to "+app, body)
+	updateCall(g, "POST", "/v1/updates/apps/"+app+"/apply", body, &out, map[string]string{host.UpdateConfirmHeader: tok})
 	if g.asJSON {
 		updatePrint(g, out)
 		return
@@ -309,9 +352,11 @@ func updateApply(g *globals, app, version, source string, canary int) {
 	fmt.Printf("rollout %s\nsnapshot %s\n", out.RolloutID, out.SnapshotID)
 }
 
-func updatePromote(g *globals, id string) {
+func updatePromote(g *globals, id string, yes bool) {
 	var out map[string]interface{}
-	updateCall(g, "POST", "/v1/updates/rollouts/"+id+"/promote", map[string]interface{}{}, &out)
+	body := map[string]interface{}{}
+	tok := confirmUpdate(g, yes, "POST", "/v1/updates/rollouts/"+id+"/promote", "promote "+id, body)
+	updateCall(g, "POST", "/v1/updates/rollouts/"+id+"/promote", body, &out, map[string]string{host.UpdateConfirmHeader: tok})
 	if g.asJSON {
 		updatePrint(g, out)
 		return
@@ -319,9 +364,11 @@ func updatePromote(g *globals, id string) {
 	fmt.Printf("%s %v\n", id, out["state"])
 }
 
-func updateRollback(g *globals, id string) {
+func updateRollback(g *globals, id string, yes bool) {
 	var out map[string]interface{}
-	updateCall(g, "POST", "/v1/updates/rollouts/"+id+"/rollback", map[string]string{"reason": "cli"}, &out)
+	body := map[string]string{"reason": "cli"}
+	tok := confirmUpdate(g, yes, "POST", "/v1/updates/rollouts/"+id+"/rollback", "roll back "+id, body)
+	updateCall(g, "POST", "/v1/updates/rollouts/"+id+"/rollback", body, &out, map[string]string{host.UpdateConfirmHeader: tok})
 	if g.asJSON {
 		updatePrint(g, out)
 		return
@@ -338,7 +385,7 @@ func updateSnapshots(g *globals, app string) {
 			SHA256  string `json:"sha256"`
 		} `json:"snapshots"`
 	}
-	updateCall(g, "GET", "/v1/updates/apps/"+app+"/snapshots", nil, &out)
+	updateCall(g, "GET", "/v1/updates/apps/"+app+"/snapshots", nil, &out, nil)
 	if g.asJSON {
 		updatePrint(g, out)
 		return
@@ -355,9 +402,11 @@ func updateSnapshots(g *globals, app string) {
 	tw.Flush()
 }
 
-func updateRestore(g *globals, app, snap string) {
+func updateRestore(g *globals, app, snap string, yes bool) {
 	var out map[string]interface{}
-	updateCall(g, "POST", "/v1/updates/apps/"+app+"/rollback", map[string]string{"snapshot_id": snap}, &out)
+	body := map[string]string{"snapshot_id": snap}
+	tok := confirmUpdate(g, yes, "POST", "/v1/updates/apps/"+app+"/rollback", "restore "+snap+" on "+app, body)
+	updateCall(g, "POST", "/v1/updates/apps/"+app+"/rollback", body, &out, map[string]string{host.UpdateConfirmHeader: tok})
 	if g.asJSON {
 		updatePrint(g, out)
 		return
@@ -367,7 +416,7 @@ func updateRestore(g *globals, app, snap string) {
 
 func updateSource(g *globals, app, source string) {
 	var out map[string]interface{}
-	updateCall(g, "PUT", "/v1/updates/apps/"+app+"/source", map[string]string{"source": source}, &out)
+	updateCall(g, "PUT", "/v1/updates/apps/"+app+"/source", map[string]string{"source": source}, &out, nil)
 	if g.asJSON {
 		updatePrint(g, out)
 		return

@@ -35,6 +35,30 @@ func errCode(t *testing.T, body string) string {
 	return e.Error.Code
 }
 
+func hostUpdate(c *host.Config) {
+	c.HostedApps = []string{"redx", "widget"}
+	c.GithubRepos = []string{"acme/widget=widget", "acme/redx=redx"}
+}
+
+func withPermit(t *testing.T, n *node, key, method, path, body string) (int, string) {
+	t.Helper()
+	m := map[string]interface{}{}
+	if strings.TrimSpace(body) != "" && json.Unmarshal([]byte(body), &m) != nil {
+		t.Fatalf("permit body: %s", body)
+	}
+	m["plan"] = true
+	pb, _ := json.Marshal(m)
+	st, resp, _ := do(t, method, n.URL+path, key, string(pb), "Content-Type", "application/json")
+	if st != 200 {
+		return st, resp
+	}
+	tok, _ := jsonOf(t, resp)["confirm"].(string)
+	delete(m, "plan")
+	b, _ := json.Marshal(m)
+	st, resp, _ = do(t, method, n.URL+path, key, string(b), "Content-Type", "application/json", host.UpdateConfirmHeader, tok)
+	return st, resp
+}
+
 func publishHost(t *testing.T, n *node, app, ver, notes string, tags []string) {
 	t.Helper()
 	if tags == nil {
@@ -49,7 +73,7 @@ func publishHost(t *testing.T, n *node, app, ver, notes string, tags []string) {
 		}},
 	}
 	b, _ := json.Marshal(req)
-	st, body, _ := do(t, "POST", n.URL+"/v1/updates/apps/"+app+"/publish", n.Key, string(b), "Content-Type", "application/json")
+	st, body := withPermit(t, n, n.Key, "POST", "/v1/updates/apps/"+app+"/publish", string(b))
 	if st != 201 {
 		t.Fatalf("publish %s %s: %d %s", app, ver, st, body)
 	}
@@ -62,7 +86,7 @@ func applyUpdate(t *testing.T, n *node, app, ver, source, strategy string, canar
 		req["canary"] = canary
 	}
 	b, _ := json.Marshal(req)
-	st, body, _ := do(t, "POST", n.URL+"/v1/updates/apps/"+app+"/apply", n.Key, string(b), "Content-Type", "application/json")
+	st, body := withPermit(t, n, n.Key, "POST", "/v1/updates/apps/"+app+"/apply", string(b))
 	if st != 202 {
 		return st, map[string]interface{}{"raw": body}
 	}
@@ -141,9 +165,11 @@ func TestUpdateAuthDenials(t *testing.T) {
 			t.Fatalf("read unauth %s: %d %s", p, st, body)
 		}
 	}
-	st, body, _ := do(t, "GET", n.URL+"/v1/updates/apps/redx", readKey, "")
-	if st != 200 {
-		t.Fatalf("read key status %d %s", st, body)
+	for _, p := range reads {
+		st, body, _ := do(t, "GET", n.URL+p, readKey, "")
+		if st != 403 || errCode(t, body) != "forbidden" {
+			t.Fatalf("read key %s: %d %s", p, st, body)
+		}
 	}
 }
 
@@ -175,7 +201,7 @@ func TestUpdateNotHostedAndPreferences(t *testing.T) {
 
 func TestUpdatePublishApplyDirectAndSequence(t *testing.T) {
 	dir := t.TempDir()
-	n := startNode(t, dir, nil)
+	n := startNode(t, dir, func(c *host.Config, _ string) { hostUpdate(c) })
 	publishHost(t, n, "redx", "1.0.0", "First", []string{"+stability"})
 	publishHost(t, n, "redx", "1.0.1", "Second security fix", []string{"+security"})
 
@@ -290,7 +316,7 @@ func TestUpdatePublishApplyDirectAndSequence(t *testing.T) {
 
 func TestUpdateTamperedManifestRefused(t *testing.T) {
 	dir := t.TempDir()
-	n := startNode(t, dir, nil)
+	n := startNode(t, dir, func(c *host.Config, _ string) { hostUpdate(c) })
 	key := n.Key
 	publishHost(t, n, "redx", "1.2.0", "Tamper me", nil)
 	n.Stop()
@@ -332,8 +358,11 @@ func TestUpdateTamperedManifestRefused(t *testing.T) {
 }
 
 func TestUpdateCanaryRollbackMidway(t *testing.T) {
-	n := startNode(t, t.TempDir(), nil)
-	path := "/v1/path/app.red-xai.db:Cfg.V"
+	n := startNode(t, t.TempDir(), func(c *host.Config, _ string) { hostUpdate(c) })
+	path := "/v1/db/redx/path/app.red-xai.db:Cfg.V"
+	if st, body, _ := do(t, "POST", n.URL+"/v1/dbs", n.Key, `{"name":"redx"}`, "Content-Type", "application/json"); st != 201 && st != 409 {
+		t.Fatalf("create app db %d %s", st, body)
+	}
 	if st, body, _ := do(t, "PUT", n.URL+path, n.Key, `"before"`); st != 200 {
 		t.Fatalf("put before %d %s", st, body)
 	}
@@ -357,6 +386,10 @@ func TestUpdateCanaryRollbackMidway(t *testing.T) {
 	if st, body, _ := do(t, "PUT", n.URL+path, n.Key, `"after"`); st != 200 {
 		t.Fatalf("put after %d %s", st, body)
 	}
+	other := "/v1/path/app.red-xai.db:Other.V"
+	if st, body, _ := do(t, "PUT", n.URL+other, n.Key, `"kept"`); st != 200 {
+		t.Fatalf("put other %d %s", st, body)
+	}
 	st, body, _ = do(t, "POST", n.URL+"/v1/updates/apps/redx/apply", n.Key, `{"version":"2.0.0","source":"host","strategy":"direct"}`, "Content-Type", "application/json")
 	if st != 409 || errCode(t, body) != "rollout_conflict" {
 		t.Fatalf("second apply %d %s", st, body)
@@ -365,13 +398,17 @@ func TestUpdateCanaryRollbackMidway(t *testing.T) {
 	if st != 409 || errCode(t, body) != "rollout_conflict" {
 		t.Fatalf("early promote %d %s", st, body)
 	}
-	st, body, _ = do(t, "POST", n.URL+"/v1/updates/rollouts/"+id+"/rollback", n.Key, `{"reason":"mid-canary"}`, "Content-Type", "application/json")
+	st, body = withPermit(t, n, n.Key, "POST", "/v1/updates/rollouts/"+id+"/rollback", `{"reason":"mid-canary"}`)
 	if st != 200 || !strings.Contains(body, `"state":"rolled_back"`) {
 		t.Fatalf("rollback %d %s", st, body)
 	}
 	st, body, _ = do(t, "GET", n.URL+path, n.Key, "")
 	if st != 200 || !strings.Contains(body, "before") || strings.Contains(body, "after") {
-		t.Fatalf("restored value %d %s", st, body)
+		t.Fatalf("restored app value %d %s", st, body)
+	}
+	st, body, _ = do(t, "GET", n.URL+other, n.Key, "")
+	if st != 200 || !strings.Contains(body, "kept") {
+		t.Fatalf("unrelated write must survive rollback %d %s", st, body)
 	}
 	st, body, _ = do(t, "GET", n.URL+"/v1/updates/apps/redx", n.Key, "")
 	if st != 200 {
@@ -383,7 +420,7 @@ func TestUpdateCanaryRollbackMidway(t *testing.T) {
 }
 
 func TestUpdatePromoteBlueGreenHealthAndSnapshotFail(t *testing.T) {
-	n := startNode(t, t.TempDir(), nil)
+	n := startNode(t, t.TempDir(), func(c *host.Config, _ string) { hostUpdate(c) })
 	publishHost(t, n, "redx", "3.0.0", "Blue", nil)
 	host.SetUpdateMembers(n.H, []string{"n1", "n2", "n3", "n4"})
 	st, applied := applyUpdate(t, n, "redx", "3.0.0", "host", "blue_green", nil)
@@ -399,7 +436,7 @@ func TestUpdatePromoteBlueGreenHealthAndSnapshotFail(t *testing.T) {
 	if prog["updated"].(float64) != 2 || prog["total"].(float64) != 4 {
 		t.Fatalf("blue progress %s", body)
 	}
-	st, body, _ = do(t, "POST", n.URL+"/v1/updates/rollouts/"+id+"/promote", n.Key, `{}`, "Content-Type", "application/json")
+	st, body = withPermit(t, n, n.Key, "POST", "/v1/updates/rollouts/"+id+"/promote", `{}`)
 	if st != 200 || !strings.Contains(body, `"state":"done"`) {
 		t.Fatalf("promote %d %s", st, body)
 	}
@@ -418,8 +455,8 @@ func TestUpdatePromoteBlueGreenHealthAndSnapshotFail(t *testing.T) {
 
 	publishHost(t, n, "redx", "3.0.2", "Snap", nil)
 	host.SetUpdateSnapshotFail(n.H, true)
-	st, body, _ = do(t, "POST", n.URL+"/v1/updates/apps/redx/apply", n.Key,
-		`{"version":"3.0.2","source":"host","strategy":"direct"}`, "Content-Type", "application/json")
+	st, body = withPermit(t, n, n.Key, "POST", "/v1/updates/apps/redx/apply",
+		`{"version":"3.0.2","source":"host","strategy":"direct"}`)
 	if st != 409 || errCode(t, body) != "snapshot_failed" {
 		t.Fatalf("snap fail %d %s", st, body)
 	}
@@ -432,12 +469,32 @@ func TestUpdatePromoteBlueGreenHealthAndSnapshotFail(t *testing.T) {
 
 func TestUpdateOwnerGates(t *testing.T) {
 	f, iss := startFake(t)
-	n := startAcctNode(t, iss)
+	n := startNode(t, t.TempDir(), func(c *host.Config, u string) {
+		hostUpdate(c)
+		c.AccountsIssuer = iss
+		c.AccountsClientSecret = "test-client-secret"
+		c.AccountsEventsPoll = 3600
+		c.OwnerEmails = []string{ownerA, ownerB}
+	})
 	if !n.H.AccountsEnabled() {
 		t.Fatal("accounts should be on")
 	}
-	publishHost(t, n, "redx", "4.0.0", "Owner", nil)
-	st, body, _ := do(t, "POST", n.URL+"/v1/updates/apps/redx/apply", n.Key, `{"version":"4.0.0","source":"host","strategy":"direct"}`, "Content-Type", "application/json")
+	tok, acct := signIn(t, n, f, ownerOK)
+	if acct["owner"] != true {
+		t.Fatalf("owner sign-in: %v", acct)
+	}
+	pub, _ := json.Marshal(map[string]interface{}{
+		"version": "4.0.0", "channel": "stable", "notes_md": "Owner", "outcome_tags": []string{"+security"},
+		"targets": []string{"host"},
+		"artifacts": []map[string]string{{
+			"filename": "redx-4.0.0-linux-amd64.tar.gz", "os": "linux", "arch": "amd64", "kind": "tar.gz",
+		}},
+	})
+	st, body := withPermit(t, n, tok, "POST", "/v1/updates/apps/redx/publish", string(pub))
+	if st != 201 {
+		t.Fatalf("owner publish %d %s", st, body)
+	}
+	st, body, _ = do(t, "POST", n.URL+"/v1/updates/apps/redx/apply", n.Key, `{"version":"4.0.0","source":"host","strategy":"direct"}`, "Content-Type", "application/json")
 	if st != 403 || !strings.Contains(body, "only an owner login can do this on this host") {
 		t.Fatalf("non-owner apply %d %s", st, body)
 	}
@@ -454,11 +511,7 @@ func TestUpdateOwnerGates(t *testing.T) {
 	if st != 200 {
 		t.Fatalf("source while accounts on %d %s", st, body)
 	}
-	tok, acct := signIn(t, n, f, ownerOK)
-	if acct["owner"] != true {
-		t.Fatalf("owner sign-in: %v", acct)
-	}
-	st, body, _ = do(t, "POST", n.URL+"/v1/updates/apps/redx/apply", tok, `{"version":"4.0.0","source":"host","strategy":"direct"}`, "Content-Type", "application/json")
+	st, body = withPermit(t, n, tok, "POST", "/v1/updates/apps/redx/apply", `{"version":"4.0.0","source":"host","strategy":"direct"}`)
 	if st != 202 {
 		t.Fatalf("owner apply %d %s", st, body)
 	}
@@ -509,6 +562,7 @@ func TestUpdateGitHubWebhookAndEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	n := startNode(t, dir, func(c *host.Config, _ string) {
+		hostUpdate(c)
 		c.GithubWebhookSecretFile = secretPath
 	})
 	host.SetUpdateAllowLoopback(n.H, true)
@@ -528,7 +582,7 @@ func TestUpdateGitHubWebhookAndEvents(t *testing.T) {
 	mac = hmac.New(sha256.New, []byte(secret))
 	mac.Write(payload)
 	sig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
-	st, body, _ = do(t, "POST", n.URL+"/v1/updates/github/webhook", "", string(payload), "Content-Type", "application/json", "X-Hub-Signature-256", sig, "X-GitHub-Event", "release")
+	st, body, _ = do(t, "POST", n.URL+"/v1/updates/github/webhook", "", string(payload), "Content-Type", "application/json", "X-Hub-Signature-256", sig, "X-GitHub-Event", "release", "X-GitHub-Delivery", "delivery-missing-sums")
 	if st != 400 || errCode(t, body) != "bad_signature" {
 		t.Fatalf("missing sums %d %s", st, body)
 	}
@@ -537,11 +591,12 @@ func TestUpdateGitHubWebhookAndEvents(t *testing.T) {
 	sum := sha256.Sum256(blob)
 	sumHex := hex.EncodeToString(sum[:])
 	sums := sumHex + "  widget-1.4.0-linux-amd64.tar.gz\n"
+	const rel = "/acme/widget/releases/download/v1.4.2/"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/SHA256SUMS":
+		case rel + "SHA256SUMS":
 			_, _ = w.Write([]byte(sums))
-		case "/widget-1.4.0-linux-amd64.tar.gz":
+		case rel + "widget-1.4.0-linux-amd64.tar.gz":
 			_, _ = w.Write(blob)
 		default:
 			http.NotFound(w, r)
@@ -550,7 +605,7 @@ func TestUpdateGitHubWebhookAndEvents(t *testing.T) {
 	defer srv.Close()
 	badSums := strings.Repeat("ab", 32) + "  widget-1.4.0-linux-amd64.tar.gz\n"
 	badSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/SHA256SUMS" {
+		if strings.HasSuffix(r.URL.Path, "/SHA256SUMS") {
 			_, _ = w.Write([]byte(badSums))
 			return
 		}
@@ -558,10 +613,11 @@ func TestUpdateGitHubWebhookAndEvents(t *testing.T) {
 	}))
 	defer badSrv.Close()
 
-	badPayload := []byte(`{"action":"published","repository":{"full_name":"acme/widget"},"release":{"id":8,"tag_name":"v1.4.1","body":"bad","target_commitish":"` + commit + `","assets":[{"name":"SHA256SUMS","browser_download_url":"` + badSrv.URL + `/SHA256SUMS"},{"name":"widget-1.4.0-linux-amd64.tar.gz","browser_download_url":"` + badSrv.URL + `/widget-1.4.0-linux-amd64.tar.gz"}]}}`)
+	badRel := "/acme/widget/releases/download/v1.4.1/"
+	badPayload := []byte(`{"action":"published","repository":{"full_name":"acme/widget"},"release":{"id":8,"tag_name":"v1.4.1","body":"bad","target_commitish":"` + commit + `","assets":[{"name":"SHA256SUMS","browser_download_url":"` + badSrv.URL + badRel + `SHA256SUMS"},{"name":"widget-1.4.0-linux-amd64.tar.gz","browser_download_url":"` + badSrv.URL + badRel + `widget-1.4.0-linux-amd64.tar.gz"}]}}`)
 	mac = hmac.New(sha256.New, []byte(secret))
 	mac.Write(badPayload)
-	st, body, _ = do(t, "POST", n.URL+"/v1/updates/github/webhook", "", string(badPayload), "Content-Type", "application/json", "X-Hub-Signature-256", "sha256="+hex.EncodeToString(mac.Sum(nil)), "X-GitHub-Event", "release")
+	st, body, _ = do(t, "POST", n.URL+"/v1/updates/github/webhook", "", string(badPayload), "Content-Type", "application/json", "X-Hub-Signature-256", "sha256="+hex.EncodeToString(mac.Sum(nil)), "X-GitHub-Event", "release", "X-GitHub-Delivery", "delivery-bad-sums")
 	if st != 400 || errCode(t, body) != "bad_signature" {
 		t.Fatalf("bad sums %d %s", st, body)
 	}
@@ -579,10 +635,10 @@ func TestUpdateGitHubWebhookAndEvents(t *testing.T) {
 	}
 	defer conn.Close()
 
-	goodPayload := []byte(`{"action":"published","repository":{"full_name":"acme/widget"},"release":{"id":9,"tag_name":"v1.4.2","body":"Security fix","target_commitish":"` + commit + `","assets":[{"name":"SHA256SUMS","browser_download_url":"` + srv.URL + `/SHA256SUMS"},{"name":"widget-1.4.0-linux-amd64.tar.gz","browser_download_url":"` + srv.URL + `/widget-1.4.0-linux-amd64.tar.gz"}]}}`)
+	goodPayload := []byte(`{"action":"published","repository":{"full_name":"acme/widget"},"release":{"id":9,"tag_name":"v1.4.2","body":"Security fix","target_commitish":"` + commit + `","assets":[{"name":"SHA256SUMS","browser_download_url":"` + srv.URL + rel + `SHA256SUMS"},{"name":"widget-1.4.0-linux-amd64.tar.gz","browser_download_url":"` + srv.URL + rel + `widget-1.4.0-linux-amd64.tar.gz"}]}}`)
 	mac = hmac.New(sha256.New, []byte(secret))
 	mac.Write(goodPayload)
-	st, body, _ = do(t, "POST", n.URL+"/v1/updates/github/webhook", "", string(goodPayload), "Content-Type", "application/json", "X-Hub-Signature-256", "sha256="+hex.EncodeToString(mac.Sum(nil)), "X-GitHub-Event", "release")
+	st, body, _ = do(t, "POST", n.URL+"/v1/updates/github/webhook", "", string(goodPayload), "Content-Type", "application/json", "X-Hub-Signature-256", "sha256="+hex.EncodeToString(mac.Sum(nil)), "X-GitHub-Event", "release", "X-GitHub-Delivery", "delivery-good")
 	if st != 202 {
 		t.Fatalf("webhook %d %s", st, body)
 	}

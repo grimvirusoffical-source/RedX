@@ -53,15 +53,17 @@ type Host struct {
 
 	upd *updater // host update manifests, rollouts, snapshots
 
-	started time.Time
-	lock    *flock.Flock
-	pause   sync.RWMutex // writes hold RLock; backup/snapshot hold Lock
-	opMu    sync.Mutex   // serialises (apply, log-append) on the leader => log order == apply order
-	reqs    atomic.Uint64
-	authBad atomic.Uint64
-	cancel  context.CancelFunc
-	wg      sync.WaitGroup
-	mux     http.Handler
+	started       time.Time
+	lock          *flock.Flock
+	pause         sync.RWMutex // writes hold RLock; backup/snapshot hold Lock
+	opMu          sync.Mutex   // serialises (apply, log-append) on the leader => log order == apply order
+	reqs          atomic.Uint64
+	authBad       atomic.Uint64
+	metricMu      sync.Mutex
+	metricSamples []reqSample
+	cancel        context.CancelFunc
+	wg            sync.WaitGroup
+	mux           http.Handler
 }
 
 // New opens everything under cfg.DataDir.

@@ -142,6 +142,19 @@ func (r *Registry) List() []string {
 	return out
 }
 
+// CloseOne closes one database and drops the cached handle so the next Get reopens it.
+func (r *Registry) CloseOne(name string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	b := r.open[name]
+	if b == nil {
+		return nil
+	}
+	err := b.Close()
+	delete(r.open, name)
+	return err
+}
+
 // CloseAll closes every open database.
 func (r *Registry) CloseAll() error {
 	r.mu.Lock()

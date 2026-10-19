@@ -53,6 +53,7 @@ default_db = "default"                # database served by /v1/path/...
 # If neither is set, redxd creates <data_dir>/updates/signing.key (mode 0600) on first start.
 # update_signing_key_file = "/etc/redx/update-signing.key"
 # github_webhook_secret_file = "/etc/redx/github-webhook.secret"  # mode 0600; or env REDX_GITHUB_WEBHOOK_SECRET
-# github_repo = "red-xai/redx"            # default repo for POST /v1/updates/.../publish target github
-# hosted_apps = ["redx"]                  # app ids this host may serve as source "host" (or env REDX_HOSTED_APPS)
+# github_repo = "red-xai/redx"            # preferred repo when an app maps to more than one entry below
+# github_repos = ["red-xai/redx=redx"]    # owner/repo=app. Webhooks and artifact URLs are limited to these repos.
+# hosted_apps = ["redx"]                  # only these app ids can be published or served as source "host" (or env REDX_HOSTED_APPS)
 # A GitHub token, when publishing to GitHub, is env REDX_GITHUB_TOKEN only.

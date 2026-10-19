@@ -51,6 +51,10 @@ func viewOf(r KeyRecord, now time.Time) KeyView {
 
 func (h *Host) routes() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capw := &statusCapture{ResponseWriter: w}
+		w = capw
+		started := time.Now()
+		defer func() { h.noteRequest(capw.code, time.Since(started)) }()
 		h.reqs.Add(1)
 		lim := int64(h.Cfg.MaxBodyMB) << 20
 		if r.Method == "PUT" && (strings.Contains(r.URL.Path, "/pack/") || strings.Contains(r.URL.Path, "/media/")) {

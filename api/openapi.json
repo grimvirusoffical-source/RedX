@@ -3303,7 +3303,7 @@
     "tags": [
      "updates"
     ],
-    "x-redx-auth": "key",
+    "x-redx-auth": "host-admin",
     "x-redx-danger": "safe",
     "x-redx-danger-level": 0,
     "x-rottenapple-level": "L1"
@@ -3341,7 +3341,7 @@
     "tags": [
      "updates"
     ],
-    "x-redx-auth": "key",
+    "x-redx-auth": "host-admin",
     "x-redx-danger": "safe",
     "x-redx-danger-level": 0,
     "x-rottenapple-level": "L1"
@@ -3446,7 +3446,7 @@
     "tags": [
      "updates"
     ],
-    "x-redx-auth": "key",
+    "x-redx-auth": "host-admin",
     "x-redx-danger": "safe",
     "x-redx-danger-level": 0,
     "x-rottenapple-level": "L1"
@@ -3499,7 +3499,7 @@
     "tags": [
      "updates"
     ],
-    "x-redx-auth": "key",
+    "x-redx-auth": "host-admin",
     "x-redx-danger": "safe",
     "x-redx-danger-level": 0,
     "x-rottenapple-level": "L1"
@@ -3552,7 +3552,7 @@
     "tags": [
      "updates"
     ],
-    "x-redx-auth": "key",
+    "x-redx-auth": "host-admin",
     "x-redx-danger": "safe",
     "x-redx-danger-level": 0,
     "x-rottenapple-level": "L1"
@@ -3614,7 +3614,7 @@
     "tags": [
      "updates"
     ],
-    "x-redx-auth": "key",
+    "x-redx-auth": "host-admin",
     "x-redx-danger": "safe",
     "x-redx-danger-level": 0,
     "x-rottenapple-level": "L1"
@@ -3735,7 +3735,7 @@
       "$ref": "#/components/responses/Error"
      }
     },
-    "summary": "Sign a host and/or github manifest. A host target marks the app hosted.",
+    "summary": "Sign a host and/or github manifest for an app already in hosted_apps. A github target creates the release.",
     "tags": [
      "updates"
     ],
@@ -3829,7 +3829,7 @@
     "tags": [
      "updates"
     ],
-    "x-redx-auth": "key",
+    "x-redx-auth": "host-admin",
     "x-redx-danger": "safe",
     "x-redx-danger-level": 0,
     "x-rottenapple-level": "L1"
@@ -3903,7 +3903,7 @@
     "tags": [
      "updates"
     ],
-    "x-redx-auth": "key",
+    "x-redx-auth": "host-admin",
     "x-redx-danger": "safe",
     "x-redx-danger-level": 0,
     "x-redx-websocket": true,
@@ -4000,7 +4000,7 @@
     "tags": [
      "updates"
     ],
-    "x-redx-auth": "key",
+    "x-redx-auth": "host-admin",
     "x-redx-danger": "safe",
     "x-redx-danger-level": 0,
     "x-rottenapple-level": "L1"

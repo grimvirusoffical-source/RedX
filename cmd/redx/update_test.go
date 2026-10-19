@@ -17,6 +17,7 @@ func TestUpdateCLI(t *testing.T) {
 	cfg.DataDir = t.TempDir()
 	cfg.ArgonMemKiB, cfg.ArgonTime = 64, 1
 	cfg.LogLevel = "quiet"
+	cfg.HostedApps = []string{"redx"}
 	h, err := host.New(cfg, engineadapter.Opener(engineadapter.Config{SweepMS: 50}), t.Logf)
 	if err != nil {
 		t.Fatal(err)
@@ -25,12 +26,33 @@ func TestUpdateCLI(t *testing.T) {
 	t.Cleanup(func() { srv.Close(); h.Close() })
 	key := h.BootstrapKey
 
-	body := []byte(`{"version":"1.5.0","channel":"stable","notes_md":"CLI release","outcome_tags":["+perf"],"targets":["host"],"artifacts":[{"filename":"redx-1.5.0-linux-amd64.tar.gz","os":"linux","arch":"amd64","kind":"tar.gz"}]}`)
+	body := []byte(`{"version":"1.5.0","channel":"stable","notes_md":"CLI release","outcome_tags":["+perf"],"targets":["host"],"artifacts":[{"filename":"redx-1.5.0-linux-amd64.tar.gz","os":"linux","arch":"amd64","kind":"tar.gz"}],"plan":true}`)
 	req, _ := http.NewRequest("POST", srv.URL+"/v1/updates/apps/redx/publish", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+key)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-RedX-Confirm", "updatePublish")
 	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var planned struct {
+		Confirm string `json:"confirm"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&planned); err != nil {
+		resp.Body.Close()
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 || planned.Confirm == "" {
+		t.Fatalf("plan publish %d", resp.StatusCode)
+	}
+	body = []byte(`{"version":"1.5.0","channel":"stable","notes_md":"CLI release","outcome_tags":["+perf"],"targets":["host"],"artifacts":[{"filename":"redx-1.5.0-linux-amd64.tar.gz","os":"linux","arch":"amd64","kind":"tar.gz"}]}`)
+	req, _ = http.NewRequest("POST", srv.URL+"/v1/updates/apps/redx/publish", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+key)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-RedX-Confirm", "updatePublish")
+	req.Header.Set(host.UpdateConfirmHeader, planned.Confirm)
+	resp, err = http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +69,11 @@ func TestUpdateCLI(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "redx 1.5.0") {
 		t.Fatalf("check %d %q %s", code, out, se)
 	}
-	out, se, code = runCLI(t, srv.URL, key, "update", "apply", "redx", "--version", "1.5.0", "--source", "host")
+	_, se, code = runCLI(t, srv.URL, key, "update", "apply", "redx", "--version", "1.5.0", "--source", "host")
+	if code == 0 || !strings.Contains(se, "--yes") {
+		t.Fatalf("cli must require --yes: %d %s", code, se)
+	}
+	out, se, code = runCLI(t, srv.URL, key, "update", "apply", "redx", "--version", "1.5.0", "--source", "host", "--yes")
 	if code != 0 || !strings.Contains(out, "rollout ") || !strings.Contains(out, "snapshot ") {
 		t.Fatalf("apply %d %q %s", code, out, se)
 	}

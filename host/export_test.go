@@ -34,6 +34,24 @@ func SetUpdateMembers(h *Host, ids []string) {
 func SetUpdateHealth(h *Host, errorRate, p95 float64) {
 	h.upd.mu.Lock()
 	h.upd.health = Health{ErrorRate: errorRate, P95MS: p95}
+	h.upd.healthSet = true
+	h.upd.mu.Unlock()
+}
+
+// ClearUpdateHealth clears the test override so rollouts read the host's own metrics.
+func ClearUpdateHealth(h *Host) {
+	h.upd.mu.Lock()
+	h.upd.healthSet = false
+	h.upd.mu.Unlock()
+}
+
+// ResetUpdateMetrics drops recorded request samples so health is unknown.
+func ResetUpdateMetrics(h *Host) { h.resetRequestMetrics() }
+
+// SetUpdatePermitTTL sets how long a plan confirmation stays valid.
+func SetUpdatePermitTTL(h *Host, d time.Duration) {
+	h.upd.mu.Lock()
+	h.upd.permitTTL = d
 	h.upd.mu.Unlock()
 }
 

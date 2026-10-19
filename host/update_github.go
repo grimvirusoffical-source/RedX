@@ -31,14 +31,16 @@ type publishArtifact struct {
 }
 
 type publishInput struct {
-	Version string
-	Channel string
-	Notes   string
-	Tags    []string
-	Targets []string
-	Arts    []publishArtifact
-	Repo    string
-	BaseURL string
+	Version       string
+	Channel       string
+	Notes         string
+	Tags          []string
+	Targets       []string
+	Arts          []publishArtifact
+	Repo          string
+	BaseURL       string
+	MinFrom       string
+	CreateRelease bool
 }
 
 func (h *Host) updatePublish(w http.ResponseWriter, r *http.Request, app string) {
@@ -50,6 +52,13 @@ func (h *Host) updatePublish(w http.ResponseWriter, r *http.Request, app string)
 	if !ok {
 		return
 	}
+	if !h.refuseHiddenDB(w, r, pr, app) || !h.ownerOnlyOK(w, r, pr) {
+		return
+	}
+	if !h.appAllowlisted(app) {
+		writeUpdateErr(w, http.StatusConflict, "not_hosted", "app is not hosted with Red-XAI")
+		return
+	}
 	var body struct {
 		Version     string            `json:"version"`
 		Channel     string            `json:"channel"`
@@ -57,18 +66,30 @@ func (h *Host) updatePublish(w http.ResponseWriter, r *http.Request, app string)
 		OutcomeTags []string          `json:"outcome_tags"`
 		Targets     []string          `json:"targets"`
 		Artifacts   []publishArtifact `json:"artifacts"`
+		MinFrom     string            `json:"min_from"`
+		Plan        bool              `json:"plan"`
 	}
 	if json.Unmarshal(readBody(r), &body) != nil {
 		writeUpdateErr(w, 400, "invalid", "invalid JSON")
 		return
 	}
-	touchesMaster := h.IsMasterDB(app)
-	if !h.guardUpdateMutation(w, r, pr, app, false, touchesMaster) {
+	if body.Plan {
+		if !validVersion(body.Version) {
+			writeUpdateErr(w, 400, "invalid", "invalid version")
+			return
+		}
+		id, exp := h.upd.issuePermit(updatePermit{Action: "updatePublish", App: app, Version: body.Version})
+		writeJSON(w, 200, map[string]interface{}{"confirm": id, "expires": exp.UTC().Format(time.RFC3339), "action": "updatePublish", "app": app, "version": body.Version})
+		return
+	}
+	if err := h.upd.consumePermit(r.Header.Get(UpdateConfirmHeader), updatePermit{Action: "updatePublish", App: app, Version: body.Version}); err != nil {
+		h.updateFail(w, err)
 		return
 	}
 	urls, err := h.upd.publish(r.Context(), publishInput{
 		Version: body.Version, Channel: body.Channel, Notes: body.NotesMD, Tags: body.OutcomeTags,
-		Targets: body.Targets, Arts: body.Artifacts, BaseURL: h.publicBase(r),
+		Targets: body.Targets, Arts: body.Artifacts, BaseURL: h.publicBase(r), MinFrom: body.MinFrom,
+		CreateRelease: true,
 	}, app)
 	if err != nil {
 		h.auditUpdate(r, pr, "update.publish", "app="+app+" version="+body.Version+" error")
@@ -82,6 +103,9 @@ func (h *Host) updatePublish(w http.ResponseWriter, r *http.Request, app string)
 func (u *updater) publish(ctx context.Context, in publishInput, app string) (map[string]string, error) {
 	if !validAppID(app) || !validVersion(in.Version) {
 		return nil, errString("invalid app or version")
+	}
+	if !u.h.appAllowlisted(app) {
+		return nil, errNotHosted
 	}
 	if in.Channel == "" {
 		in.Channel = "stable"
@@ -111,20 +135,14 @@ func (u *updater) publish(ctx context.Context, in publishInput, app string) (map
 			return nil, errString("targets must be host and/or github")
 		}
 	}
-	repo := in.Repo
-	if repo == "" {
-		repo = os.Getenv("REDX_GITHUB_REPO")
-	}
-	if repo == "" {
-		repo = u.h.Cfg.GithubRepo
-	}
-	u.mu.Lock()
-	if repo == "" && u.st.Apps[app] != nil {
-		repo = u.st.Apps[app].GitHubRepo
-	}
-	u.mu.Unlock()
-	if wantGit && (repo == "" || strings.TrimSpace(os.Getenv("REDX_GITHUB_TOKEN")) == "") {
-		return nil, errString("github repo or token is not configured")
+	repo := u.h.repoForApp(app)
+	if wantGit {
+		if !in.CreateRelease {
+			return nil, errString("creating a github release needs an explicit publish")
+		}
+		if repo == "" || strings.TrimSpace(os.Getenv("REDX_GITHUB_TOKEN")) == "" {
+			return nil, errString("github repo or token is not configured")
+		}
 	}
 	files, arts, err := u.materialize(ctx, app, in.Version, in.Arts, in.BaseURL)
 	if err != nil {
@@ -133,34 +151,36 @@ func (u *updater) publish(ctx context.Context, in publishInput, app string) (map
 	out := map[string]string{}
 	var signed *Manifest
 	if wantHost {
-		m, err := u.signBuilt(app, in, "host", arts, repo, 0, "")
+		m, created, err := u.signBuilt(app, in, "host", arts, repo, 0, "")
 		if err != nil {
 			return nil, err
 		}
 		signed = m
 		out["host"] = manifestURL(in.BaseURL, app, in.Version, "host")
-		u.mu.Lock()
-		u.appLocked(app).Hosted = true
-		_ = u.saveLocked()
-		u.mu.Unlock()
+		if created {
+			u.emit(UpdateEvent{Type: "update.available", App: app, Version: in.Version, Source: "host"})
+			u.emit(UpdateEvent{Type: "update.analysed", App: app, Version: in.Version, Source: "host"})
+			u.maybeAuto(app, in.Version, "host", m.Outcome.Tags, m.Channel)
+		}
 	}
 	if wantGit {
 		id, _, err := u.githubCreateRelease(ctx, repo, in.Version, in.Notes, files)
 		if err != nil {
 			return nil, err
 		}
-		m, err := u.signBuilt(app, in, "github", arts, repo, id, "")
+		m, created, err := u.signBuilt(app, in, "github", arts, repo, id, "")
 		if err != nil {
 			return nil, err
 		}
 		signed = m
 		out["github"] = manifestURL(in.BaseURL, app, in.Version, "github")
+		if created {
+			u.emit(UpdateEvent{Type: "update.available", App: app, Version: in.Version, Source: "github"})
+			u.emit(UpdateEvent{Type: "update.analysed", App: app, Version: in.Version, Source: "github"})
+			u.maybeAuto(app, in.Version, "github", m.Outcome.Tags, m.Channel)
+		}
 	}
-	if signed != nil {
-		u.emit(UpdateEvent{Type: "update.available", App: app, Version: in.Version, Source: signed.Source.Kind})
-		u.emit(UpdateEvent{Type: "update.analysed", App: app, Version: in.Version, Source: signed.Source.Kind})
-		u.maybeAuto(app, in.Version, signed.Source.Kind, signed.Outcome.Tags, signed.Channel)
-	}
+	_ = signed
 	return out, nil
 }
 
@@ -258,7 +278,7 @@ func (u *updater) saveBlob(app, version, source, id string, b []byte) error {
 	return u.saveLocked()
 }
 
-func (u *updater) signBuilt(app string, in publishInput, kind string, arts []Artifact, repo string, releaseID int64, commit string) (*Manifest, error) {
+func (u *updater) signBuilt(app string, in publishInput, kind string, arts []Artifact, repo string, releaseID int64, commit string) (*Manifest, bool, error) {
 	if commit == "" || !validCommit(commit) {
 		commit = zeroCommit
 	}
@@ -283,7 +303,7 @@ func (u *updater) signBuilt(app string, in publishInput, kind string, arts []Art
 		PublishedAt: time.Now().UTC().Format(time.RFC3339),
 		Source:      ManifestSource{Kind: kind},
 		Outcome:     outcomeFromNotes(in.Tags, in.Notes),
-		Requires:    Requires{Restart: true, Migrations: []string{}},
+		Requires:    Requires{MinFrom: in.MinFrom, Restart: true, Migrations: []string{}},
 		Artifacts:   copied,
 	}
 	if kind == "host" {
@@ -291,10 +311,18 @@ func (u *updater) signBuilt(app string, in publishInput, kind string, arts []Art
 	} else {
 		m.Source.GitHub = &GitHubOrigin{Repo: repo, Tag: tag, Commit: commit, ReleaseID: releaseID}
 	}
-	if _, _, err := u.putManifest(m); err != nil {
-		return nil, err
+	_, _, created, err := u.putManifest(m)
+	if err != nil {
+		return nil, false, err
 	}
-	return m, nil
+	if !created {
+		got, _, _, err := u.loadManifest(app, in.Version, kind)
+		if err != nil {
+			return nil, false, err
+		}
+		return got, false, nil
+	}
+	return m, true, nil
 }
 
 func (u *updater) maybeAuto(app, version, source string, tags []string, channel string) {
@@ -344,7 +372,7 @@ func (u *updater) maybeAuto(app, version, source string, tags []string, channel 
 		pct = 10
 		min = 15
 	}
-	_, _, _ = u.apply(applyInput{App: app, Version: version, Source: source, Strategy: strat, Percent: pct, MinMinutes: min})
+	_, _, _ = u.apply(applyInput{App: app, Version: version, Source: source, Strategy: strat, Percent: pct, MinMinutes: min, Internal: true})
 }
 
 func (u *updater) githubAPIBase() string {
@@ -378,7 +406,7 @@ func (u *updater) githubCreateRelease(ctx context.Context, repo, version, notes 
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := u.httpClient().Do(req)
+	resp, err := u.apiClient().Do(req)
 	if err != nil {
 		return 0, "", err
 	}
@@ -415,7 +443,7 @@ func (u *updater) githubUpload(ctx context.Context, token, uploadURL, name strin
 	q := up.Query()
 	q.Set("name", name)
 	up.RawQuery = q.Encode()
-	if err := u.allowFetch(up.String()); err != nil {
+	if err := u.allowAPI(up.String()); err != nil {
 		return err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, up.String(), bytes.NewReader(body))
@@ -424,7 +452,7 @@ func (u *updater) githubUpload(ctx context.Context, token, uploadURL, name strin
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/octet-stream")
-	resp, err := u.httpClient().Do(req)
+	resp, err := u.apiClient().Do(req)
 	if err != nil {
 		return err
 	}
@@ -441,58 +469,91 @@ func (u *updater) httpClient() *http.Client {
 		if len(via) >= 5 {
 			return errors.New("too many redirects")
 		}
-		return u.allowFetch(req.URL.String())
+		return u.allowArtifact(req.URL.String())
 	}}
 }
 
-func (u *updater) allowFetch(raw string) error {
+func (u *updater) apiClient() *http.Client {
+	return &http.Client{Timeout: 60 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 3 {
+			return errors.New("too many redirects")
+		}
+		return u.allowAPI(req.URL.String())
+	}}
+}
+
+// allowArtifact accepts only an allowlisted repo's release download URL.
+// Loopback is accepted only when the test hook is on, and the path must still name that repo.
+func (u *updater) allowArtifact(raw string) error {
 	u.mu.Lock()
 	lb := u.allowLoopback
-	api := u.githubAPI
 	u.mu.Unlock()
 	if os.Getenv("REDX_UPDATE_ALLOW_LOOPBACK") == "1" {
 		lb = true
 	}
 	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") {
+	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return errors.New("refused artifact url")
 	}
-	host := parsed.Hostname()
-	if ip := net.ParseIP(host); ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()) {
-		if lb && ip.IsLoopback() {
-			return nil
-		}
+	if strings.Contains(parsed.Path, "..") || strings.Contains(strings.ToLower(parsed.EscapedPath()), "%2e") {
 		return errors.New("refused artifact url")
 	}
-	if strings.EqualFold(host, "localhost") {
-		if lb {
-			return nil
+	hostName := parsed.Hostname()
+	loop := strings.EqualFold(hostName, "localhost")
+	if ip := net.ParseIP(hostName); ip != nil {
+		if !ip.IsLoopback() {
+			return errors.New("refused artifact url")
 		}
+		loop = true
+	}
+	if loop {
+		if !lb || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return errors.New("refused artifact url")
+		}
+	} else if parsed.Scheme != "https" || !strings.EqualFold(hostName, "github.com") {
 		return errors.New("refused artifact url")
 	}
-	if api != "" {
-		if au, err := url.Parse(api); err == nil && strings.EqualFold(au.Host, parsed.Host) {
-			return nil
-		}
+	owner, repo, ok := releaseOwnerRepo(parsed.Path)
+	if !ok {
+		return errors.New("refused artifact url")
 	}
-	if parsed.Scheme == "https" && githubHost(host) {
-		return nil
+	if _, mapped := u.h.repoApp(owner + "/" + repo); !mapped {
+		return errors.New("refused artifact url")
 	}
-	return errors.New("refused artifact url")
+	return nil
 }
 
-func githubHost(h string) bool {
-	h = strings.ToLower(h)
-	switch h {
-	case "github.com", "api.github.com", "uploads.github.com", "objects.githubusercontent.com",
-		"release-assets.githubusercontent.com", "codeload.github.com":
-		return true
+func releaseOwnerRepo(path string) (string, string, bool) {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) != 6 || parts[2] != "releases" || parts[3] != "download" || parts[4] == "" || parts[5] == "" {
+		return "", "", false
 	}
-	return strings.HasSuffix(h, ".githubusercontent.com") || strings.HasSuffix(h, ".github.com")
+	if strings.Contains(parts[5], "..") || strings.Contains(parts[4], "..") {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
+}
+
+func (u *updater) allowAPI(raw string) error {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" || parsed.User != nil {
+		return errors.New("refused github api url")
+	}
+	base, err := url.Parse(u.githubAPIBase())
+	if err != nil || base.Host == "" {
+		return errors.New("refused github api url")
+	}
+	if strings.EqualFold(parsed.Host, base.Host) && parsed.Scheme == base.Scheme {
+		return nil
+	}
+	if parsed.Scheme == "https" && strings.EqualFold(parsed.Hostname(), "uploads.github.com") && strings.EqualFold(base.Hostname(), "api.github.com") {
+		return nil
+	}
+	return errors.New("refused github api url")
 }
 
 func (u *updater) fetch(ctx context.Context, raw string, limit int64) ([]byte, error) {
-	if err := u.allowFetch(raw); err != nil {
+	if err := u.allowArtifact(raw); err != nil {
 		return nil, err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, raw, nil)
@@ -529,8 +590,19 @@ func (h *Host) updateGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		writeUpdateErr(w, http.StatusUnauthorized, "bad_signature", "bad signature")
 		return
 	}
+	delivery := strings.TrimSpace(r.Header.Get("X-GitHub-Delivery"))
+	if delivery == "" || len(delivery) > 128 || strings.ContainsAny(delivery, " \r\n") {
+		writeUpdateErr(w, 400, "invalid", "missing X-GitHub-Delivery")
+		return
+	}
+	if !h.upd.claimDelivery(delivery) {
+		h.Audit.Log(AuditEvent{Event: "update.webhook", Remote: remoteIP(r), Method: r.Method, Route: routeOf(r), Reason: "replayed delivery"})
+		writeUpdateErr(w, http.StatusConflict, "forbidden", "replayed github delivery")
+		return
+	}
 	var payload gitHook
 	if json.Unmarshal(body, &payload) != nil {
+		h.upd.releaseDelivery(delivery)
 		writeUpdateErr(w, 400, "invalid", "invalid JSON")
 		return
 	}
@@ -545,6 +617,12 @@ func (h *Host) updateGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := h.upd.ingestRelease(r.Context(), h.publicBase(r), payload); err != nil {
+			if errors.Is(err, errSkip) {
+				h.Audit.Log(AuditEvent{Event: "update.webhook", Remote: remoteIP(r), Method: r.Method, Route: routeOf(r), Detail: "skipped " + payload.Action + " " + payload.Release.TagName})
+				writeJSON(w, 202, map[string]interface{}{"ok": true, "skipped": payload.Action})
+				return
+			}
+			h.upd.releaseDelivery(delivery)
 			h.Audit.Log(AuditEvent{Event: "update.webhook", Remote: remoteIP(r), Method: r.Method, Route: routeOf(r), Reason: "rejected"})
 			h.updateFail(w, err)
 			return
@@ -621,13 +699,26 @@ type gitHook struct {
 
 func (u *updater) ingestRelease(ctx context.Context, base string, p gitHook) error {
 	repo := p.Repository.FullName
-	app := appFromRepo(repo)
-	if !validAppID(app) {
-		return errString("cannot derive an app id from the repository")
+	app, ok := u.h.repoApp(repo)
+	if !ok || !validAppID(app) {
+		return errRepo
+	}
+	if !u.h.appAllowlisted(app) {
+		return errNotHosted
 	}
 	ver := strings.TrimPrefix(p.Release.TagName, "v")
 	if !validVersion(ver) {
 		return errString("invalid release version")
+	}
+	u.mu.Lock()
+	installed := u.installedVersionLocked(app)
+	already := u.hasVersionLocked(app, ver)
+	u.mu.Unlock()
+	if p.Action == "edited" && (already || (installed != "" && semverAtMost(ver, installed))) {
+		return errSkip
+	}
+	if already {
+		return errSkip
 	}
 	commit := p.Release.TargetCommitish
 	if !validCommit(commit) {
@@ -725,8 +816,15 @@ func (u *updater) ingestRelease(ctx context.Context, base string, p gitHook) err
 		Requires:  Requires{Restart: true, Migrations: []string{}},
 		Artifacts: arts,
 	}
-	if _, _, err := u.putManifest(m); err != nil {
+	_, _, created, err := u.putManifest(m)
+	if err != nil {
+		if errors.Is(err, errDowngrade) {
+			return errSkip
+		}
 		return err
+	}
+	if !created {
+		return errSkip
 	}
 	u.emit(UpdateEvent{Type: "update.available", App: app, Version: ver, Source: "github"})
 	u.emit(UpdateEvent{Type: "update.analysed", App: app, Version: ver, Source: "github"})
@@ -757,6 +855,68 @@ func parseSHA256SUMS(b []byte) (map[string]string, error) {
 		return nil, errors.New("empty SHA256SUMS")
 	}
 	return out, nil
+}
+
+func semverAtMost(version, ceiling string) bool {
+	cmp, ok := semverCmp(version, ceiling)
+	return ok && cmp <= 0
+}
+
+func (h *Host) appAllowlisted(app string) bool {
+	for _, n := range h.Cfg.HostedApps {
+		if strings.TrimSpace(n) == app {
+			return true
+		}
+	}
+	return false
+}
+
+// repoApp maps an allowlisted owner/repo to its app id. The repository name is not the app id.
+func (h *Host) repoApp(full string) (string, bool) {
+	full = strings.ToLower(strings.TrimSpace(full))
+	for _, e := range h.Cfg.GithubRepos {
+		repo, app, ok := parseRepoAllow(e)
+		if ok && repo == full {
+			return app, true
+		}
+	}
+	return "", false
+}
+
+// repoForApp returns the allowlisted repository that publishes this app.
+func (h *Host) repoForApp(app string) string {
+	want := strings.ToLower(strings.TrimSpace(h.Cfg.GithubRepo))
+	found := ""
+	for _, e := range h.Cfg.GithubRepos {
+		repo, mapped, ok := parseRepoAllow(e)
+		if !ok || mapped != app {
+			continue
+		}
+		if want != "" && repo == want {
+			return repo
+		}
+		if found == "" {
+			found = repo
+		}
+	}
+	return found
+}
+
+func parseRepoAllow(e string) (repo, app string, ok bool) {
+	repo, app, ok = strings.Cut(strings.TrimSpace(e), "=")
+	if !ok {
+		return "", "", false
+	}
+	repo = strings.ToLower(strings.TrimSpace(repo))
+	app = strings.TrimSpace(app)
+	owner, name, split := strings.Cut(repo, "/")
+	if !split || owner == "" || name == "" || strings.Contains(owner, "/") || strings.Contains(name, "/") {
+		return "", "", false
+	}
+	if !validAppID(app) {
+		return "", "", false
+	}
+	return repo, app, true
 }
 
 func appFromRepo(full string) string {

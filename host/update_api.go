@@ -25,8 +25,16 @@ func (h *Host) updateFail(w http.ResponseWriter, err error) {
 		return
 	case errors.Is(err, errNotHosted):
 		writeUpdateErr(w, http.StatusConflict, "not_hosted", "app is not hosted with Red-XAI")
-	case errors.Is(err, errSeq):
+	case errors.Is(err, errSeq), errors.Is(err, errDowngrade):
 		writeUpdateErr(w, http.StatusConflict, "sequence_regression", "sequence regression")
+	case errors.Is(err, errMinFrom):
+		writeUpdateErr(w, http.StatusConflict, "sequence_regression", "installed version is below min_from")
+	case errors.Is(err, errConfirm):
+		writeUpdateErr(w, http.StatusForbidden, "forbidden", "update confirmation required")
+	case errors.Is(err, errRepo):
+		writeUpdateErr(w, http.StatusForbidden, "forbidden", "repository is not allowlisted for this app")
+	case errors.Is(err, errReplay):
+		writeUpdateErr(w, http.StatusConflict, "forbidden", "replayed github delivery")
 	case errors.Is(err, errBadSig):
 		writeUpdateErr(w, http.StatusBadRequest, "bad_signature", "bad signature")
 	case errors.Is(err, errSnap):
@@ -121,8 +129,11 @@ func (h *Host) updateKeys(w http.ResponseWriter, r *http.Request) {
 	}})
 }
 
+// UpdateConfirmHeader carries the single-use plan token. X-RedX-Confirm still names the operation.
+const UpdateConfirmHeader = "X-RedX-Update-Confirm"
+
 func (h *Host) updateEvents(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.updateAuth(w, r, false); !ok {
+	if _, ok := h.updateAuth(w, r, true); !ok {
 		return
 	}
 	ch, cancel := h.upd.subscribe()
@@ -170,7 +181,7 @@ func (h *Host) updateEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Host) updateAppList(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.updateAuth(w, r, false); !ok {
+	if _, ok := h.updateAuth(w, r, true); !ok {
 		return
 	}
 	h.upd.mu.Lock()
@@ -192,7 +203,7 @@ func (h *Host) updateAppRoute(w http.ResponseWriter, r *http.Request, app string
 		return
 	}
 	if len(rest) == 0 && r.Method == http.MethodGet {
-		pr, ok := h.updateAuth(w, r, false)
+		pr, ok := h.updateAuth(w, r, true)
 		if !ok || !h.refuseHiddenDB(w, r, pr, app) {
 			return
 		}
@@ -204,12 +215,19 @@ func (h *Host) updateAppRoute(w http.ResponseWriter, r *http.Request, app string
 		return
 	}
 	switch rest[0] {
+	case "history", "snapshots", "source", "policy", "apply", "rollback", "publish":
+		if len(rest) != 1 {
+			writeUpdateErr(w, http.StatusNotFound, "not_found", "not found")
+			return
+		}
+	}
+	switch rest[0] {
 	case "history":
 		if r.Method != http.MethodGet {
 			writeUpdateErr(w, http.StatusMethodNotAllowed, "not_found", "method not allowed")
 			return
 		}
-		pr, ok := h.updateAuth(w, r, false)
+		pr, ok := h.updateAuth(w, r, true)
 		if !ok || !h.refuseHiddenDB(w, r, pr, app) {
 			return
 		}
@@ -219,7 +237,7 @@ func (h *Host) updateAppRoute(w http.ResponseWriter, r *http.Request, app string
 			writeUpdateErr(w, http.StatusMethodNotAllowed, "not_found", "method not allowed")
 			return
 		}
-		pr, ok := h.updateAuth(w, r, false)
+		pr, ok := h.updateAuth(w, r, true)
 		if !ok || !h.refuseHiddenDB(w, r, pr, app) {
 			return
 		}
@@ -246,7 +264,7 @@ func (h *Host) updateManifestRoute(w http.ResponseWriter, r *http.Request, app s
 		writeUpdateErr(w, http.StatusNotFound, "not_found", "not found")
 		return
 	}
-	pr, ok := h.updateAuth(w, r, false)
+	pr, ok := h.updateAuth(w, r, true)
 	if !ok || !h.refuseHiddenDB(w, r, pr, app) {
 		return
 	}
@@ -291,7 +309,7 @@ func (h *Host) updateManifestRoute(w http.ResponseWriter, r *http.Request, app s
 }
 
 func (h *Host) updateArtifact(w http.ResponseWriter, r *http.Request, app, version, id string) {
-	pr, ok := h.updateAuth(w, r, false)
+	pr, ok := h.updateAuth(w, r, true)
 	if !ok || !h.refuseHiddenDB(w, r, pr, app) {
 		return
 	}
@@ -355,7 +373,7 @@ func (h *Host) updatePolicy(w http.ResponseWriter, r *http.Request, app string) 
 		return
 	}
 	pr, ok := h.updateAuth(w, r, true)
-	if !ok || !h.guardUpdateMutation(w, r, pr, app, false, false) {
+	if !ok || !h.guardUpdateMutation(w, r, pr, app, false, false) || !h.ownerOnlyOK(w, r, pr) {
 		return
 	}
 	var body struct {
@@ -398,6 +416,7 @@ func (h *Host) updateApply(w http.ResponseWriter, r *http.Request, app string) {
 		} `json:"canary"`
 		ScheduleAt *string `json:"schedule_at"`
 		DryRun     bool    `json:"dry_run"`
+		Plan       bool    `json:"plan"`
 	}
 	if json.Unmarshal(readBody(r), &body) != nil {
 		writeUpdateErr(w, 400, "invalid", "invalid JSON")
@@ -407,11 +426,20 @@ func (h *Host) updateApply(w http.ResponseWriter, r *http.Request, app string) {
 	if strategy == "" {
 		strategy = "direct"
 	}
-	topology := strategy == "canary" || strategy == "blue_green"
-	if !h.guardUpdateMutation(w, r, pr, app, topology, true) {
+	if !h.guardUpdateMutation(w, r, pr, app, true, false) {
 		return
 	}
-	in := applyInput{App: app, Version: body.Version, Source: body.Source, Strategy: strategy, DryRun: body.DryRun}
+	in := applyInput{App: app, Version: body.Version, Source: body.Source, Strategy: strategy}
+	if body.Plan || body.DryRun {
+		if _, err := h.upd.prepareApply(in); err != nil {
+			h.updateFail(w, err)
+			return
+		}
+		id, exp := h.upd.issuePermit(updatePermit{Action: "updateApply", App: app, Version: body.Version, Source: body.Source})
+		writeJSON(w, 200, map[string]interface{}{"confirm": id, "expires": exp.UTC().Format(time.RFC3339), "action": "updateApply", "app": app, "version": body.Version})
+		return
+	}
+	in.Permit = r.Header.Get(UpdateConfirmHeader)
 	if body.Canary != nil {
 		in.Percent = body.Canary.Percent
 		in.MinMinutes = body.Canary.MinMinutes
@@ -440,14 +468,29 @@ func (h *Host) updateRestore(w http.ResponseWriter, r *http.Request, app string)
 		return
 	}
 	pr, ok := h.updateAuth(w, r, true)
-	if !ok || !h.guardUpdateMutation(w, r, pr, app, true, true) {
+	if !ok || !h.guardUpdateMutation(w, r, pr, app, true, false) {
 		return
 	}
 	var body struct {
 		SnapshotID string `json:"snapshot_id"`
+		Plan       bool   `json:"plan"`
 	}
 	if json.Unmarshal(readBody(r), &body) != nil || body.SnapshotID == "" {
 		writeUpdateErr(w, 400, "invalid", `body must be {"snapshot_id":"snap_..."}`)
+		return
+	}
+	ver := h.upd.snapshotVersion(app, body.SnapshotID)
+	if ver == "" && !h.upd.snapshotExists(app, body.SnapshotID) {
+		writeUpdateErr(w, http.StatusNotFound, "not_found", "not found")
+		return
+	}
+	if body.Plan {
+		id, exp := h.upd.issuePermit(updatePermit{Action: "updateAppRollback", App: app, Version: ver, SnapshotID: body.SnapshotID})
+		writeJSON(w, 200, map[string]interface{}{"confirm": id, "expires": exp.UTC().Format(time.RFC3339), "action": "updateAppRollback", "app": app, "version": ver})
+		return
+	}
+	if err := h.upd.consumePermit(r.Header.Get(UpdateConfirmHeader), updatePermit{Action: "updateAppRollback", App: app, Version: ver, SnapshotID: body.SnapshotID}); err != nil {
+		h.updateFail(w, err)
 		return
 	}
 	if err := h.upd.restoreApp(app, body.SnapshotID, "restore"); err != nil {
@@ -462,7 +505,12 @@ func (h *Host) updateRestore(w http.ResponseWriter, r *http.Request, app string)
 
 func (h *Host) updateRolloutRoute(w http.ResponseWriter, r *http.Request, id string, rest []string) {
 	if len(rest) == 0 && r.Method == http.MethodGet {
-		if _, ok := h.updateAuth(w, r, false); !ok {
+		pr, ok := h.updateAuth(w, r, true)
+		if !ok {
+			return
+		}
+		app := h.upd.rolloutApp(id)
+		if app != "" && !h.refuseHiddenDB(w, r, pr, app) {
 			return
 		}
 		view, err := h.upd.rolloutView(id)
@@ -482,6 +530,10 @@ func (h *Host) updateRolloutRoute(w http.ResponseWriter, r *http.Request, id str
 		return
 	}
 	app := h.upd.rolloutApp(id)
+	var planBody struct {
+		Plan bool `json:"plan"`
+	}
+	_ = json.Unmarshal(readBody(r), &planBody)
 	switch rest[0] {
 	case "promote":
 		if r.Method != http.MethodPost {
@@ -489,6 +541,29 @@ func (h *Host) updateRolloutRoute(w http.ResponseWriter, r *http.Request, id str
 			return
 		}
 		if !h.guardUpdateMutation(w, r, pr, app, true, false) {
+			return
+		}
+		ver := h.upd.rolloutVersion(id)
+		if planBody.Plan {
+			if app == "" {
+				writeUpdateErr(w, http.StatusNotFound, "not_found", "not found")
+				return
+			}
+			pid, exp := h.upd.issuePermit(updatePermit{Action: "updatePromote", App: app, Version: ver, RolloutID: id})
+			writeJSON(w, 200, map[string]interface{}{"confirm": pid, "expires": exp.UTC().Format(time.RFC3339), "action": "updatePromote", "app": app, "version": ver})
+			return
+		}
+		if err := h.upd.consumePermit(r.Header.Get(UpdateConfirmHeader), updatePermit{Action: "updatePromote", App: app, Version: ver, RolloutID: id}); err != nil {
+			// A missing rollout is not found, even when the token is also missing.
+			if app == "" {
+				writeUpdateErr(w, http.StatusNotFound, "not_found", "not found")
+				return
+			}
+			if err2 := h.upd.promotePreflight(id); err2 != nil {
+				h.updateFail(w, err2)
+				return
+			}
+			h.updateFail(w, err)
 			return
 		}
 		if err := h.upd.promote(id); err != nil {
@@ -504,17 +579,29 @@ func (h *Host) updateRolloutRoute(w http.ResponseWriter, r *http.Request, id str
 			writeUpdateErr(w, http.StatusMethodNotAllowed, "not_found", "method not allowed")
 			return
 		}
-		if !h.guardUpdateMutation(w, r, pr, app, true, true) {
+		if !h.guardUpdateMutation(w, r, pr, app, true, false) {
 			return
 		}
-		var body struct {
-			Reason string `json:"reason"`
+		ver := h.upd.rolloutVersion(id)
+		if planBody.Plan {
+			if app == "" {
+				writeUpdateErr(w, http.StatusNotFound, "not_found", "not found")
+				return
+			}
+			pid, exp := h.upd.issuePermit(updatePermit{Action: "updateRolloutRollback", App: app, Version: ver, RolloutID: id})
+			writeJSON(w, 200, map[string]interface{}{"confirm": pid, "expires": exp.UTC().Format(time.RFC3339), "action": "updateRolloutRollback", "app": app, "version": ver})
+			return
 		}
-		_ = json.Unmarshal(readBody(r), &body)
-		if body.Reason == "" {
-			body.Reason = "rollback"
+		if err := h.upd.consumePermit(r.Header.Get(UpdateConfirmHeader), updatePermit{Action: "updateRolloutRollback", App: app, Version: ver, RolloutID: id}); err != nil {
+			if app == "" {
+				writeUpdateErr(w, http.StatusNotFound, "not_found", "not found")
+				return
+			}
+			h.updateFail(w, err)
+			return
 		}
-		if err := h.upd.rollbackRollout(id, body.Reason); err != nil {
+		reason := "rollback"
+		if err := h.upd.rollbackRollout(id, reason); err != nil {
 			h.auditUpdate(r, pr, "update.rollback", "rollout="+id+" error")
 			h.updateFail(w, err)
 			return

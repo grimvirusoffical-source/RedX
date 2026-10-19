@@ -103,12 +103,33 @@ type historyItem struct {
 }
 
 type diskState struct {
-	Apps      map[string]*appState       `json:"apps"`
-	Manifests map[string]*storedManifest `json:"manifests"` // app|version|source
-	Snaps     map[string]*snapMeta       `json:"snapshots"`
-	Rollouts  map[string]*rollout        `json:"rollouts"`
-	History   []historyItem              `json:"history"`
-	Blobs     map[string]string          `json:"blobs"` // app|version|source|id -> relative path
+	Apps       map[string]*appState       `json:"apps"`
+	Manifests  map[string]*storedManifest `json:"manifests"` // app|version|source
+	Snaps      map[string]*snapMeta       `json:"snapshots"`
+	Rollouts   map[string]*rollout        `json:"rollouts"`
+	History    []historyItem              `json:"history"`
+	Blobs      map[string]string          `json:"blobs"`                // app|version|source|id -> relative path
+	Deliveries map[string]int64           `json:"deliveries,omitempty"` // X-GitHub-Delivery -> unix nano
+}
+
+// updatePermit is a single-use confirmation issued by a plan or dry-run call.
+type updatePermit struct {
+	Action     string
+	App        string
+	Version    string
+	Source     string
+	SnapshotID string
+	RolloutID  string
+	Expires    time.Time
+}
+
+// healthView is what a rollout reports. Rates are nil when status is unknown.
+type healthView struct {
+	Status    string   `json:"status"`
+	ErrorRate *float64 `json:"error_rate"`
+	P95MS     *float64 `json:"p95_ms"`
+	LiveNodes int      `json:"live_nodes,omitempty"`
+	Nodes     int      `json:"nodes,omitempty"`
 }
 
 type updater struct {
@@ -123,9 +144,12 @@ type updater struct {
 
 	members       []string
 	health        Health
+	healthSet     bool
 	snapFail      bool
 	githubAPI     string
 	allowLoopback bool
+	permits       map[string]updatePermit
+	permitTTL     time.Duration
 	subs          map[int]chan UpdateEvent
 	subN          int
 }
@@ -157,7 +181,7 @@ func openUpdater(h *Host) (*updater, error) {
 			Snaps: map[string]*snapMeta{}, Rollouts: map[string]*rollout{},
 			Blobs: map[string]string{},
 		},
-		subs: map[int]chan UpdateEvent{},
+		subs: map[int]chan UpdateEvent{}, permits: map[string]updatePermit{},
 	}
 	if b, err := os.ReadFile(filepath.Join(dir, "state.json")); err == nil && len(b) > 0 {
 		if err := json.Unmarshal(b, &u.st); err != nil {
@@ -178,6 +202,9 @@ func openUpdater(h *Host) (*updater, error) {
 	}
 	if u.st.Blobs == nil {
 		u.st.Blobs = map[string]string{}
+	}
+	if u.st.Deliveries == nil {
+		u.st.Deliveries = map[string]int64{}
 	}
 	changed := false
 	for _, ro := range u.st.Rollouts {
@@ -417,58 +444,221 @@ func (u *updater) subscribe() (<-chan UpdateEvent, func()) {
 	}
 }
 
-func (u *updater) putManifest(m *Manifest) (body []byte, sig string, err error) {
+// putManifest signs a manifest. Sequence is bound to (app, version): the same version
+// keeps the sequence it was first signed with, and a new version is accepted only when
+// it is strictly newer (semver) than every version already signed. created is false when
+// this source already had an immutable manifest.
+func (u *updater) putManifest(m *Manifest) (body []byte, sig string, created bool, err error) {
 	if m.Schema == "" {
 		m.Schema = updateManifestSchema
 	}
 	if m.Schema != updateManifestSchema {
-		return nil, "", errors.New("unknown manifest schema")
+		return nil, "", false, errors.New("unknown manifest schema")
 	}
 	if !validAppID(m.App) || !validVersion(m.Version) {
-		return nil, "", errors.New("invalid app or version")
+		return nil, "", false, errors.New("invalid app or version")
+	}
+	if _, ok := parseSemver(m.Version); !ok {
+		return nil, "", false, errors.New("version must be semver")
 	}
 	switch m.Channel {
 	case "stable", "beta", "security":
 	default:
-		return nil, "", errors.New("channel must be stable, beta or security")
+		return nil, "", false, errors.New("channel must be stable, beta or security")
 	}
 	switch m.Source.Kind {
 	case "host", "github":
 	default:
-		return nil, "", errors.New("source.kind must be host or github")
+		return nil, "", false, errors.New("source.kind must be host or github")
 	}
 	if err := validateOutcomeTags(m.Outcome.Tags); err != nil {
-		return nil, "", err
+		return nil, "", false, err
 	}
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	a := u.appLocked(m.App)
-	if m.Sequence == 0 {
-		m.Sequence = a.LastSeq + 1
+	key := manifestKey(m.App, m.Version, m.Source.Kind)
+	if sm := u.st.Manifests[key]; sm != nil {
+		return sm.Body, sm.Sig, false, nil
 	}
-	if err := checkSequence(a.LastSeq, m.Sequence); err != nil {
-		return nil, "", errSeq
+	if seq, ok := u.seqForVersionLocked(m.App, m.Version); ok {
+		m.Sequence = seq
+	} else {
+		if err := u.newerThanAllLocked(m.App, m.Version); err != nil {
+			return nil, "", false, err
+		}
+		m.Sequence = a.LastSeq + 1
+		if m.Sequence < 1 {
+			m.Sequence = 1
+		}
+		a.LastSeq = m.Sequence
 	}
 	body, err = marshalManifest(m)
 	if err != nil {
-		return nil, "", err
+		return nil, "", false, err
 	}
 	sig = signManifestBytes(u.priv, body)
-	u.st.Manifests[manifestKey(m.App, m.Version, m.Source.Kind)] = &storedManifest{Body: body, Sig: sig}
-	if m.Sequence > a.LastSeq {
-		a.LastSeq = m.Sequence
-	}
-	if m.Source.Kind == "github" && m.Source.GitHub != nil && m.Source.GitHub.Repo != "" {
-		a.GitHubRepo = m.Source.GitHub.Repo
-	}
+	u.st.Manifests[key] = &storedManifest{Body: body, Sig: sig}
 	u.addHistoryLocked(historyItem{Kind: "publish", At: time.Now().UTC(), App: m.App, Version: m.Version, Source: m.Source.Kind, Sequence: m.Sequence, Outcome: &m.Outcome})
 	if err := u.saveLocked(); err != nil {
-		return nil, "", err
+		return nil, "", false, err
 	}
-	return body, sig, nil
+	return body, sig, true, nil
 }
 
-var errSeq = errors.New("sequence regression")
+func (u *updater) seqForVersionLocked(app, version string) (int64, bool) {
+	for key, sm := range u.st.Manifests {
+		if sm == nil || !strings.HasPrefix(key, app+"|"+version+"|") {
+			continue
+		}
+		var m Manifest
+		if json.Unmarshal(sm.Body, &m) != nil || m.Version != version {
+			continue
+		}
+		if m.Sequence > 0 {
+			return m.Sequence, true
+		}
+	}
+	return 0, false
+}
+
+func (u *updater) newerThanAllLocked(app, version string) error {
+	for key, sm := range u.st.Manifests {
+		if sm == nil || !strings.HasPrefix(key, app+"|") {
+			continue
+		}
+		var m Manifest
+		if json.Unmarshal(sm.Body, &m) != nil || m.App != app {
+			continue
+		}
+		cmp, ok := semverCmp(version, m.Version)
+		if !ok || cmp <= 0 {
+			return errDowngrade
+		}
+	}
+	return nil
+}
+
+func (u *updater) installedVersionLocked(app string) string {
+	a := u.st.Apps[app]
+	if a == nil {
+		return ""
+	}
+	return a.Nodes[u.h.NodeID].Version
+}
+
+func (u *updater) hasVersionLocked(app, version string) bool {
+	_, ok := u.seqForVersionLocked(app, version)
+	return ok
+}
+
+var (
+	errSeq       = errors.New("sequence regression")
+	errDowngrade = errors.New("version is lower than one already signed")
+	errMinFrom   = errors.New("installed version is below min_from")
+	errConfirm   = errors.New("update confirmation required")
+	errSkip      = errors.New("skipped")
+	errRepo      = errors.New("repository is not allowlisted for this app")
+	errReplay    = errors.New("replayed github delivery")
+)
+
+const updatePermitTTL = 2 * time.Minute
+
+func (u *updater) issuePermit(p updatePermit) (string, time.Time) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.permits == nil {
+		u.permits = map[string]updatePermit{}
+	}
+	now := time.Now()
+	for id, cur := range u.permits {
+		if now.After(cur.Expires) {
+			delete(u.permits, id)
+		}
+	}
+	ttl := u.permitTTL
+	if ttl <= 0 {
+		ttl = updatePermitTTL
+	}
+	p.Expires = now.Add(ttl)
+	id := newUpdateID("uc_")
+	u.permits[id] = p
+	return id, p.Expires
+}
+
+func (u *updater) consumePermit(id string, want updatePermit) error {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	p, ok := u.permits[id]
+	if !ok || time.Now().After(p.Expires) {
+		delete(u.permits, id)
+		return errConfirm
+	}
+	if p.Action != want.Action || p.App != want.App || p.Version != want.Version {
+		return errConfirm
+	}
+	if p.Source != "" && want.Source != "" && p.Source != want.Source {
+		return errConfirm
+	}
+	if p.SnapshotID != "" && p.SnapshotID != want.SnapshotID {
+		return errConfirm
+	}
+	if p.RolloutID != "" && p.RolloutID != want.RolloutID {
+		return errConfirm
+	}
+	delete(u.permits, id)
+	return nil
+}
+
+func (u *updater) claimDelivery(id string) bool {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.st.Deliveries == nil {
+		u.st.Deliveries = map[string]int64{}
+	}
+	if _, ok := u.st.Deliveries[id]; ok {
+		return false
+	}
+	now := time.Now().UnixNano()
+	u.st.Deliveries[id] = now
+	if len(u.st.Deliveries) > 2048 {
+		var oldest string
+		var when int64
+		for k, v := range u.st.Deliveries {
+			if oldest == "" || v < when {
+				oldest, when = k, v
+			}
+		}
+		delete(u.st.Deliveries, oldest)
+	}
+	_ = u.saveLocked()
+	return true
+}
+
+func (u *updater) releaseDelivery(id string) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	delete(u.st.Deliveries, id)
+	_ = u.saveLocked()
+}
+
+func (u *updater) measureHealth() healthView {
+	u.mu.Lock()
+	forced := u.healthSet
+	h := u.health
+	u.mu.Unlock()
+	if forced {
+		view := healthView{Status: "ok", ErrorRate: &h.ErrorRate, P95MS: &h.P95MS}
+		if h.ErrorRate > updateMaxErrorRate || h.P95MS > updateMaxP95MS {
+			view.Status = "bad"
+		}
+		return view
+	}
+	if u.h == nil {
+		return healthView{Status: "unknown"}
+	}
+	return u.h.liveHealth()
+}
 
 func (u *updater) nextSequence(app string) int64 {
 	u.mu.Lock()

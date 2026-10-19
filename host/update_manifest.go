@@ -216,6 +216,83 @@ func checkSequence(last, next int64) error {
 	return nil
 }
 
+// semver is major.minor.patch with an optional leading v and an optional pre-release.
+// A release (no pre-release) is newer than the same numbers with a pre-release.
+type semver struct {
+	major, minor, patch int
+	pre                 string
+}
+
+func parseSemver(s string) (semver, bool) {
+	s = strings.TrimPrefix(strings.TrimPrefix(s, "v"), "V")
+	pre := ""
+	if i := strings.IndexAny(s, "-+"); i >= 0 {
+		if s[i] == '-' {
+			pre = s[i+1:]
+			if j := strings.Index(pre, "+"); j >= 0 {
+				pre = pre[:j]
+			}
+		}
+		s = s[:i]
+	}
+	parts := strings.Split(s, ".")
+	if len(parts) == 0 || len(parts) > 3 {
+		return semver{}, false
+	}
+	nums := [3]int{}
+	for i, p := range parts {
+		if p == "" {
+			return semver{}, false
+		}
+		n, err := strconv.Atoi(p)
+		if err != nil || n < 0 {
+			return semver{}, false
+		}
+		nums[i] = n
+	}
+	return semver{major: nums[0], minor: nums[1], patch: nums[2], pre: pre}, true
+}
+
+// semverCmp returns -1, 0, 1. A version that is not semver does not compare.
+func semverCmp(a, b string) (int, bool) {
+	av, aok := parseSemver(a)
+	bv, bok := parseSemver(b)
+	if !aok || !bok {
+		return 0, false
+	}
+	if av.major != bv.major {
+		return cmpInt(av.major, bv.major), true
+	}
+	if av.minor != bv.minor {
+		return cmpInt(av.minor, bv.minor), true
+	}
+	if av.patch != bv.patch {
+		return cmpInt(av.patch, bv.patch), true
+	}
+	switch {
+	case av.pre == bv.pre:
+		return 0, true
+	case av.pre == "":
+		return 1, true
+	case bv.pre == "":
+		return -1, true
+	case av.pre < bv.pre:
+		return -1, true
+	default:
+		return 1, true
+	}
+}
+
+func cmpInt(a, b int) int {
+	if a < b {
+		return -1
+	}
+	if a > b {
+		return 1
+	}
+	return 0
+}
+
 // parseOutcomeTag accepts "+security" or "-breaking".
 func parseOutcomeTag(s string) error {
 	if len(s) < 2 || (s[0] != '+' && s[0] != '-') {

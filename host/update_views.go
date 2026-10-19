@@ -41,14 +41,28 @@ func (u *updater) status(app string) map[string]interface{} {
 	}
 	byVer := map[string]*availDTO{}
 	var hostLatest, gitLatest *verRef
-	var hostSeq, gitSeq int64
+	installedVer := ""
+	if a != nil {
+		if nv, ok := a.Nodes[u.h.NodeID]; ok {
+			installedVer = nv.Version
+		}
+	}
 	for key, sm := range u.st.Manifests {
 		if sm == nil || len(key) < len(app)+1 || key[:len(app)+1] != app+"|" {
+			continue
+		}
+		if u.verify(sm.Body, sm.Sig) != nil {
 			continue
 		}
 		var m Manifest
 		if json.Unmarshal(sm.Body, &m) != nil || m.App != app {
 			continue
+		}
+		if installedVer != "" {
+			cmp, ok := semverCmp(m.Version, installedVer)
+			if !ok || cmp < 0 {
+				continue
+			}
 		}
 		row := byVer[m.Version]
 		if row == nil {
@@ -62,13 +76,11 @@ func (u *updater) status(app string) map[string]interface{} {
 			row.Channel = m.Channel
 		}
 		ref := verRef{Version: m.Version, Sequence: m.Sequence}
-		if m.Source.Kind == "host" && m.Sequence >= hostSeq {
-			hostSeq = m.Sequence
+		if m.Source.Kind == "host" && newerRef(ref, hostLatest) {
 			cp := ref
 			hostLatest = &cp
 		}
-		if m.Source.Kind == "github" && m.Sequence >= gitSeq {
-			gitSeq = m.Sequence
+		if m.Source.Kind == "github" && newerRef(ref, gitLatest) {
 			cp := ref
 			gitLatest = &cp
 		}
@@ -79,10 +91,11 @@ func (u *updater) status(app string) map[string]interface{} {
 		avail = append(avail, *row)
 	}
 	sort.Slice(avail, func(i, j int) bool {
-		if avail[i].seq == avail[j].seq {
-			return avail[i].Version < avail[j].Version
+		cmp, ok := semverCmp(avail[i].Version, avail[j].Version)
+		if ok && cmp != 0 {
+			return cmp > 0
 		}
-		return avail[i].seq > avail[j].seq
+		return avail[i].Version < avail[j].Version
 	})
 	// drop the unexported seq from JSON by re-marshalling through a public struct
 	pub := make([]struct {
@@ -218,11 +231,22 @@ func (u *updater) rolloutApp(id string) string {
 	return ""
 }
 
+func newerRef(next verRef, cur *verRef) bool {
+	if cur == nil {
+		return true
+	}
+	cmp, ok := semverCmp(next.Version, cur.Version)
+	if !ok {
+		return next.Sequence > cur.Sequence
+	}
+	return cmp > 0
+}
+
 func (u *updater) rolloutView(id string) (map[string]interface{}, error) {
 	u.mu.Lock()
-	defer u.mu.Unlock()
 	ro := u.st.Rollouts[id]
 	if ro == nil {
+		u.mu.Unlock()
 		return nil, os.ErrNotExist
 	}
 	pct := 0.0
@@ -232,13 +256,32 @@ func (u *updater) rolloutView(id string) (map[string]interface{}, error) {
 	if ro.State == "done" {
 		pct = 100
 	}
-	return map[string]interface{}{
+	view := map[string]interface{}{
 		"rollout_id": ro.ID, "app": ro.App, "version": ro.Version, "source": ro.Source,
 		"state": ro.State, "snapshot_id": ro.SnapshotID,
 		"strategy": ro.Effective,
 		"progress": map[string]interface{}{"updated": len(ro.Updated), "total": ro.Total, "percent": pct},
-		"health":   u.health,
-	}, nil
+	}
+	u.mu.Unlock()
+	view["health"] = u.measureHealth()
+	return view, nil
+}
+
+func (u *updater) snapshotVersion(app, id string) string {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	s := u.st.Snaps[id]
+	if s == nil || s.App != app {
+		return ""
+	}
+	return s.Version
+}
+
+func (u *updater) snapshotExists(app, id string) bool {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	s := u.st.Snaps[id]
+	return s != nil && s.App == app
 }
 
 func (u *updater) restoreApp(app, snapID, reason string) error {

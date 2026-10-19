@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
-	"strconv"
 	"time"
 )
 
@@ -20,6 +18,8 @@ type applyInput struct {
 	MinMinutes int
 	ScheduleAt *time.Time
 	DryRun     bool
+	Internal   bool
+	Permit     string
 }
 
 func newUpdateID(prefix string) string {
@@ -75,12 +75,14 @@ func (u *updater) apply(in applyInput) (roID, snapID string, err error) {
 	cur := a.Nodes[u.h.NodeID]
 	u.mu.Unlock()
 
-	m, _, _, err := u.loadManifest(in.App, in.Version, in.Source)
+	m, err := u.preflightApply(in, cur)
 	if err != nil {
 		return "", "", err
 	}
-	if err := checkSequence(cur.Sequence, m.Sequence); err != nil && cur.Sequence > 0 {
-		return "", "", errSeq
+	if !in.Internal {
+		if err := u.consumePermit(in.Permit, updatePermit{Action: "updateApply", App: in.App, Version: in.Version, Source: in.Source}); err != nil {
+			return "", "", err
+		}
 	}
 
 	u.mu.Lock()
@@ -148,42 +150,60 @@ var (
 	errSnap            = errors.New("snapshot failed")
 )
 
-func (u *updater) takeSnapshot(app, version string) (*snapMeta, error) {
-	u.mu.Lock()
-	fail := u.snapFail
-	u.mu.Unlock()
-	if fail {
-		return nil, errors.New("snapshot failed")
-	}
-	path, off, err := u.h.buildSnapshot()
+func (u *updater) preflightApply(in applyInput, cur nodeVer) (*Manifest, error) {
+	m, _, _, err := u.loadManifest(in.App, in.Version, in.Source)
 	if err != nil {
 		return nil, err
 	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		os.Remove(path)
-		return nil, err
+	if _, ok := parseSemver(m.Version); !ok {
+		return nil, errors.New("version must be semver")
 	}
-	id := newUpdateID("snap_")
-	dest := filepath.Join(u.dir, "snapshots")
-	if err := os.MkdirAll(dest, 0o700); err != nil {
-		os.Remove(path)
-		return nil, err
-	}
-	final := filepath.Join(dest, id+".tgz")
-	if err := os.Rename(path, final); err != nil {
-		if werr := os.WriteFile(final, b, 0o600); werr != nil {
-			os.Remove(path)
-			return nil, err
+	if cur.Version != "" {
+		cmp, ok := semverCmp(m.Version, cur.Version)
+		if !ok || cmp < 0 {
+			return nil, errDowngrade
 		}
-		os.Remove(path)
 	}
-	meta := &snapMeta{ID: id, App: app, Version: version, CreatedAt: time.Now().UTC(), Size: int64(len(b)), SHA256: sha256Hex(b), Offset: off, Path: final}
+	if m.Requires.MinFrom != "" {
+		if cur.Version == "" {
+			return nil, errMinFrom
+		}
+		cmp, ok := semverCmp(cur.Version, m.Requires.MinFrom)
+		if !ok || cmp < 0 {
+			return nil, errMinFrom
+		}
+	}
+	if err := checkSequence(cur.Sequence, m.Sequence); err != nil && cur.Sequence > 0 {
+		return nil, errSeq
+	}
+	return m, nil
+}
+
+// prepareApply is the read-only check a plan or dry-run uses. It does not snapshot or install.
+func (u *updater) prepareApply(in applyInput) (*Manifest, error) {
+	if !validVersion(in.Version) {
+		return nil, errors.New("invalid version")
+	}
+	if in.Source != "host" && in.Source != "github" {
+		return nil, errors.New("source must be host or github")
+	}
 	u.mu.Lock()
-	u.st.Snaps[id] = meta
-	_ = u.saveLocked()
+	a := u.appLocked(in.App)
+	hosted := a.Hosted
+	pref := u.sourcePref(a)
+	conflict := u.activeRollout(in.App) != nil
+	cur := a.Nodes[u.h.NodeID]
 	u.mu.Unlock()
-	return meta, nil
+	if in.Source == "host" && !hosted {
+		return nil, errNotHosted
+	}
+	if pref == "github" && in.Source == "host" {
+		return nil, errNotHosted
+	}
+	if conflict {
+		return nil, errRolloutConflict
+	}
+	return u.preflightApply(in, cur)
 }
 
 func (u *updater) advanceLocked(ro *rollout, members []string, m *Manifest) {
@@ -229,16 +249,39 @@ func (u *updater) maybeAutoRollback(id string) {
 		u.mu.Unlock()
 		return
 	}
-	h := u.health
-	bad := h.ErrorRate > updateMaxErrorRate || h.P95MS > updateMaxP95MS
 	u.mu.Unlock()
-	if !bad {
+	if u.measureHealth().Status != "bad" {
 		return
 	}
 	_ = u.rollbackRollout(id, "health threshold")
 }
 
 var errHealth = errors.New("health threshold")
+
+func (u *updater) rolloutVersion(id string) string {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if ro := u.st.Rollouts[id]; ro != nil {
+		return ro.Version
+	}
+	return ""
+}
+
+func (u *updater) promotePreflight(id string) error {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	ro := u.st.Rollouts[id]
+	if ro == nil {
+		return os.ErrNotExist
+	}
+	if ro.State != "canary" {
+		return fmt.Errorf("rollout is %s", ro.State)
+	}
+	if ro.MinMinutes > 0 && !ro.CanarySince.IsZero() && time.Since(ro.CanarySince) < time.Duration(ro.MinMinutes)*time.Minute {
+		return errRolloutConflict
+	}
+	return nil
+}
 
 func (u *updater) promote(id string) error {
 	members := u.membersOf()
@@ -257,12 +300,12 @@ func (u *updater) promote(id string) error {
 		u.mu.Unlock()
 		return errRolloutConflict
 	}
-	h := u.health
-	if h.ErrorRate > updateMaxErrorRate || h.P95MS > updateMaxP95MS {
-		u.mu.Unlock()
+	u.mu.Unlock()
+	if u.measureHealth().Status == "bad" {
 		_ = u.rollbackRollout(id, "health threshold")
 		return errHealth
 	}
+	u.mu.Lock()
 	ro.State = "promoting"
 	a := u.appLocked(ro.App)
 	nv := nodeVer{Version: ro.Version, Sequence: ro.TargetSeq, Source: ro.Source}
@@ -313,22 +356,23 @@ func (u *updater) restoreSnap(id, reason, rolloutID string) error {
 		u.mu.Unlock()
 		return os.ErrNotExist
 	}
-	path, off, app, captured := meta.Path, meta.Offset, meta.App, meta.Version
-	var prev map[string]nodeVer
-	if rolloutID != "" {
-		if ro := u.st.Rollouts[rolloutID]; ro != nil {
-			prev = cloneNodes(ro.PrevNodes)
-		}
-	}
+	path, sum, app, captured := meta.Path, meta.SHA256, meta.App, meta.Version
 	u.mu.Unlock()
-	if err := u.h.installUpdateSnapshot(path, off); err != nil {
+	doc, err := u.installAppSnap(path, sum, app)
+	if err != nil {
 		return errSnap
 	}
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	a := u.appLocked(app)
-	if prev != nil {
-		a.Nodes = prev
+	if doc != nil && doc.Nodes != nil {
+		a.Nodes = doc.Nodes
+		if doc.SourcePref != "" {
+			a.SourcePref = doc.SourcePref
+		}
+		if doc.Policy.AutoApply != "" {
+			a.Policy = doc.Policy
+		}
 	}
 	if rolloutID != "" {
 		if ro := u.st.Rollouts[rolloutID]; ro != nil {
@@ -343,12 +387,12 @@ func (u *updater) restoreSnap(id, reason, rolloutID string) error {
 		if ro.App == app && (ro.State == "canary" || ro.State == "promoting" || ro.State == "scheduled" || ro.State == "snapshotting") {
 			ro.State = "rolled_back"
 			ro.Reason = reason
-			if ro.PrevNodes != nil {
+			if ro.PrevNodes != nil && (doc == nil || doc.Nodes == nil) {
 				a.Nodes = cloneNodes(ro.PrevNodes)
 			}
 		}
 	}
-	if rolloutID == "" && prev == nil {
+	if rolloutID == "" && (doc == nil || doc.Nodes == nil) {
 		if captured == "" {
 			a.Nodes = map[string]nodeVer{}
 		} else {
@@ -409,54 +453,6 @@ func (u *updater) emitHealth(id string) {
 	ev := UpdateEvent{Type: "rollout.health", App: ro.App, Version: ro.Version, Source: ro.Source, RolloutID: id, State: ro.State}
 	u.mu.Unlock()
 	u.emit(ev)
-}
-
-// installUpdateSnapshot unpacks a snapshot taken by buildSnapshot and swaps it
-// in with the same pause / rename / key-replace path the cluster uses.
-func (h *Host) installUpdateSnapshot(path string, offset uint64) error {
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	tmp, err := os.MkdirTemp(h.Cfg.DataDir, ".upd-snap-")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(tmp)
-	sc, err := ExtractSnapshot(f, filepath.Join(tmp, "dbs"))
-	if err != nil {
-		return err
-	}
-	h.pause.Lock()
-	defer h.pause.Unlock()
-	if err := h.Reg.CloseAll(); err != nil {
-		h.Logf("update snapshot: closing dbs: %v", err)
-	}
-	old := h.Reg.Root() + ".old-" + strconv.FormatInt(time.Now().UnixNano(), 36)
-	if err := os.Rename(h.Reg.Root(), old); err != nil {
-		return err
-	}
-	if err := os.Rename(filepath.Join(tmp, "dbs"), h.Reg.Root()); err != nil {
-		_ = os.Rename(old, h.Reg.Root())
-		return err
-	}
-	_ = os.RemoveAll(old)
-	if err := h.KS.ReplaceAll(sc.Keys); err != nil {
-		return err
-	}
-	if sc.TTL != nil {
-		cdir := filepath.Join(h.Cfg.DataDir, "cluster")
-		_ = os.MkdirAll(cdir, 0o700)
-		_ = os.WriteFile(filepath.Join(cdir, "ttl.json"), sc.TTL, 0o600)
-	}
-	h.Tracker.Reload()
-	if h.Cluster != nil && h.Cluster.log != nil {
-		if err := h.Cluster.log.Reset(offset); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (u *updater) startScheduled(id string) {

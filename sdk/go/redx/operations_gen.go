@@ -78,22 +78,22 @@ var Operations = map[string]Operation{
 	"connectApps":           {ID: "connectApps", Group: "connect", Method: "GET", Path: "/v1/connect/apps", Shorthand: "", Auth: "host-admin", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Connected apps."},
 	"connectRevokeApp":      {ID: "connectRevokeApp", Group: "connect", Method: "DELETE", Path: "/v1/connect/apps/{id}", Shorthand: "", Auth: "host-admin", Danger: DangerDangerous, Response: "json", Request: "", HostConfirm: "", Summary: "Revoke a connected app's key."},
 	"updateKeys":            {ID: "updateKeys", Group: "updates", Method: "GET", Path: "/v1/updates/keys", Shorthand: "", Auth: "none", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Ed25519 public keys that sign update manifests."},
-	"listUpdateApps":        {ID: "listUpdateApps", Group: "updates", Method: "GET", Path: "/v1/updates/apps", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Update status of every app this host knows."},
-	"updateApp":             {ID: "updateApp", Group: "updates", Method: "GET", Path: "/v1/updates/apps/{app}", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Installed version, hosted flag, source preference and available manifests."},
-	"updateManifest":        {ID: "updateManifest", Group: "updates", Method: "GET", Path: "/v1/updates/apps/{app}/manifests/{version}", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Signed redx.update-manifest/v1 body. Header X-RedX-Signature covers these exact bytes."},
-	"updateManifestSig":     {ID: "updateManifestSig", Group: "updates", Method: "GET", Path: "/v1/updates/apps/{app}/manifests/{version}.sig", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "text", Request: "", HostConfirm: "", Summary: "The Ed25519 signature string for a manifest (ed25519:\u003cbase64\u003e)."},
-	"updateArtifact":        {ID: "updateArtifact", Group: "updates", Method: "GET", Path: "/v1/updates/apps/{app}/manifests/{version}/artifacts/{artifact_id}", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "binary", Request: "", HostConfirm: "", Summary: "One published artifact. Verify its sha256 against the signed manifest."},
-	"updateHistory":         {ID: "updateHistory", Group: "updates", Method: "GET", Path: "/v1/updates/apps/{app}/history", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Publish, apply, snapshot and rollback history for an app."},
-	"updateSnapshots":       {ID: "updateSnapshots", Group: "updates", Method: "GET", Path: "/v1/updates/apps/{app}/snapshots", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Immutable snapshots taken before applies."},
-	"updateRollout":         {ID: "updateRollout", Group: "updates", Method: "GET", Path: "/v1/updates/rollouts/{rollout_id}", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Rollout state, progress and health."},
-	"updateEvents":          {ID: "updateEvents", Group: "updates", Method: "GET", Path: "/v1/updates/events", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "websocket", Request: "", HostConfirm: "", Summary: "WebSocket of update.available, update.analysed, rollout.state, rollout.health and rollback.done."},
+	"listUpdateApps":        {ID: "listUpdateApps", Group: "updates", Method: "GET", Path: "/v1/updates/apps", Shorthand: "", Auth: "host-admin", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Update status of every app this host knows."},
+	"updateApp":             {ID: "updateApp", Group: "updates", Method: "GET", Path: "/v1/updates/apps/{app}", Shorthand: "", Auth: "host-admin", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Installed version, hosted flag, source preference and available manifests."},
+	"updateManifest":        {ID: "updateManifest", Group: "updates", Method: "GET", Path: "/v1/updates/apps/{app}/manifests/{version}", Shorthand: "", Auth: "host-admin", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Signed redx.update-manifest/v1 body. Header X-RedX-Signature covers these exact bytes."},
+	"updateManifestSig":     {ID: "updateManifestSig", Group: "updates", Method: "GET", Path: "/v1/updates/apps/{app}/manifests/{version}.sig", Shorthand: "", Auth: "host-admin", Danger: DangerSafe, Response: "text", Request: "", HostConfirm: "", Summary: "The Ed25519 signature string for a manifest (ed25519:\u003cbase64\u003e)."},
+	"updateArtifact":        {ID: "updateArtifact", Group: "updates", Method: "GET", Path: "/v1/updates/apps/{app}/manifests/{version}/artifacts/{artifact_id}", Shorthand: "", Auth: "host-admin", Danger: DangerSafe, Response: "binary", Request: "", HostConfirm: "", Summary: "One published artifact. Verify its sha256 against the signed manifest."},
+	"updateHistory":         {ID: "updateHistory", Group: "updates", Method: "GET", Path: "/v1/updates/apps/{app}/history", Shorthand: "", Auth: "host-admin", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Publish, apply, snapshot and rollback history for an app."},
+	"updateSnapshots":       {ID: "updateSnapshots", Group: "updates", Method: "GET", Path: "/v1/updates/apps/{app}/snapshots", Shorthand: "", Auth: "host-admin", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Immutable snapshots taken before applies."},
+	"updateRollout":         {ID: "updateRollout", Group: "updates", Method: "GET", Path: "/v1/updates/rollouts/{rollout_id}", Shorthand: "", Auth: "host-admin", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Rollout state, progress and health."},
+	"updateEvents":          {ID: "updateEvents", Group: "updates", Method: "GET", Path: "/v1/updates/events", Shorthand: "", Auth: "host-admin", Danger: DangerSafe, Response: "websocket", Request: "", HostConfirm: "", Summary: "WebSocket of update.available, update.analysed, rollout.state, rollout.health and rollback.done."},
 	"updateSource":          {ID: "updateSource", Group: "updates", Method: "PUT", Path: "/v1/updates/apps/{app}/source", Shorthand: "", Auth: "host-admin", Danger: DangerAdmin, Response: "json", Request: "json", HostConfirm: "", Summary: "Prefer host, github or both. host or both on an app Red-XAI does not host returns 409 not_hosted."},
 	"updatePolicy":          {ID: "updatePolicy", Group: "updates", Method: "PUT", Path: "/v1/updates/apps/{app}/policy", Shorthand: "", Auth: "host-admin", Danger: DangerAdmin, Response: "json", Request: "json", HostConfirm: "", Summary: "Auto-apply policy: off, security or all, on channel stable or beta, inside an optional cron window."},
 	"updateApply":           {ID: "updateApply", Group: "updates", Method: "POST", Path: "/v1/updates/apps/{app}/apply", Shorthand: "", Auth: "host-admin", Danger: DangerDangerous, Response: "json", Request: "json", HostConfirm: "", Summary: "Snapshot, then apply. strategy is direct, canary or blue_green. Refuses a failed snapshot and a sequence regression."},
 	"updatePromote":         {ID: "updatePromote", Group: "updates", Method: "POST", Path: "/v1/updates/rollouts/{rollout_id}/promote", Shorthand: "", Auth: "host-admin", Danger: DangerDangerous, Response: "json", Request: "", HostConfirm: "", Summary: "Move a healthy canary to the rest of the cluster."},
 	"updateRolloutRollback": {ID: "updateRolloutRollback", Group: "updates", Method: "POST", Path: "/v1/updates/rollouts/{rollout_id}/rollback", Shorthand: "", Auth: "host-admin", Danger: DangerDangerous, Response: "json", Request: "json", HostConfirm: "", Summary: "Restore the snapshot taken before this rollout, including mid-canary."},
 	"updateAppRollback":     {ID: "updateAppRollback", Group: "updates", Method: "POST", Path: "/v1/updates/apps/{app}/rollback", Shorthand: "", Auth: "host-admin", Danger: DangerDangerous, Response: "json", Request: "json", HostConfirm: "", Summary: "Restore one snapshot for an app."},
-	"updatePublish":         {ID: "updatePublish", Group: "updates", Method: "POST", Path: "/v1/updates/apps/{app}/publish", Shorthand: "", Auth: "host-admin", Danger: DangerDangerous, Response: "json", Request: "json", HostConfirm: "", Summary: "Sign a host and/or github manifest. A host target marks the app hosted."},
+	"updatePublish":         {ID: "updatePublish", Group: "updates", Method: "POST", Path: "/v1/updates/apps/{app}/publish", Shorthand: "", Auth: "host-admin", Danger: DangerDangerous, Response: "json", Request: "json", HostConfirm: "", Summary: "Sign a host and/or github manifest for an app already in hosted_apps. A github target creates the release."},
 	"updateGitHubWebhook":   {ID: "updateGitHubWebhook", Group: "updates", Method: "POST", Path: "/v1/updates/github/webhook", Shorthand: "", Auth: "none", Danger: DangerWrite, Response: "json", Request: "", HostConfirm: "", Summary: "GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest."},
 }
 
@@ -606,14 +606,14 @@ func (c *Client) UpdateKeys(ctx context.Context, a Args) (*Result, error) {
 
 // ListUpdateApps: Update status of every app this host knows.
 //
-// GET /v1/updates/apps, auth key, danger safe.
+// GET /v1/updates/apps, auth host-admin, danger safe.
 func (c *Client) ListUpdateApps(ctx context.Context, a Args) (*Result, error) {
 	return c.Call(ctx, "listUpdateApps", a)
 }
 
 // UpdateApp: Installed version, hosted flag, source preference and available manifests.
 //
-// GET /v1/updates/apps/{app}, auth key, danger safe.
+// GET /v1/updates/apps/{app}, auth host-admin, danger safe.
 func (c *Client) UpdateApp(ctx context.Context, app string, a Args) (*Result, error) {
 	a.Params = withParams(a.Params, map[string]string{"app": app})
 	return c.Call(ctx, "updateApp", a)
@@ -621,7 +621,7 @@ func (c *Client) UpdateApp(ctx context.Context, app string, a Args) (*Result, er
 
 // UpdateManifest: Signed redx.update-manifest/v1 body. Header X-RedX-Signature covers these exact bytes.
 //
-// GET /v1/updates/apps/{app}/manifests/{version}, auth key, danger safe.
+// GET /v1/updates/apps/{app}/manifests/{version}, auth host-admin, danger safe.
 func (c *Client) UpdateManifest(ctx context.Context, app string, version string, a Args) (*Result, error) {
 	a.Params = withParams(a.Params, map[string]string{"app": app, "version": version})
 	return c.Call(ctx, "updateManifest", a)
@@ -629,7 +629,7 @@ func (c *Client) UpdateManifest(ctx context.Context, app string, version string,
 
 // UpdateManifestSig: The Ed25519 signature string for a manifest (ed25519:<base64>).
 //
-// GET /v1/updates/apps/{app}/manifests/{version}.sig, auth key, danger safe.
+// GET /v1/updates/apps/{app}/manifests/{version}.sig, auth host-admin, danger safe.
 func (c *Client) UpdateManifestSig(ctx context.Context, app string, version string, a Args) (*Result, error) {
 	a.Params = withParams(a.Params, map[string]string{"app": app, "version": version})
 	return c.Call(ctx, "updateManifestSig", a)
@@ -637,7 +637,7 @@ func (c *Client) UpdateManifestSig(ctx context.Context, app string, version stri
 
 // UpdateArtifact: One published artifact. Verify its sha256 against the signed manifest.
 //
-// GET /v1/updates/apps/{app}/manifests/{version}/artifacts/{artifact_id}, auth key, danger safe.
+// GET /v1/updates/apps/{app}/manifests/{version}/artifacts/{artifact_id}, auth host-admin, danger safe.
 func (c *Client) UpdateArtifact(ctx context.Context, app string, version string, artifact_id string, a Args) (*Result, error) {
 	a.Params = withParams(a.Params, map[string]string{"app": app, "version": version, "artifact_id": artifact_id})
 	return c.Call(ctx, "updateArtifact", a)
@@ -645,7 +645,7 @@ func (c *Client) UpdateArtifact(ctx context.Context, app string, version string,
 
 // UpdateHistory: Publish, apply, snapshot and rollback history for an app.
 //
-// GET /v1/updates/apps/{app}/history, auth key, danger safe.
+// GET /v1/updates/apps/{app}/history, auth host-admin, danger safe.
 func (c *Client) UpdateHistory(ctx context.Context, app string, a Args) (*Result, error) {
 	a.Params = withParams(a.Params, map[string]string{"app": app})
 	return c.Call(ctx, "updateHistory", a)
@@ -653,7 +653,7 @@ func (c *Client) UpdateHistory(ctx context.Context, app string, a Args) (*Result
 
 // UpdateSnapshots: Immutable snapshots taken before applies.
 //
-// GET /v1/updates/apps/{app}/snapshots, auth key, danger safe.
+// GET /v1/updates/apps/{app}/snapshots, auth host-admin, danger safe.
 func (c *Client) UpdateSnapshots(ctx context.Context, app string, a Args) (*Result, error) {
 	a.Params = withParams(a.Params, map[string]string{"app": app})
 	return c.Call(ctx, "updateSnapshots", a)
@@ -661,7 +661,7 @@ func (c *Client) UpdateSnapshots(ctx context.Context, app string, a Args) (*Resu
 
 // UpdateRollout: Rollout state, progress and health.
 //
-// GET /v1/updates/rollouts/{rollout_id}, auth key, danger safe.
+// GET /v1/updates/rollouts/{rollout_id}, auth host-admin, danger safe.
 func (c *Client) UpdateRollout(ctx context.Context, rollout_id string, a Args) (*Result, error) {
 	a.Params = withParams(a.Params, map[string]string{"rollout_id": rollout_id})
 	return c.Call(ctx, "updateRollout", a)
@@ -715,7 +715,7 @@ func (c *Client) UpdateAppRollback(ctx context.Context, app string, a Args) (*Re
 	return c.Call(ctx, "updateAppRollback", a)
 }
 
-// UpdatePublish: Sign a host and/or github manifest. A host target marks the app hosted.
+// UpdatePublish: Sign a host and/or github manifest for an app already in hosted_apps. A github target creates the release.
 //
 // POST /v1/updates/apps/{app}/publish, auth host-admin, danger dangerous.
 func (c *Client) UpdatePublish(ctx context.Context, app string, a Args) (*Result, error) {

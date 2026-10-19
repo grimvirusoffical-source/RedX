@@ -27,6 +27,7 @@ func runCLI(t *testing.T, addr, key string, args ...string) (string, string, int
 	t.Helper()
 	cmd := exec.Command(os.Args[0], args...)
 	cmd.Env = append(os.Environ(), "REDX_CLI_AS_MAIN=1", "REDX_ADDR="+addr, "REDX_KEY="+key)
+	cmd.Stdin = bytes.NewReader(nil)
 	var so, se bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &so, &se
 	err := cmd.Run()

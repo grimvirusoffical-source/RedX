@@ -196,28 +196,54 @@ Phase 1 of the host update system. Manifests are `redx.update-manifest/v1`, sign
 (`X-RedX-Signature: ed25519:<base64>` over the exact JSON bytes). The signing key comes from
 `REDX_UPDATE_SIGNING_KEY`, `update_signing_key_file` / `REDX_UPDATE_SIGNING_KEY_FILE` (mode 0600),
 or a key generated under `<data>/updates/signing.key`. It is never written into config, git, or the audit log.
-`GET /v1/updates/keys` needs no key.
+`GET /v1/updates/keys` needs no key. Every other update read needs a host-admin key.
 
-Reads need any valid key. Mutations need a host-admin key. Apply, rollback, restore and promote call the
-same `ownerOnlyOK` / `refuseMasterMutation` / `refuseHiddenDB` gates as backup and cluster changes. While
-Red-XAI Accounts is on (`AccountsEnabled`), those calls are owner-only because a snapshot includes every
-database. An app id equal to the master accounts database is hidden (`404`).
+Mutations need a host-admin key. Apply, rollback, restore and promote call the same `ownerOnlyOK` /
+`refuseHiddenDB` gates as backup and cluster changes. While Red-XAI Accounts is on (`AccountsEnabled`),
+those calls, plus publish and policy, are owner-only. An app id equal to the master accounts database
+is hidden (`404`). Snapshots contain only that app's version, update policy, artifact blobs and its own
+database. They never include the keystore, the master accounts database, other databases, or host config.
+Restore checks the snapshot sha256 before writing anything back.
+
+Apply refuses a semver lower than the installed version and a manifest whose `requires.min_from` the
+installed version does not meet (both `409 sequence_regression`). Sequence is bound to app + version and
+only increases for a strictly newer semver. Status omits manifests that fail signature verification and
+does not advertise a version older than the one installed.
+
+`plan:true` or `dry_run:true` issues a single-use `X-RedX-Update-Confirm` token bound to the app, version
+and action. It does not take a snapshot. The real call still needs `X-RedX-Confirm` with the operation id.
+The CLI asks before sending the token, or takes `--yes`. Extra path segments on apply, publish and rollback
+are `404`.
+
+Publish is limited to apps in `hosted_apps`. Artifact URLs must be
+`https://github.com/{owner}/{repo}/releases/download/{tag}/{file}` for a repo listed in `github_repos`
+(`owner/repo=app`). A GitHub release is created only by that publish. The webhook accepts only those
+repos, requires `X-GitHub-Delivery`, refuses a replay, and skips an `edited` event whose version is
+already stored or not newer than the installed one.
+
+Rollout health is the host's own error rate, latency and node liveness. With no samples the status is
+`unknown` and a canary is not auto-promoted. Auto-rollback runs only when health is `bad`.
 
 | Route | Auth | Purpose |
 |---|---|---|
-| `GET /v1/updates/apps`, `GET /v1/updates/apps/{app}` | key | hosted, source_pref, installed, available |
-| `GET .../manifests/{version}`, `.../{version}.sig`, `.../artifacts/{artifact_id}` | key | signed manifest, signature, artifact |
-| `PUT .../source`, `PUT .../policy` | host admin | `host`/`github`/`both`; auto-apply. `host` or `both` when the app is not hosted → `409 not_hosted` |
-| `POST .../apply` | host admin | immutable snapshot, then direct / canary / blue-green. Snapshot failure refuses the apply |
-| `GET /v1/updates/rollouts/{rollout_id}`, `POST .../promote`, `POST .../rollback` | key / host admin | progress, health gate, rollback mid-rollout |
-| `GET .../snapshots`, `POST .../rollback` | key / host admin | list and one-click restore |
-| `GET .../history` | key | publish, apply, snapshot, rollback |
-| `POST .../publish` | host admin | sign a host and/or GitHub manifest |
-| `POST /v1/updates/github/webhook` | HMAC `X-Hub-Signature-256` | verify SHA256SUMS, then sign a github-source manifest |
-| `GET /v1/updates/events` | key | WebSocket: `update.available`, `update.analysed`, `rollout.state`, `rollout.health`, `rollback.done` |
+| `GET /v1/updates/apps`, `GET /v1/updates/apps/{app}` | host admin | hosted, source_pref, installed, available |
+| `GET .../manifests/{version}`, `.../{version}.sig`, `.../artifacts/{artifact_id}` | host admin | signed manifest, signature, artifact |
+| `PUT .../source` | host admin | `host`/`github`/`both`. `host` or `both` when the app is not hosted → `409 not_hosted` |
+| `PUT .../policy` | host admin; owner while Accounts is on | auto-apply |
+| `POST .../apply` | host admin; owner while Accounts is on | app snapshot, then direct / canary / blue-green. Snapshot failure refuses the apply |
+| `GET /v1/updates/rollouts/{rollout_id}` | host admin | progress and health |
+| `POST .../promote`, `POST .../rollback` | host admin; owner while Accounts is on | health gate, rollback mid-rollout |
+| `GET .../snapshots` | host admin | list this app's snapshots |
+| `POST .../rollback` | host admin; owner while Accounts is on | restore one snapshot for this app |
+| `GET .../history` | host admin | publish, apply, snapshot, rollback |
+| `POST .../publish` | host admin; owner while Accounts is on, and the app must be hosted | sign a host and/or GitHub manifest |
+| `POST /v1/updates/github/webhook` | HMAC `X-Hub-Signature-256` | allowlisted repo, `X-GitHub-Delivery`, SHA256SUMS, then a signed github-source manifest |
+| `GET /v1/updates/events` | host admin | WebSocket: `update.available`, `update.analysed`, `rollout.state`, `rollout.health`, `rollback.done` |
 | `GET /v1/apps/events` | Accounts client auth | Existing Accounts JSON poll. `update.*` events on that feed are forwarded to the WebSocket and do not end sessions |
 
 Errors are `{ "error": { "code", "message" } }` with `not_hosted`, `bad_signature`, `sequence_regression`,
-`snapshot_failed`, `rollout_conflict`, `not_found`, `forbidden`. Validation uses `invalid`.
+`snapshot_failed`, `rollout_conflict`, `not_found`, `forbidden`. Validation uses `invalid`. Owner-only
+refusals stay the flat `{"error":"..."}` string used by the rest of the host.
 BoxQL is unchanged: updates are not a query language.
-The CLI is `redx update status|check|apply|promote|rollback|snapshots|restore|source`.
+The CLI is `redx update status|check|apply|promote|rollback|snapshots|restore|source`. Apply, promote,
+rollback and restore prompt, or take `--yes`.
