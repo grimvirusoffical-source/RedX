@@ -89,6 +89,8 @@ func (h *Host) routes() http.Handler {
 			h.connectRoute(w, r)
 		case strings.HasPrefix(p, "/v1/auth/"):
 			h.authRoute(w, r)
+		case strings.HasPrefix(p, "/v1/billing/"):
+			h.billingRoute(w, r)
 		case strings.HasPrefix(p, "/v1/owner/"):
 			h.ownerRoute(w, r)
 		case p == "/v1/keys" || strings.HasPrefix(p, "/v1/keys/"):

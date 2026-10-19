@@ -65,8 +65,11 @@ type Config struct {
 	Join string `toml:"join"`
 
 	// Red-XAI Accounts sign-in for the web console (OIDC with PKCE). Empty issuer = off; API keys always work.
-	AccountsIssuer   string `toml:"accounts_issuer"`       // e.g. https://accounts.red-xai.example
-	AccountsClientID string `toml:"accounts_client_id"`    // OAuth client id registered for this host (default "redx")
+	AccountsIssuer   string `toml:"accounts_issuer"`    // e.g. https://accounts.red-xai.example
+	AccountsClientID string `toml:"accounts_client_id"` // OAuth client id registered for this host (default "redx")
+	// BillingPublicURL is the https URL people reach this console at; RedX Hosted checkout returns there
+	// (default: advertise). Stripe keys are never in the config file: env STRIPE_* only (docs/billing.md).
+	BillingPublicURL string `toml:"billing_public_url"`
 	AccountsRedirect string `toml:"accounts_redirect_url"` // default <advertise>/v1/auth/callback
 	// AccountsMasterDB is the RedX database holding the master Red-XAI accounts DB (default "redxai_accounts").
 	// While accounts are on, only owner logins (and keys scoped to exactly that database) can see it.
@@ -220,6 +223,7 @@ func (c *Config) ApplyEnv(get func(string) string) error {
 	s("REDX_JOIN", &c.Join)
 	s("REDX_ACCOUNTS_ISSUER", &c.AccountsIssuer)
 	s("REDX_ACCOUNTS_CLIENT_ID", &c.AccountsClientID)
+	s("REDX_BILLING_PUBLIC_URL", &c.BillingPublicURL)
 	s("REDX_ACCOUNTS_REDIRECT_URL", &c.AccountsRedirect)
 	s("REDX_ACCOUNTS_MASTER_DB", &c.AccountsMasterDB)
 	s("REDX_ACCOUNTS_CLIENT_SECRET", &c.AccountsClientSecret)
