@@ -105,6 +105,19 @@ func post(url, key, body string) (int, string) {
 	if key != "" {
 		req.Header.Set("Authorization", "Bearer "+key)
 	}
+	// Dangerous ops need X-RedX-Confirm (server-enforced since 0.4.5).
+	switch {
+	case strings.HasSuffix(req.URL.Path, "/v1/keys/pairing"):
+		req.Header.Set("X-RedX-Confirm", "createPairingCode")
+	case req.URL.Path == "/v1/keys" || strings.HasSuffix(req.URL.Path, "/v1/keys"):
+		req.Header.Set("X-RedX-Confirm", "createKey")
+	case strings.HasSuffix(req.URL.Path, "/v1/cluster/promote"):
+		req.Header.Set("X-RedX-Confirm", "promote")
+	case strings.HasSuffix(req.URL.Path, "/v1/cluster/join-token"):
+		req.Header.Set("X-RedX-Confirm", "createJoinToken")
+	case strings.HasSuffix(req.URL.Path, "/v1/connect/approve"):
+		req.Header.Set("X-RedX-Confirm", "connectApprove")
+	}
 	r, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return 0, err.Error()

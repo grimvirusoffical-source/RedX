@@ -51,7 +51,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   }
   // pairing: a one-time code from a QR link signs a fresh browser in; the link cannot be reused and holds no key
   {
-    const r = await fetch(url + '/v1/keys/pairing', { method: 'POST', headers: { Authorization: 'Bearer ' + key }, body: JSON.stringify({ db: 'default', scope: 'write', label: 'shots-phone' }) });
+    const r = await fetch(url + '/v1/keys/pairing', { method: 'POST', headers: { Authorization: 'Bearer ' + key, 'X-RedX-Confirm': 'createPairingCode' }, body: JSON.stringify({ db: 'default', scope: 'write', label: 'shots-phone' }) });
     const { code } = await r.json();
     const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, colorScheme: 'dark' });
     const p = await ctx.newPage();
