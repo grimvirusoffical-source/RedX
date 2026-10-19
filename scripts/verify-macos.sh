@@ -15,6 +15,7 @@ hdiutil detach "$MNT" >/dev/null 2>&1
 A="$HOME/Applications/RedX.app"
 plutil -lint "$A/Contents/Info.plist" >/dev/null && ok "Info.plist valid"
 [ -f "$A/Contents/Resources/redx.icns" ] && ok "icon present" || bad "icon missing"
+grep -q "Red-XAI LLC" "$A/Contents/Resources/LICENSE" && ok "LICENSE in the app bundle" || bad "LICENSE missing from the app"
 lipo -info "$A/Contents/MacOS/redxd" | tee /dev/stderr | grep -q "x86_64" && lipo -info "$A/Contents/MacOS/redxd" | grep -q arm64 && ok "universal binary (arm64 + x86_64)" || bad "not universal"
 "$A/Contents/MacOS/redxd" --version && ok "redxd runs on $HOSTARCH"
 file "$A/Contents/MacOS/RedX" | grep -q Mach-O && ! cmp -s "$A/Contents/MacOS/RedX" "$A/Contents/Resources/bin/redx" && ok "app executable is the launcher (not the CLI)" || bad "app executable is not the launcher"
@@ -38,6 +39,7 @@ pkill -x redxd; sleep 1
 sudo installer -pkg "$PKG" -target / >/dev/null && ok "pkg installs" || bad "pkg install"
 [ -d /Applications/RedX.app ] && ok "/Applications/RedX.app" || bad "app not installed by pkg"
 /usr/local/bin/redx --version && ok "/usr/local/bin/redx works" || bad "cli from pkg"
+grep -q "Red-XAI LLC" /usr/local/share/doc/redx/LICENSE && ok "pkg installs LICENSE" || bad "pkg LICENSE missing"
 # every Mach-O carries a valid signature (ad-hoc unless a Developer ID was used), in every architecture slice
 for b in /Applications/RedX.app/Contents/MacOS/RedX /Applications/RedX.app/Contents/MacOS/redxd \
          /Applications/RedX.app/Contents/Resources/bin/redx /usr/local/bin/redx /usr/local/bin/redxd; do

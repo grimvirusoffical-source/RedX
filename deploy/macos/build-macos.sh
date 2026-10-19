@@ -67,6 +67,7 @@ for ARCH in "$@"; do
   cp "$W/bin/redxd" "$APP/Contents/MacOS/"
   cp "$W/bin/redx" "$APP/Contents/Resources/bin/redx"
   cp "$ICNS" "$APP/Contents/Resources/redx.icns"
+  cp "$ROOT/LICENSE" "$APP/Contents/Resources/LICENSE"
   sed "s/@VERSION@/${VERSION}/g" "$ROOT/deploy/macos/Info.plist.in" > "$APP/Contents/Info.plist"
   plutil -lint "$APP/Contents/Info.plist"
   chmod 755 "$APP/Contents/MacOS/"* "$APP/Contents/Resources/bin/redx"
@@ -76,6 +77,7 @@ for ARCH in "$@"; do
   # ---- .dmg (drag RedX to Applications) ----
   STAGE="$W/dmg"; mkdir -p "$STAGE"; cp -R "$APP" "$STAGE/"; ln -s /Applications "$STAGE/Applications"
   cp "$ROOT/deploy/macos/README-FIRST.txt" "$STAGE/READ ME FIRST.txt"
+  cp "$ROOT/LICENSE" "$STAGE/LICENSE.txt"
   hdiutil create -volname "RedX ${VERSION}" -srcfolder "$STAGE" -ov -format UDZO "$OUT/${NAME}.dmg"
 
   # ---- .pkg (installs RedX.app into /Applications, redx + redxd CLI into /usr/local/bin) ----
@@ -83,6 +85,7 @@ for ARCH in "$@"; do
   cp -R "$APP" "$PR/Applications/"
   # the CLI copies are the app's already signed binaries (each signed on its own, before pkgbuild)
   cp "$APP/Contents/Resources/bin/redx" "$APP/Contents/MacOS/redxd" "$PR/usr/local/bin/"
+  mkdir -p "$PR/usr/local/share/doc/redx"; cp "$ROOT/LICENSE" "$PR/usr/local/share/doc/redx/LICENSE"
   for b in "$PR/usr/local/bin/redx" "$PR/usr/local/bin/redxd"; do codesign --verify --strict "$b"; done
   # not relocatable: otherwise Installer "updates" a RedX.app it finds elsewhere (e.g. ~/Applications) instead of /Applications
   CPL="$W/component.plist"

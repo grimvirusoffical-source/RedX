@@ -15,6 +15,7 @@ install -m 0644 "$ROOT/assets/icons/redx.svg" "$P/usr/share/icons/hicolor/scalab
 install -m 0644 "$ROOT/deploy/linux/redxd.service" "$P/lib/systemd/system/redxd.service"
 for d in hosting.md getting-started.md boxql.md box-grammar.md console.md installers.md connect.md; do [ -f "$ROOT/docs/$d" ] && install -m 0644 "$ROOT/docs/$d" "$P/usr/share/doc/redx/$d"; done
 install -m 0644 "$ROOT/deploy/redx.example.toml" "$P/usr/share/doc/redx/redx.example.toml"
+install -m 0644 "$ROOT/LICENSE" "$P/usr/share/doc/redx/copyright"
 SIZE=$(du -sk "$P" | cut -f1)
 cat > "$P/DEBIAN/control" <<CTL
 Package: redx
