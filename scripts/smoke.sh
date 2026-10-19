@@ -9,8 +9,11 @@ URL="http://127.0.0.1:$PORT"
 fail=0; ok() { echo "PASS  $*"; }; bad() { echo "FAIL  $*"; fail=1; }
 code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
 
-"$BIN/redxd" keygen --data-dir "$D" --id smoke-key >/dev/null && ok "redxd keygen wrote master.key (mode $(stat -c %a "$D/master.key"))" || bad "keygen"
-[ "$(stat -c %a "$D/master.key")" = 600 ] || bad "master.key is not mode 600"
+# portable file mode and size (GNU stat on Linux, BSD stat on macOS)
+fmode() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
+fsize() { wc -c < "$1" | tr -d ' '; }
+"$BIN/redxd" keygen --data-dir "$D" --id smoke-key >/dev/null && ok "redxd keygen wrote master.key (mode $(fmode "$D/master.key"))" || bad "keygen"
+[ "$(fmode "$D/master.key")" = 600 ] && ok "master.key is mode 600" || bad "master.key is not mode 600"
 "$BIN/redxd" run --no-open --bootstrap console --data-dir "$D" --code-allowed-boxes 'players.red-xai.db:Player' --listen "127.0.0.1:$PORT" > "$D/out.txt" 2>&1 & PID=$!
 for i in $(seq 1 50); do curl -sf "$URL/healthz" >/dev/null && break; sleep 0.1; done
 curl -sf "$URL/healthz" >/dev/null && ok "healthz" || { bad "daemon did not start"; cat "$D/out.txt"; exit 1; }
@@ -85,7 +88,7 @@ PF="$URL/v1/db/default/pack/media/file/dir/blob.bin"
 curl -s "${AUTH[@]}" -H 'Range: bytes=1048570-1048590' "$PF" -o "$D/r.bin" -D "$D/r.hdr"
 head -c 1048591 "$D/blob.bin" | tail -c 21 > "$D/r.exp"
 grep -q '^HTTP/1.1 206' "$D/r.hdr" && cmp -s "$D/r.bin" "$D/r.exp" && ok "Range read across a chunk boundary: 206, exact bytes" || bad "range read"
-grep -qi "^content-range: bytes 1048570-1048590/$(stat -c %s "$D/blob.bin")" "$D/r.hdr" && ok "Content-Range header correct" || bad "content-range"
+SZ=$(fsize "$D/blob.bin"); [ -n "$SZ" ] && [ "$SZ" -gt 1048590 ] && grep -Eqi "^content-range: bytes 1048570-1048590/${SZ}[[:space:]]*\$" "$D/r.hdr" && ok "Content-Range header correct (/$SZ)" || bad "content-range"
 "$BIN/redx" pack get media dir/blob.bin --out "$D/p.bin" --range=-100 2>/dev/null && tail -c 100 "$D/blob.bin" | cmp -s - "$D/p.bin" && ok "redx pack get --range -100 (suffix)" || bad "cli range"
 [ "$(code "${AUTH[@]}" -H 'Range: bytes=999999999-' "$PF")" = 416 ] && ok "unsatisfiable range 416" || bad "416"
 "$BIN/redx" pack ls media dir 2>/dev/null | grep -q blob.bin && ok "pack ls" || bad "pack ls"
@@ -119,7 +122,7 @@ PY
 MF="$URL/v1/db/default/media/art/file/a.png"
 curl -s "${AUTH[@]}" -H 'Range: bytes=8-23' "$MF" -o "$D/m.bin" -D "$D/m.hdr"
 head -c 24 "$D/a.png" | tail -c 16 | cmp -s - "$D/m.bin" && grep -q '^HTTP/1.1 206' "$D/m.hdr" && ok "media Range: 206, exact bytes" || bad "media range"
-grep -qi "^content-range: bytes 8-23/$(stat -c %s "$D/a.png")" "$D/m.hdr" && ok "media Content-Range correct" || bad "media content-range"
+SZ=$(fsize "$D/a.png"); [ -n "$SZ" ] && [ "$SZ" -gt 23 ] && grep -Eqi "^content-range: bytes 8-23/${SZ}[[:space:]]*\$" "$D/m.hdr" && ok "media Content-Range correct (/$SZ)" || bad "media content-range"
 [ "$(code "${AUTH[@]}" -X PUT --data 'plain text' "$URL/v1/db/default/media/art/file/t.png")" = 415 ] && ok "non-media upload refused (415)" || bad "media 415"
 [ "$(code "$MF")" = 401 ] && ok "media without key 401" || bad "media no key"
 # GET of an absent path is always 404; bare-file subscribe is an error

@@ -64,8 +64,8 @@ jobs:
           export REDXD_BIN="$PWD/bin/redxd"
           (cd sdk/js && npm test)
           (cd sdk/python && python3 -m unittest discover -s tests -t .)
-      - name: Shell smoke tests and cluster smoke (Linux only)
-        if: runner.os == 'Linux'
+      - name: Shell smoke tests and cluster smoke (Linux and macOS)
+        if: runner.os != 'Windows'
         run: |
           scripts/smoke.sh bin
           scripts/cluster-smoke.sh bin

@@ -367,8 +367,19 @@ func TestE14SweepDoesNotStallReaders(t *testing.T) {
 	if db.Stats()["qs.expired"] != N {
 		t.Fatalf("expired %v", db.Stats()["qs.expired"])
 	}
-	if p99 > 50*time.Millisecond {
-		t.Fatalf("p99 Get latency during sweep %v > 50ms", p99)
+	// Budget: 50 ms normally (measured p99 is microseconds). Under -race on a loaded machine p99 has been seen
+	// at 77 ms, so allow 250 ms there. A real stall (the sweep holding the readers' lock for its whole run)
+	// shows up as readers waiting about as long as the sweep itself, so also require the p99 to stay well
+	// below the sweep time whenever the sweep is long enough to tell the two apart.
+	budget := 50 * time.Millisecond
+	if raceEnabled {
+		budget = 250 * time.Millisecond
+	}
+	if p99 > budget {
+		t.Fatalf("p99 Get latency during sweep %v > %v (sweep took %v)", p99, budget, sweep)
+	}
+	if sweep > 4*budget && p99 > sweep/2 {
+		t.Fatalf("readers stalled for the sweep: p99 %v vs sweep %v", p99, sweep)
 	}
 }
 
