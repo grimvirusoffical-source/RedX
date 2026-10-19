@@ -153,14 +153,69 @@ const OWNER = 'owner@example.com'; // placeholder; real owner addresses live in 
     await p.waitForSelector('.shell');
     const hiddenAccount = ['owner', 'updates', 'keys', 'devices', 'apps', 'backups', 'cluster', 'presets', 'raw', 'policy', 'watch'];
     for (const id of hiddenAccount) expect(await p.$(`.nav-item[data-id="${id}"]`) === null, 'regular account hides ' + id);
-    expect(await p.$('.nav-item[data-id="hosting"]') !== null, 'hosting is in the nav for a signed-in account');
+    const hostOnly = ['hosting', 'usage', 'updates', 'logs', 'hostapps', 'deploy', 'domains', 'env', 'applogs'];
+    expect(await p.getAttribute('#console-mode [data-surface="database"]', 'aria-pressed') === 'true', 'default mode is Database');
+    expect(await p.evaluate(() => {
+      const header = document.querySelector('header.top');
+      const sw = document.querySelector('#console-mode');
+      if (!header || !sw || !header.contains(sw)) return false;
+      const h = header.getBoundingClientRect();
+      const s = sw.getBoundingClientRect();
+      return Math.abs((s.left + s.right) / 2 - (h.left + h.right) / 2) < 12;
+    }), 'the Database / Host switch is centered in the header');
+    expect(await p.$('.nav-item[data-id="dashboard"]') !== null && await p.$('.nav-item[data-id="help"]') !== null, 'Database mode shows the database pages and Help');
+    for (const id of hostOnly) expect(await p.$(`.nav-item[data-id="${id}"]`) === null, 'Database mode hides ' + id);
+    where = 'mode-toggle';
+    await p.click('#console-mode [data-surface="host"]');
+    await p.waitForSelector('.nav-item[data-id="hosting"]');
+    expect(await p.getAttribute('#console-mode [data-surface="host"]', 'aria-pressed') === 'true', 'toggle selects Host');
+    for (const id of ['hosting', 'usage', 'logs', 'hostapps', 'deploy', 'domains', 'env', 'applogs']) {
+      expect(await p.$(`.nav-item[data-id="${id}"]`) !== null, 'Host mode shows ' + id);
+    }
+    expect(await p.$('.nav-item[data-id="updates"]') === null, 'a regular account hides Updates in Host mode');
+    expect(await p.$('.nav-item[data-id="owner"]') === null, 'a regular account hides Owner in Host mode');
+    expect(await p.$('.nav-item[data-id="dashboard"]') === null, 'Host mode hides the database pages');
+    for (const id of ['hostapps', 'deploy', 'domains', 'env', 'applogs']) {
+      expect(await p.getAttribute(`.nav-item[data-id="${id}"]`, 'href') === '#/' + id, id + ' is a real nav link');
+      await p.click(`.nav-item[data-id="${id}"]`);
+      await p.waitForFunction((page) => {
+        const e = document.querySelector('#coming-soon');
+        return e && e.dataset.page === page && /Coming soon/.test(e.textContent) && !document.querySelector('.errbox') && !document.querySelector('#page-missing');
+      }, id);
+    }
+    expect(await p.$('.shell') !== null, 'Coming soon keeps the console shell');
+    await p.click('#console-mode [data-surface="database"]');
+    await p.waitForSelector('.nav-item[data-id="dashboard"]');
+    expect(await p.$('.nav-item[data-id="hosting"]') === null, 'toggle back to Database hides Host pages');
+    where = 'mode-persist';
+    await p.click('#console-mode [data-surface="host"]');
+    await p.waitForSelector('.nav-item[data-id="hosting"]');
+    expect(await p.evaluate(() => localStorage.getItem('redx.consoleMode.rxa_REG1')) === 'host', 'Host mode is stored for this user');
+    await p.reload({ waitUntil: 'networkidle' });
+    await p.waitForSelector('.nav-item[data-id="hosting"]');
+    expect(await p.getAttribute('#console-mode [data-surface="host"]', 'aria-pressed') === 'true', 'reload keeps Host for this user');
+    where = 'mode-deeplink';
+    await p.goto(url + '/?mode=database#/dashboard', { waitUntil: 'networkidle' });
+    await p.waitForSelector('.nav-item[data-id="dashboard"]');
+    expect(await p.getAttribute('#console-mode [data-surface="database"]', 'aria-pressed') === 'true', 'deep link selects Database');
+    expect(await p.evaluate(() => localStorage.getItem('redx.consoleMode.rxa_REG1')) === 'database', 'deep link updates the stored choice');
+    await p.goto(url + '/?mode=host#/hosting', { waitUntil: 'networkidle' });
+    await p.waitForSelector('#hosting-off');
+    expect(await p.getAttribute('#console-mode [data-surface="host"]', 'aria-pressed') === 'true', 'deep link selects Host and keeps the hash route');
+    expect(/Hosting plans aren't on sale yet/.test(await p.textContent('#hosting-page')), 'billing off says plans are not on sale');
+    expect(/#\/hosting$/.test(await p.evaluate(() => location.hash)) && /[?&]mode=host(?:&|$)/.test(await p.evaluate(() => location.search)), 'address keeps ?mode=host and #/hosting');
+    await p.evaluate(() => localStorage.setItem('redx.consoleMode.rxa_REG1', 'database'));
+    await p.goto(url + '/#/logs', { waitUntil: 'networkidle' });
+    await p.waitForSelector('#logs-page');
+    expect(await p.getAttribute('#console-mode [data-surface="host"]', 'aria-pressed') === 'true', 'opening a host page selects Host mode');
+    await p.goto(url + '/?mode=database#/updates', { waitUntil: 'networkidle' });
+    await p.waitForSelector('#page-missing');
+    expect(await p.getAttribute('#console-mode [data-surface="host"]', 'aria-pressed') === 'true', 'a host address overrides ?mode=database');
     await p.goto(url + '/#/owner', { waitUntil: 'networkidle' });
     await p.waitForSelector('#page-missing');
     const missing = await p.textContent('#page-missing');
     expect(/Page not found/.test(missing) && !missing.includes(OWNER), 'direct #/owner is not-found and does not name an owner');
-    await p.goto(url + '/#/hosting', { waitUntil: 'networkidle' });
-    await p.waitForSelector('#hosting-off');
-    expect(/Hosting plans aren't on sale yet/.test(await p.textContent('#hosting-page')), 'billing off says plans are not on sale');
+    expect(await p.$('.nav-item[data-id="owner"]') === null, 'Owner stays hidden for a regular account after a direct address');
     const regStatus = await p.evaluate(async () => (await fetch('/v1/owner/accounts', { headers: { Authorization: 'Bearer ' + sessionStorage.getItem('redx.key') } })).status);
     expect(regStatus === 403, 'owner API refuses a regular account (403)');
     await p.click('.who');
@@ -172,7 +227,14 @@ const OWNER = 'owner@example.com'; // placeholder; real owner addresses live in 
     await setNext({ sub: 'rxa_OWN1', email: OWNER, email_verified: true, username: 'owner_account', amr: ['pwd'] });
     await p.click('#acct-signin');
     await p.waitForSelector('.shell', { timeout: 15000 });
+    expect(await p.getAttribute('#console-mode [data-surface="database"]', 'aria-pressed') === 'true', 'a different user starts in Database mode');
+    expect(await p.evaluate(() => localStorage.getItem('redx.consoleMode.rxa_REG1')) === 'host', 'the previous user Host choice is kept');
     expect(await p.$('.nav-item[data-id="owner"]') === null && await p.isVisible('#owner-blocked'), 'owner email without 2FA gets no owner rights and is told why');
+    await p.click('#console-mode [data-surface="host"]');
+    await p.waitForSelector('.nav-item[data-id="hosting"]');
+    expect(await p.$('.nav-item[data-id="owner"]') === null, 'Owner stays hidden in Host mode without owner rights');
+    await p.click('#console-mode [data-surface="database"]');
+    await p.waitForSelector('.nav-item[data-id="dashboard"]');
     await p.click('.who');
     await p.waitForSelector('#acct-signin', { timeout: 10000 });
 
@@ -182,6 +244,13 @@ const OWNER = 'owner@example.com'; // placeholder; real owner addresses live in 
     await p.click('#acct-signin');
     await p.waitForSelector('.nav-item[data-id="owner"]', { timeout: 15000 });
     ok('owner with 2FA sees the Owner page');
+    expect(await p.getAttribute('#console-mode [data-surface="database"]', 'aria-pressed') === 'true', 'owner starts in Database mode');
+    await p.click('#console-mode [data-surface="host"]');
+    await p.waitForSelector('.nav-item[data-id="updates"]');
+    expect(await p.$('.nav-item[data-id="owner"]') !== null, 'owner sees Owner in Host mode');
+    await p.click('#console-mode [data-surface="database"]');
+    await p.waitForSelector('.nav-item[data-id="dashboard"]');
+    expect(await p.$('.nav-item[data-id="owner"]') !== null, 'owner sees Owner in Database mode');
     // create the master accounts DB and one account record as the owner (the accounts service would write these)
     await p.evaluate(async () => {
       const H = { Authorization: 'Bearer ' + sessionStorage.getItem('redx.key'), 'Content-Type': 'application/json' };
@@ -223,7 +292,11 @@ const OWNER = 'owner@example.com'; // placeholder; real owner addresses live in 
     const hiddenKey = ['owner', 'updates', 'keys', 'devices', 'apps', 'backups', 'cluster', 'presets', 'raw', 'policy'];
     for (const id of hiddenKey) expect(await p.$(`.nav-item[data-id="${id}"]`) === null, 'read key hides ' + id);
     expect(await p.$('.nav-item[data-id="watch"]') !== null, 'a read key can open Live Watch');
-    expect(await p.$('.nav-item[data-id="hosting"]') !== null, 'a read key sees Hosting');
+    expect(await p.$('.nav-item[data-id="hosting"]') === null, 'a read key starts in Database mode');
+    await p.goto(url + '/#/hosting', { waitUntil: 'networkidle' });
+    await p.waitForSelector('.nav-item[data-id="hosting"]');
+    expect(await p.getAttribute('#console-mode [data-surface="host"]', 'aria-pressed') === 'true', 'opening Hosting selects Host mode');
+    expect(await p.$('.nav-item[data-id="owner"]') === null, 'a read key has no Owner item in Host mode');
     await p.goto(url + '/#/owner', { waitUntil: 'networkidle' });
     await p.waitForSelector('#page-missing');
     expect(/Page not found/.test(await p.textContent('#page-missing')), 'direct #/owner is not-found for a read key');

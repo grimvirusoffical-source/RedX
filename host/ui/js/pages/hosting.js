@@ -17,7 +17,7 @@ export default async function render() {
   const root = page();
   root.id = 'hosting-page';
   const body = h('div');
-  root.append(pageHead('Hosting', 'RedX Hosted plans, usage, and the databases on your account.'), body);
+  root.append(pageHead('Plans & billing', 'RedX Hosted plans, the current plan, and a new database on this account.'), body);
 
   let plans = { enabled: false, plans: [] };
   try {
@@ -39,10 +39,7 @@ export default async function render() {
 
   if (me) body.append(accountCard(me, plans));
   if (plans && plans.enabled) body.append(planGrid(plans, me));
-  if (account) {
-    body.append(createCard());
-    body.append(await activityCard());
-  }
+  if (account) body.append(createCard());
   return root;
 }
 
@@ -65,7 +62,6 @@ function accountCard(me, plans) {
     ...bits,
     h('p', null, chip(access, access === 'full' ? 'ok' : access === 'readonly' ? 'warn' : 'err'), ' ', ACCESS[access] || ACCESS.none),
     ...notices);
-  if (me.usage && me.quota) card.append(h('div', { id: 'usage-meters' }, meters(me.usage, me.quota)));
   if (me.portal || me.active) card.append(h('button', { class: 'btn', type: 'button', style: { marginTop: '12px' }, onclick: () => portal() }, 'Manage billing'));
   return card;
 }
@@ -79,24 +75,6 @@ function overQuota(me) {
   if (!u || !q) return false;
   const hit = (used, cap) => typeof cap === 'number' && cap >= 0 && used >= cap;
   return hit(u.trafficBytes || 0, q.trafficBytes) || hit(u.storageBytes || 0, q.storageBytes) || hit(u.hostSwitches || 0, q.hostSwitches);
-}
-
-function meters(u, q) {
-  return h('div', { class: 'stack' },
-    meter('Storage', u.storageBytes || 0, q.storageBytes, fmtBytes),
-    meter('Monthly traffic', u.trafficBytes || 0, q.trafficBytes, fmtBytes),
-    meter('Host on/off switches', u.hostSwitches || 0, q.hostSwitches, (n) => String(n)));
-}
-
-function meter(label, used, cap, fmt) {
-  const unlimited = typeof cap !== 'number' || cap < 0;
-  const pct = unlimited || !cap ? 0 : Math.max(0, Math.min(100, Math.round((used / cap) * 100)));
-  const over = !unlimited && cap > 0 && used >= cap;
-  const text = unlimited ? fmt(used) + ' · unlimited' : fmt(used) + ' / ' + fmt(cap);
-  return h('div', { class: 'meter-row' },
-    h('div', { class: 'row' }, h('span', null, label), h('span', { class: 'muted small' }, text)),
-    h('div', { class: 'meter' + (over ? ' err' : ''), role: 'meter', 'aria-label': label, 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(unlimited ? 0 : pct) },
-      h('span', { style: { width: pct + '%' } })));
 }
 
 function planGrid(plans, me) {
@@ -170,27 +148,6 @@ function createCard() {
     field('Logical name', name),
     h('button', { class: 'btn primary', type: 'button', onclick: () => create() }, 'Create hosted database'),
     out);
-}
-
-async function activityCard() {
-  const box = h('div', { class: 'card', id: 'activity-log', style: { marginTop: '16px' } }, h('h3', null, 'Database activity'));
-  try {
-    const r = await api('GET', '/v1/hosting/activity', { noAuthRedirect: true });
-    const dbs = r.dbs || [];
-    if (!dbs.length) {
-      box.append(h('p', { class: 'muted' }, 'No hosted databases on this account yet.'));
-      return box;
-    }
-    box.append(dbs.map((d) => h('div', { 'data-db': d.logical || d.name, style: { marginTop: '12px' } },
-      h('p', null, h('b', null, d.logical || d.name), d.name && d.logical ? [' ', h('span', { class: 'muted small' }, 'physical ', h('code', null, d.name))] : null),
-      h('p', { class: 'muted small' }, (d.requests || 0) + ' requests · ' + (d.errors || 0) + ' errors'),
-      (d.denied || []).length ? h('div', null, h('p', { class: 'muted small' }, 'Recent denied requests'),
-        ...d.denied.slice().reverse().map((x) => h('p', { class: 'small' }, String(x.status), ' ', x.method || '', ' ', x.path || '', x.reason ? [' · ', x.reason] : null)))
-        : h('p', { class: 'muted small' }, 'No recent denied requests.'))));
-  } catch {
-    box.append(h('p', { class: 'muted' }, 'Activity is available for this account\'s own databases.'));
-  }
-  return box;
 }
 
 async function portal() {

@@ -1,18 +1,16 @@
 import { h, icon, mount, toast, $, clear } from './util.js';
 import { api, session, setUnauthorizedHandler, exchangePairingCode } from './api.js';
-import { state, subscribe, setMode, setTheme, setDb, applyTheme, loadWho, loadDbs, isHostAdmin, wizard, pageAllowed } from './state.js';
+import { state, subscribe, setMode, setTheme, setDb, applyTheme, loadWho, loadDbs, isHostAdmin, wizard, pageAllowed, setConsoleMode, applyConsoleModeForRoute, HOST_PAGES, DATABASE_PAGES } from './state.js';
 
-const NAV = [
+const DATABASE_NAV = [
   { id: 'dashboard', title: 'Dashboard', icon: 'home' },
   { id: 'databases', title: 'Databases', icon: 'db' },
   { id: 'data', title: 'Data Explorer', icon: 'table' },
   { id: 'studio', title: 'BoxQL Studio', icon: 'terminal' },
-  { id: 'hosting', title: 'Hosting', icon: 'globe' },
   { id: 'keys', title: 'API Keys', icon: 'key' },
   { id: 'devices', title: 'Add a device', icon: 'phone' },
   { id: 'apps', title: 'Connected apps', icon: 'link' },
   { id: 'backups', title: 'Backups', icon: 'backup' },
-  { id: 'updates', title: 'Updates', icon: 'refresh' },
   { id: 'settings', title: 'Settings', icon: 'gear' },
   { id: 'help', title: 'Help', icon: 'book' },
   { id: 'watch', title: 'Live Watch', icon: 'pulse', adv: true },
@@ -22,12 +20,31 @@ const NAV = [
   { id: 'presets', title: 'Presets', icon: 'compare', adv: true },
   { id: 'owner', title: 'Owner', icon: 'shield' },
 ];
+const HOST_NAV = [
+  { id: 'hosting', title: 'Plans & billing', icon: 'globe' },
+  { id: 'usage', title: 'Usage & quotas', icon: 'pulse' },
+  { id: 'updates', title: 'Updates', icon: 'refresh' },
+  { id: 'logs', title: 'Logs', icon: 'list' },
+  { id: 'hostapps', title: 'Apps', icon: 'rocket', soon: true },
+  { id: 'deploy', title: 'Deploy', icon: 'upload', soon: true },
+  { id: 'domains', title: 'Domains & SSL', icon: 'lock', soon: true },
+  { id: 'env', title: 'Env & Secrets', icon: 'key', soon: true },
+  { id: 'applogs', title: 'App logs', icon: 'file', soon: true },
+  { id: 'owner', title: 'Owner', icon: 'shield' },
+];
+const NAV = [...DATABASE_NAV, ...HOST_NAV];
 const PAGES = new Set([...NAV.map((n) => n.id), 'join', 'wizard', 'connect']);
+const PAGE_FILE = { hostapps: 'coming', deploy: 'coming', domains: 'coming', env: 'coming', applogs: 'coming' };
 
 const app = document.getElementById('app');
 let current = null; // {destroy}
 
 export function navigate(path) { location.hash = '#/' + path.replace(/^#?\/?/, ''); }
+function rawPage() {
+  const raw = location.hash.replace(/^#\/?/, '').split('?')[0].split('/')[0];
+  if (!raw) return '';
+  try { return decodeURIComponent(raw); } catch { return raw; }
+}
 export function parseHash() {
   const raw = location.hash.replace(/^#\/?/, '');
   const [p, qs] = raw.split('?');
@@ -120,15 +137,16 @@ export async function startShell(firstRun = false) {
   await loadDbs();
   clear(app);
   app.className = 'shell';
-  shell = buildShell();
-  app.append(shell.root);
-  window.removeEventListener('hashchange', route);
-  window.addEventListener('hashchange', route);
   // a connect link (#/connect?...) must survive the first-run setup and sign-in: never send it to the wizard
   const connecting = parseHash().page === 'connect';
   if (!connecting && (firstRun || (!wizard.done() && isHostAdmin() && state.dbs.length <= 1 && (!location.hash || location.hash === '#/')))) {
     location.hash = '#/wizard';
   }
+  applyConsoleModeForRoute(rawPage());
+  shell = buildShell();
+  app.append(shell.root);
+  window.removeEventListener('hashchange', route);
+  window.addEventListener('hashchange', route);
   route();
 }
 
@@ -158,32 +176,62 @@ function buildShell() {
     nav,
     h('div', { class: 'side-foot' }, h('span', { class: 'muted small', id: 'ver' }, 'v' + (state.who && state.who.version || ''))));
   const dbSel = h('select', { class: 'select', 'aria-label': 'Current database', onchange: (e) => setDb(e.target.value) });
-  const modeBtn = h('button', { class: 'seg', role: 'group', 'aria-label': 'Mode' },
+  const modeBtn = h('button', { class: 'seg mode-seg', role: 'group', 'aria-label': 'Mode' },
     h('span', { class: 'seg-opt', 'data-m': 'simple', onclick: () => setMode('simple') }, 'Simple'),
     h('span', { class: 'seg-opt', 'data-m': 'advanced', onclick: () => setMode('advanced') }, 'Advanced'));
   modeBtn.title = 'Simple shows the everyday pages; Advanced adds Live Watch, Raw editor, Security, Cluster and Presets';
+  const surfaceBtn = h('div', { class: 'seg', id: 'console-mode', role: 'group', 'aria-label': 'Console' },
+    h('button', { class: 'seg-opt', type: 'button', 'data-surface': 'database', onclick: () => setSurface('database') }, 'Database'),
+    h('button', { class: 'seg-opt', type: 'button', 'data-surface': 'host', onclick: () => setSurface('host') }, 'Host'));
   const themeBtn = themeSwitcher();
   const who = h('button', { class: 'chip who', title: 'Sign out', onclick: signOut });
   const menu = h('button', { class: 'icon-btn menu-btn', 'aria-label': 'Menu', onclick: () => root.classList.toggle('open') }, icon('menu'));
-  const top = h('header', { class: 'top' }, menu, h('div', { class: 'grow' }), h('label', { class: 'dbpick' }, h('span', { class: 'muted small' }, 'Database'), dbSel), modeBtn, themeBtn, who);
+  const dbPick = h('label', { class: 'dbpick' }, h('span', { class: 'muted small' }, 'Database'), dbSel);
+  const top = h('header', { class: 'top' },
+    h('div', { class: 'top-start' }, menu, dbPick, modeBtn),
+    h('div', { class: 'top-center' }, surfaceBtn),
+    h('div', { class: 'top-end' }, themeBtn, who));
   const main = h('main', { class: 'main', id: 'main', tabindex: '-1' });
   const scrim = h('div', { class: 'scrim', onclick: () => root.classList.remove('open') });
   const root = h('div', { class: 'frame' }, side, scrim, h('div', { class: 'col' }, top, main));
+  function setSurface(next) {
+    const target = next === 'host' ? 'host' : 'database';
+    const raw = rawPage();
+    if (target === 'host' && (raw === '' || DATABASE_PAGES.has(raw))) {
+      location.hash = '#/hosting';
+      return;
+    }
+    if (target === 'database' && (raw === '' || HOST_PAGES.has(raw))) {
+      location.hash = '#/dashboard';
+      return;
+    }
+    setConsoleMode(target);
+  }
   function refresh() {
     clear(nav);
-    const mk = (n) => h('a', { class: 'nav-item', href: '#/' + n.id, 'data-id': n.id, onclick: () => root.classList.remove('open') }, icon(n.icon, 18), h('span', null, n.title));
+    const list = state.consoleMode === 'host' ? HOST_NAV : DATABASE_NAV;
+    const mk = (n) => h('a', { class: 'nav-item', href: '#/' + n.id, 'data-id': n.id, onclick: () => root.classList.remove('open') }, icon(n.icon, 18), h('span', null, n.title), n.soon ? h('span', { class: 'chip soon' }, 'Soon') : null);
     const show = (n) => pageAllowed(n.id);
-    NAV.filter((n) => !n.adv && n.id !== 'owner' && show(n)).forEach((n) => nav.append(mk(n)));
-    const owner = NAV.find((n) => n.id === 'owner');
-    if (owner && show(owner)) nav.append(mk(owner));
-    const adv = NAV.filter((n) => n.adv && show(n));
-    if (adv.length) {
-      nav.append(h('div', { class: 'nav-sep' }, state.mode === 'advanced' ? 'Advanced' : h('a', { href: '#', onclick: (e) => { e.preventDefault(); setMode('advanced'); } }, 'Show advanced pages')));
-      if (state.mode === 'advanced') adv.forEach((n) => nav.append(mk(n)));
+    list.filter((n) => !n.adv && n.id !== 'owner' && show(n)).forEach((n) => nav.append(mk(n)));
+    if (state.consoleMode !== 'host') {
+      const adv = list.filter((n) => n.adv && show(n));
+      if (adv.length) {
+        nav.append(h('div', { class: 'nav-sep' }, state.mode === 'advanced' ? 'Advanced' : h('a', { href: '#', onclick: (e) => { e.preventDefault(); setMode('advanced'); } }, 'Show advanced pages')));
+        if (state.mode === 'advanced') adv.forEach((n) => nav.append(mk(n)));
+      }
     }
+    const owner = list.find((n) => n.id === 'owner');
+    if (owner && show(owner)) nav.append(mk(owner));
     clear(dbSel);
     (state.dbs.length ? state.dbs : [state.db]).forEach((d) => dbSel.append(h('option', { value: d, selected: d === state.db }, d)));
     modeBtn.querySelectorAll('.seg-opt').forEach((o) => o.classList.toggle('on', o.dataset.m === state.mode));
+    surfaceBtn.dataset.mode = state.consoleMode;
+    surfaceBtn.querySelectorAll('.seg-opt').forEach((o) => {
+      const on = o.dataset.surface === state.consoleMode;
+      o.classList.toggle('on', on);
+      o.setAttribute('aria-pressed', String(on));
+    });
+    root.dataset.console = state.consoleMode;
     themeBtn.sync();
     const acct = state.who && state.who.account;
     mount(who, !state.who ? '' : acct ? (acct.username || acct.email) + (acct.owner === true ? ' · owner' : '') : (state.who.label || state.who.id) + ' · ' + state.who.scope);
@@ -209,6 +257,12 @@ async function signOut() {
 let routeSeq = 0;
 async function route() {
   if (!shell) return;
+  const raw = rawPage();
+  applyConsoleModeForRoute(raw);
+  if (raw === '' && state.consoleMode === 'host') {
+    location.hash = '#/hosting';
+    return;
+  }
   const seq = ++routeSeq;
   const { page, args, query } = parseHash();
   const known = PAGES.has(page);
@@ -227,11 +281,12 @@ async function route() {
       h('p', null, h('a', { href: '#/dashboard' }, 'Back to the dashboard'))));
     return;
   }
-  document.title = (NAV.find((n) => n.id === id)?.title || (id === 'connect' ? 'Connect an app' : 'RedX')) + ' · RedX Console';
+  const titled = NAV.find((n) => n.id === id);
+  document.title = (titled ? titled.title : (id === 'connect' ? 'Connect an app' : 'RedX')) + ' · RedX Console';
   try {
-    const mod = await import('./pages/' + id + '.js');
+    const mod = await import('./pages/' + (PAGE_FILE[id] || id) + '.js');
     if (seq !== routeSeq) return;
-    const view = await mod.default({ args, query, state, navigate, refreshShell: () => shell.refresh() });
+    const view = await mod.default({ args, query, state, navigate, page: id, refreshShell: () => shell.refresh() });
     if (seq !== routeSeq) { if (view && view.destroy) view.destroy(); return; }
     clear(main);
     if (view instanceof Node) main.append(view);

@@ -11,6 +11,7 @@ export const state = {
   db: ls('redx.db', 'default'),
   dbs: [],
   mode: ls('redx.mode', 'simple'), // simple | advanced
+  consoleMode: 'database', // database | host; per user, applied once whoami is loaded
   theme: normTheme(ls('redx.theme', 'dark')), // dark (default) | system | light
 };
 const subs = new Set();
@@ -19,6 +20,75 @@ const emit = () => subs.forEach((f) => f(state));
 
 export function setDb(db) { state.db = db; lsSet('redx.db', db); emit(); }
 export function setMode(m) { state.mode = m; lsSet('redx.mode', m); emit(); }
+
+/** Database pages are the console as it stands today, including Help. Host pages replace that nav. */
+export const DATABASE_PAGES = new Set(['dashboard', 'databases', 'data', 'studio', 'keys', 'devices', 'apps', 'backups', 'settings', 'help', 'watch', 'raw', 'policy', 'cluster', 'presets']);
+export const HOST_PAGES = new Set(['hosting', 'usage', 'updates', 'logs', 'hostapps', 'deploy', 'domains', 'env', 'applogs']);
+
+/** Signed-in identity for the remembered console mode. An account uses its id, then its email. */
+export function userKey() {
+  const w = state.who;
+  if (!w) return '';
+  const a = w.account;
+  if (a) return String(a.sub || a.email || w.id || '');
+  return String(w.id || '');
+}
+
+function modeKey() {
+  const k = userKey();
+  return k ? 'redx.consoleMode.' + k : '';
+}
+
+/** Stored choice for this user, or Database when nothing valid is stored. */
+export function readConsoleMode() {
+  const k = modeKey();
+  if (!k) return 'database';
+  return ls(k, '') === 'host' ? 'host' : 'database';
+}
+
+function modeQuery() {
+  try {
+    const q = new URLSearchParams(location.search).get('mode');
+    return q === 'host' || q === 'database' ? q : '';
+  } catch { return ''; }
+}
+
+function writeModeQuery(mode) {
+  try {
+    const u = new URL(location.href);
+    if (u.searchParams.get('mode') === mode) return;
+    u.searchParams.set('mode', mode);
+    history.replaceState(null, '', u.pathname + u.search + u.hash);
+  } catch { /* ignore */ }
+}
+
+export function setConsoleMode(m) {
+  const mode = m === 'host' ? 'host' : 'database';
+  state.consoleMode = mode;
+  const k = modeKey();
+  if (k) lsSet(k, mode);
+  writeModeQuery(mode);
+  emit();
+}
+
+/**
+ * Pick the mode for a hash page. A host page selects Host and a database page selects Database.
+ * Otherwise ?mode= wins, then this user's stored choice, then Database. The choice is saved.
+ */
+export function applyConsoleModeForRoute(page) {
+  const q = modeQuery();
+  let mode;
+  if (HOST_PAGES.has(page)) mode = 'host';
+  else if (DATABASE_PAGES.has(page)) mode = 'database';
+  else if (q) mode = q;
+  else mode = readConsoleMode();
+  state.consoleMode = mode;
+  const k = modeKey();
+  if (k) lsSet(k, mode);
+  writeModeQuery(mode);
+  emit();
+  return mode;
+}
 export function setTheme(t) {
   state.theme = normTheme(t);
   lsSet('redx.theme', state.theme);
