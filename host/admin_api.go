@@ -534,6 +534,9 @@ func (h *Host) dropDBHandler(w http.ResponseWriter, r *http.Request, db string) 
 		writeErr(w, 400, "deleting a database is permanent: repeat its name as ?confirm="+db)
 		return
 	}
+	if !h.checkHostSwitchQuota(w, pr) {
+		return
+	}
 	seq, err := h.WriteDropDB(db)
 	switch {
 	case errors.Is(err, ErrNoDB):

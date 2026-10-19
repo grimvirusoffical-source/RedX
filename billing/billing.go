@@ -14,23 +14,32 @@ import (
 	"time"
 )
 
-// Tiers are the RedX Hosted plans, cheapest first, with the Stripe lookup key of each monthly price
-// (Red-XAI LLC account; metadata app=redx, plan=<tier>).
+// Tiers are the RedX Hosted plans, cheapest first. Each has a monthly and an annual Stripe
+// lookup key (Red-XAI LLC account; metadata app=redx, plan=<tier>). Annual = 10× monthly
+// (2 months free). Quotas are the same for monthly and annual; they reset every month on the
+// billing cycle. Bytes are GiB/TiB (1024-based).
 var Tiers = []Tier{
-	{"basic", "Basic", "redx_hosted_basic_monthly"},
-	{"bronze", "Bronze", "redx_hosted_bronze_monthly"},
-	{"silver", "Silver", "redx_hosted_silver_monthly"},
-	{"gold", "Gold", "redx_hosted_gold_monthly"},
-	{"platinum", "Platinum", "redx_hosted_platinum_monthly"},
-	{"emerald", "Emerald", "redx_hosted_emerald_monthly"},
+	{"basic", "Basic", "redx_hosted_basic_monthly", "redx_hosted_basic_annual",
+		Quota{TrafficBytes: 10 << 30, StorageBytes: 1 << 30, HostSwitches: 2}},
+	{"bronze", "Bronze", "redx_hosted_bronze_monthly", "redx_hosted_bronze_annual",
+		Quota{TrafficBytes: 50 << 30, StorageBytes: 5 << 30, HostSwitches: 5}},
+	{"silver", "Silver", "redx_hosted_silver_monthly", "redx_hosted_silver_annual",
+		Quota{TrafficBytes: 150 << 30, StorageBytes: 20 << 30, HostSwitches: 10}},
+	{"gold", "Gold", "redx_hosted_gold_monthly", "redx_hosted_gold_annual",
+		Quota{TrafficBytes: 500 << 30, StorageBytes: 50 << 30, HostSwitches: 20}},
+	{"platinum", "Platinum", "redx_hosted_platinum_monthly", "redx_hosted_platinum_annual",
+		Quota{TrafficBytes: 1 << 40, StorageBytes: 100 << 30, HostSwitches: 40}},
+	{"emerald", "Emerald", "redx_hosted_emerald_monthly", "redx_hosted_emerald_annual",
+		Quota{TrafficBytes: 5 << 40, StorageBytes: 500 << 30, HostSwitches: UnlimitedSwitches}},
 }
 
 // App is the metadata.app value on RedX's Stripe objects; other apps on the same account are ignored.
 const App = "redx"
 
-// Tier is one RedX Hosted plan.
+// Tier is one RedX Hosted plan (monthly + annual Stripe prices, shared monthly quotas).
 type Tier struct {
-	Key, Name, LookupKey string
+	Key, Name, MonthlyLookup, AnnualLookup string
+	Quota                                  Quota
 }
 
 func tierOf(key string) (Tier, bool) {
@@ -42,13 +51,24 @@ func tierOf(key string) (Tier, bool) {
 	return Tier{}, false
 }
 
-func tierByLookup(lk string) (Tier, bool) {
+// tierByLookup maps a Stripe price lookup key to the tier and interval ("month" | "year").
+func tierByLookup(lk string) (Tier, string, bool) {
 	for _, t := range Tiers {
-		if t.LookupKey == lk {
-			return t, true
+		if t.MonthlyLookup == lk {
+			return t, "month", true
+		}
+		if t.AnnualLookup == lk {
+			return t, "year", true
 		}
 	}
-	return Tier{}, false
+	return Tier{}, "", false
+}
+
+func (t Tier) lookup(interval string) string {
+	if interval == "year" {
+		return t.AnnualLookup
+	}
+	return t.MonthlyLookup
 }
 
 // Config wires billing. Enabled needs a secret key, a publishable key and the public console URL.
@@ -81,18 +101,27 @@ type Service struct {
 	cfg    Config
 	stripe Stripe
 	store  *Store
+	usage  *UsageStore
 	now    func() time.Time
 	logf   func(string, ...interface{})
 	reason string // why billing is off ("" when on)
 }
 
 // New builds the service. With missing or mismatched keys it still answers (plans list, 503 on
-// checkout) and Reason says why; it never fails redxd start-up.
+// checkout) and Reason says why; it never fails redxd start-up. usage may be nil (quotas off).
 func New(cfg Config, st Stripe, store *Store, logf func(string, ...interface{})) *Service {
+	return NewWithUsage(cfg, st, store, nil, logf)
+}
+
+// NewWithUsage is New plus a usage store for hosted quotas.
+func NewWithUsage(cfg Config, st Stripe, store *Store, usage *UsageStore, logf func(string, ...interface{})) *Service {
 	if logf == nil {
 		logf = func(string, ...interface{}) {}
 	}
-	s := &Service{cfg: cfg, stripe: st, store: store, now: time.Now, logf: logf}
+	if usage == nil {
+		usage, _ = OpenUsageStore("")
+	}
+	s := &Service{cfg: cfg, stripe: st, store: store, usage: usage, now: time.Now, logf: logf}
 	live := strings.HasPrefix(cfg.SecretKey, "sk_live_") || strings.HasPrefix(cfg.SecretKey, "rk_live_")
 	switch {
 	case cfg.SecretKey == "" || st == nil:
@@ -125,6 +154,28 @@ func (s *Service) PlanFor(account string) string {
 	return ""
 }
 
+// ActivePlan returns the paid-up plan row (and whether it is active).
+func (s *Service) ActivePlan(account string) (Plan, bool) {
+	p, ok := s.store.Get(account)
+	if !ok || !p.Active(s.now()) {
+		return Plan{}, false
+	}
+	return p, true
+}
+
+// Usage returns the usage store (never nil after New).
+func (s *Service) Usage() *UsageStore { return s.usage }
+
+// UsageStatusFor returns quota + usage for a paid-up account (ok false if none).
+func (s *Service) UsageStatusFor(account string) (UsageStatus, bool) {
+	p, ok := s.ActivePlan(account)
+	if !ok {
+		return UsageStatus{}, false
+	}
+	q, _ := QuotaFor(p.Tier)
+	return s.usage.Status(account, p.Tier, p.Interval, q, s.now(), p.PeriodEnd), true
+}
+
 type price struct {
 	ID         string `json:"id"`
 	LookupKey  string `json:"lookup_key"`
@@ -135,10 +186,17 @@ type price struct {
 	} `json:"recurring"`
 }
 
+// priceKey is "tier|interval", e.g. "gold|month".
+func priceKey(tier, interval string) string { return tier + "|" + interval }
+
 func (s *Service) prices(ctx context.Context) (map[string]price, error) {
-	q := url.Values{"active": {"true"}, "limit": {"20"}}
-	for i, t := range Tiers {
-		q.Set("lookup_keys["+strconv.Itoa(i)+"]", t.LookupKey)
+	q := url.Values{"active": {"true"}, "limit": {"100"}}
+	i := 0
+	for _, t := range Tiers {
+		q.Set("lookup_keys["+strconv.Itoa(i)+"]", t.MonthlyLookup)
+		i++
+		q.Set("lookup_keys["+strconv.Itoa(i)+"]", t.AnnualLookup)
+		i++
 	}
 	var out struct {
 		Data []price `json:"data"`
@@ -148,8 +206,8 @@ func (s *Service) prices(ctx context.Context) (map[string]price, error) {
 	}
 	m := map[string]price{}
 	for _, p := range out.Data {
-		if t, ok := tierByLookup(p.LookupKey); ok {
-			m[t.Key] = p
+		if t, iv, ok := tierByLookup(p.LookupKey); ok {
+			m[priceKey(t.Key, iv)] = p
 		}
 	}
 	return m, nil
@@ -182,6 +240,10 @@ func (s *Service) Handler(identify func(w http.ResponseWriter, r *http.Request) 
 		case rest == "portal" && r.Method == "POST":
 			if id, ok := identify(w, r); ok {
 				s.portalRoute(w, r, id)
+			}
+		case rest == "hosting" && r.Method == "POST":
+			if id, ok := identify(w, r); ok {
+				s.hostingRoute(w, r, id)
 			}
 		default:
 			jerr(w, 404, "not_found", "not found")
@@ -224,9 +286,10 @@ func (s *Service) plansRoute(w http.ResponseWriter, r *http.Request) {
 		Currency  string `json:"currency,omitempty"`
 		Interval  string `json:"interval,omitempty"`
 		Available bool   `json:"available"`
+		Quota     Quota  `json:"quota"`
 	}
 	out := map[string]interface{}{"enabled": s.Enabled()}
-	plans := make([]planOut, 0, len(Tiers))
+	plans := make([]planOut, 0, len(Tiers)*2)
 	var ps map[string]price
 	if s.Enabled() {
 		var err error
@@ -239,14 +302,16 @@ func (s *Service) plansRoute(w http.ResponseWriter, r *http.Request) {
 		out["reason"] = s.reason
 	}
 	for _, t := range Tiers {
-		po := planOut{Key: t.Key, Name: t.Name}
-		if p, ok := ps[t.Key]; ok {
-			po.Amount, po.Currency, po.Available = p.UnitAmount, p.Currency, true
-			if p.Recurring != nil {
-				po.Interval = p.Recurring.Interval
+		for _, iv := range []string{"month", "year"} {
+			po := planOut{Key: t.Key, Name: t.Name, Interval: iv, Quota: t.Quota}
+			if p, ok := ps[priceKey(t.Key, iv)]; ok {
+				po.Amount, po.Currency, po.Available = p.UnitAmount, p.Currency, true
+				if p.Recurring != nil && p.Recurring.Interval != "" {
+					po.Interval = p.Recurring.Interval
+				}
 			}
+			plans = append(plans, po)
 		}
-		plans = append(plans, po)
 	}
 	out["plans"] = plans
 	jout(w, 200, out)
@@ -261,6 +326,7 @@ func (s *Service) checkoutRoute(w http.ResponseWriter, r *http.Request, id Ident
 	}
 	var in struct {
 		Plan           string `json:"plan"`
+		Interval       string `json:"interval"` // month (default) | year
 		IdempotencyKey string `json:"idempotencyKey"`
 	}
 	if !readBody(w, r, &in) {
@@ -269,6 +335,17 @@ func (s *Service) checkoutRoute(w http.ResponseWriter, r *http.Request, id Ident
 	t, ok := tierOf(in.Plan)
 	if !ok {
 		jerr(w, 400, "bad_plan", "unknown plan")
+		return
+	}
+	iv := in.Interval
+	if iv == "" || iv == "monthly" {
+		iv = "month"
+	}
+	if iv == "annual" || iv == "yearly" {
+		iv = "year"
+	}
+	if iv != "month" && iv != "year" {
+		jerr(w, 400, "bad_interval", "interval must be month or year")
 		return
 	}
 	if !idemRe.MatchString(in.IdempotencyKey) {
@@ -286,7 +363,7 @@ func (s *Service) checkoutRoute(w http.ResponseWriter, r *http.Request, id Ident
 		s.stripeErr(w, err)
 		return
 	}
-	p, ok := ps[t.Key]
+	p, ok := ps[priceKey(t.Key, iv)]
 	if !ok {
 		jerr(w, 503, "plan_unavailable", "this plan is not on sale yet")
 		return
@@ -303,7 +380,7 @@ func (s *Service) checkoutRoute(w http.ResponseWriter, r *http.Request, id Ident
 	} else if id.Email != "" {
 		f.Set("customer_email", id.Email)
 	}
-	for k, v := range map[string]string{"app": App, "plan": t.Key, "account": id.Sub} {
+	for k, v := range map[string]string{"app": App, "plan": t.Key, "interval": iv, "account": id.Sub} {
 		f.Set("metadata["+k+"]", v)
 		f.Set("subscription_data[metadata]["+k+"]", v)
 	}
@@ -311,12 +388,13 @@ func (s *Service) checkoutRoute(w http.ResponseWriter, r *http.Request, id Ident
 		ID           string `json:"id"`
 		ClientSecret string `json:"client_secret"`
 	}
-	if err := s.stripe.Do(r.Context(), "POST", "/v1/checkout/sessions", f, "redx-checkout-"+id.Sub+"-"+in.IdempotencyKey, &sess); err != nil {
+	idem := "redx-checkout-"+id.Sub+"-"+iv+"-"+in.IdempotencyKey
+	if err := s.stripe.Do(r.Context(), "POST", "/v1/checkout/sessions", f, idem, &sess); err != nil {
 		s.stripeErr(w, err)
 		return
 	}
 	jout(w, 200, map[string]interface{}{"session": sess.ID, "clientSecret": sess.ClientSecret,
-		"publishableKey": s.cfg.PublishableKey, "plan": t.Key, "amount": p.UnitAmount, "currency": p.Currency})
+		"publishableKey": s.cfg.PublishableKey, "plan": t.Key, "interval": iv, "amount": p.UnitAmount, "currency": p.Currency})
 }
 
 var sessRe = regexp.MustCompile(`^cs_(test|live)_[A-Za-z0-9]{10,200}$`)
@@ -361,8 +439,16 @@ func (s *Service) meRoute(w http.ResponseWriter, id Identity) {
 	out := map[string]interface{}{"enabled": s.Enabled(), "plan": "", "active": false}
 	if p.Active(s.now()) {
 		out["plan"], out["active"], out["status"], out["cancelAtPeriodEnd"] = p.Tier, true, p.Status, p.CancelAtEnd
+		out["interval"] = p.Interval
+		if p.Interval == "" {
+			out["interval"] = "month"
+		}
 		if !p.PeriodEnd.IsZero() {
 			out["periodEnd"] = p.PeriodEnd
+		}
+		if q, ok := QuotaFor(p.Tier); ok {
+			out["quota"] = q
+			out["usage"] = s.usage.Status(id.Sub, p.Tier, p.Interval, q, s.now(), p.PeriodEnd)
 		}
 	}
 	out["portal"] = p.Customer != ""
@@ -391,6 +477,43 @@ func (s *Service) portalRoute(w http.ResponseWriter, r *http.Request, id Identit
 		return
 	}
 	jout(w, 200, map[string]string{"url": out.URL})
+}
+
+// hostingRoute turns RedX Hosted on or off for the signed-in account (counts toward the monthly switch budget).
+func (s *Service) hostingRoute(w http.ResponseWriter, r *http.Request, id Identity) {
+	p, ok := s.ActivePlan(id.Sub)
+	if !ok {
+		jerr(w, 402, "plan_required", "Choose a RedX Hosted plan first")
+		return
+	}
+	var in struct {
+		Action string `json:"action"` // on | off
+	}
+	if !readBody(w, r, &in) {
+		return
+	}
+	wantOn := false
+	switch strings.ToLower(in.Action) {
+	case "on", "start":
+		wantOn = true
+	case "off", "stop":
+		wantOn = false
+	default:
+		jerr(w, 400, "bad_request", "action must be on or off")
+		return
+	}
+	q, _ := QuotaFor(p.Tier)
+	if err := s.usage.TryHostSwitch(id.Sub, q, wantOn, s.now(), p.PeriodEnd); err != nil {
+		var qe *ErrQuota
+		if errors.As(err, &qe) {
+			jout(w, qe.HTTP, map[string]string{"error": qe.Code, "message": qe.Message, "upgrade": "/ui/billing.html"})
+			return
+		}
+		jerr(w, 500, "error", err.Error())
+		return
+	}
+	st := s.usage.Status(id.Sub, p.Tier, p.Interval, q, s.now(), p.PeriodEnd)
+	jout(w, 200, map[string]interface{}{"ok": true, "hostedOn": st.HostedOn, "usage": st})
 }
 
 // ---- webhook ----
@@ -536,20 +659,27 @@ func (s *Service) syncSubscription(ctx context.Context, id string) error {
 	if account == "" {
 		return nil
 	}
-	tier, end := "", sub.CurrentPeriodEnd
+	tier, interval, end := "", "", sub.CurrentPeriodEnd
 	for _, it := range sub.Items.Data {
-		if t, ok := tierByLookup(it.Price.LookupKey); ok {
-			tier = t.Key
+		if t, iv, ok := tierByLookup(it.Price.LookupKey); ok {
+			tier, interval = t.Key, iv
 			if it.CurrentPeriodEnd > end {
 				end = it.CurrentPeriodEnd
 			}
+		}
+	}
+	if interval == "" {
+		if sub.Metadata["interval"] == "year" {
+			interval = "year"
+		} else if tier != "" {
+			interval = "month"
 		}
 	}
 	prev, _ := s.store.Get(account)
 	if prev.Subscription != "" && prev.Subscription != sub.ID && prev.Active(s.now()) && sub.Status != "active" && sub.Status != "trialing" {
 		return nil // an old, ended subscription must not knock out the current one
 	}
-	p := Plan{Account: account, Tier: tier, Status: sub.Status, CancelAtEnd: sub.CancelAtPeriodEnd,
+	p := Plan{Account: account, Tier: tier, Interval: interval, Status: sub.Status, CancelAtEnd: sub.CancelAtPeriodEnd,
 		Customer: idOf(sub.Customer), Subscription: sub.ID, Updated: s.now().UTC()}
 	if end > 0 {
 		p.PeriodEnd = time.Unix(end, 0).UTC()

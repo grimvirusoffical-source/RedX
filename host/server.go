@@ -144,6 +144,15 @@ func (h *Host) authz(w http.ResponseWriter, r *http.Request, need, db, path stri
 	if !h.refuseHiddenDB(w, r, pr, db) {
 		return nil, false
 	}
+	// Hosted-plan traffic cap: refuse when already exhausted, then meter this request's body size.
+	if !h.checkTrafficQuota(w, pr) {
+		return nil, false
+	}
+	n := r.ContentLength
+	if n < 0 {
+		n = 0
+	}
+	h.meterTraffic(pr, n+256) // request body + a small floor for the response
 	return pr, true
 }
 
@@ -321,6 +330,9 @@ func (h *Host) pathHandler(w http.ResponseWriter, r *http.Request, db, path stri
 			h.mapErr(w, err)
 			return
 		}
+		if !h.checkStorageQuota(w, pr, int64(len(val))) {
+			return
+		}
 		if ex, ok := h.backendExtras(db); ok && ex.SecActive() {
 			if err := ex.SecWrite(secPrincipal(&pr.Key), path, val, false); err != nil {
 				h.auditPolicy(r, pr, db, err)
@@ -333,6 +345,7 @@ func (h *Host) pathHandler(w http.ResponseWriter, r *http.Request, db, path stri
 			h.mapErr(w, err)
 			return
 		}
+		h.noteStorage(pr, int64(len(val)))
 		h.writeAck(w, r, seq)
 	case "DELETE":
 		pr, ok := h.authz(w, r, ScopeWrite, db, path, false)
@@ -539,6 +552,9 @@ func (h *Host) dbsRoute(w http.ResponseWriter, r *http.Request) {
 		}
 		if json.Unmarshal(readBody(r), &b) != nil || b.Name == "" {
 			writeErr(w, 400, `body must be {"name": "..."}`)
+			return
+		}
+		if !h.checkHostSwitchQuota(w, pr) {
 			return
 		}
 		seq, err := h.WriteCreateDB(b.Name)

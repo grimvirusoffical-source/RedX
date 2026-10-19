@@ -12,6 +12,7 @@ import (
 type Plan struct {
 	Account      string    `json:"account"` // Red-XAI Account sub
 	Tier         string    `json:"tier,omitempty"`
+	Interval     string    `json:"interval,omitempty"` // month | year (from Stripe price lookup key)
 	Status       string    `json:"status,omitempty"` // Stripe subscription status
 	PeriodEnd    time.Time `json:"periodEnd,omitempty"`
 	CancelAtEnd  bool      `json:"cancelAtPeriodEnd,omitempty"`

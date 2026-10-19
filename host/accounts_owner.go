@@ -234,7 +234,11 @@ func (h *Host) ownerAccount(w http.ResponseWriter, r *http.Request, pr *Principa
 	for _, m := range recs {
 		if str(m["key"]) == id {
 			h.Audit.Log(AuditEvent{Event: "owner.read", KeyID: pr.Key.ID, Actor: pr.Account.Email, Target: "account " + truncate(id, 64), Remote: remoteIP(r)})
-			writeJSON(w, 200, ownerAccountView(m, time.Now()))
+			view := ownerAccountView(m, time.Now())
+			if st, ok := h.BillingUsage(id); ok {
+				view["hosted"] = st
+			}
+			writeJSON(w, 200, view)
 			return
 		}
 	}

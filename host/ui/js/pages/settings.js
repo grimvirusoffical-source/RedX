@@ -77,9 +77,19 @@ function hostedPlanCard() {
     if (!me) {
       card.append(h('p', { class: 'muted' }, 'Sign in with your Red-XAI Account to choose a RedX Hosted plan.'));
     } else if (me.active) {
-      const tier = (plans.plans || []).find((p) => p.key === me.plan);
-      card.append(h('p', null, chip(tier ? tier.name : me.plan, 'ok'), ' ', me.cancelAtPeriodEnd ? 'ends ' : 'renews ', me.periodEnd ? new Date(me.periodEnd).toLocaleDateString() : ''),
-        h('button', { class: 'btn', onclick: () => portal() }, 'Manage billing'));
+      const tier = (plans.plans || []).find((p) => p.key === me.plan && (p.interval || 'month') === (me.interval || 'month'));
+      const iv = me.interval === 'year' ? 'annual' : 'monthly';
+      const bits = [chip(tier ? tier.name : me.plan, 'ok'), ' · ', iv, ' · ', me.cancelAtPeriodEnd ? 'ends ' : 'renews ', me.periodEnd ? new Date(me.periodEnd).toLocaleDateString() : ''];
+      card.append(h('p', null, ...bits));
+      if (me.usage && me.quota) {
+        const u = me.usage, q = me.quota;
+        const gb = (n) => n >= (1 << 40) ? ((n / (1 << 40)).toFixed(1) + ' TB') : ((n / (1 << 30)).toFixed(2) + ' GB');
+        const sw = q.hostSwitches < 0 ? (u.hostSwitches + ' switches (unlimited)') : (u.hostSwitches + ' / ' + q.hostSwitches + ' switches');
+        card.append(h('p', { class: 'muted small' },
+          'This month: ', gb(u.trafficBytes), ' / ', gb(q.trafficBytes), ' traffic · ',
+          gb(u.storageBytes), ' / ', gb(q.storageBytes), ' storage · ', sw));
+      }
+      card.append(h('button', { class: 'btn', onclick: () => portal() }, 'Manage billing'));
     } else {
       card.append(h('p', { class: 'muted' }, 'No RedX Hosted plan on this account yet.'),
         h('div', { class: 'row gap wrap' }, h('a', { class: 'btn primary', href: '/ui/billing.html' }, 'Choose a plan'),

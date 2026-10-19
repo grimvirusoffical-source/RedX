@@ -23,19 +23,32 @@ func newBilling(cfg Config, logf func(string, ...interface{})) (*billing.Service
 	if err != nil {
 		return nil, err
 	}
+	us, err := billing.OpenUsageStore(filepath.Join(cfg.DataDir, "billing", "usage.json"))
+	if err != nil {
+		return nil, err
+	}
 	var sc billing.Stripe
 	if bc.SecretKey != "" {
 		sc = billing.NewClient(bc.SecretKey)
 	}
-	return billing.New(bc, sc, st, logf), nil
+	return billing.NewWithUsage(bc, sc, st, us, logf), nil
 }
 
 // BillingPlan returns the RedX Hosted tier a Red-XAI Account is paid up on ("" = none).
+// Quotas (storage, traffic, host switches) key off this; see docs/billing.md.
 func (h *Host) BillingPlan(accountSub string) string {
 	if h.billing == nil {
 		return ""
 	}
 	return h.billing.PlanFor(accountSub)
+}
+
+// BillingUsage returns quota + usage for a paid-up account.
+func (h *Host) BillingUsage(accountSub string) (billing.UsageStatus, bool) {
+	if h.billing == nil {
+		return billing.UsageStatus{}, false
+	}
+	return h.billing.UsageStatusFor(accountSub)
 }
 
 func (h *Host) billingRoute(w http.ResponseWriter, r *http.Request) {
