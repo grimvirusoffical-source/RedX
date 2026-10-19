@@ -61,10 +61,9 @@ jobs:
       - name: Generated SDK files match api/redx-api.json
         if: runner.os == 'Linux'
         run: go run ./scripts/gensdk -check
-      - name: Go SDK and C ABI (C ABI is skipped on Windows)
+      - name: Go SDK and C ABI (C ABI is skipped on Windows; gofmt is checked above)
         run: |
           cd sdk/go
-          gofmt -l . | (! grep .)
           if [ "$RUNNER_OS" = "Windows" ]; then
             go vet ./redx/... && go test -count=1 -timeout 10m ./redx/...
           else
