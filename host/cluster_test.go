@@ -341,10 +341,18 @@ func TestDivergedOldLeaderGetsSnapshotAndLosesUnreplicatedWrites(t *testing.T) {
 	if st, b, _ := do(t, "POST", leader.URL+"/v1/cluster/leader", leader.Key, body); st != 200 {
 		t.Fatalf("demote old leader %d %s", st, b)
 	}
-	eventually(t, "old leader resynced via snapshot, acked write discarded", 8*time.Second, func() bool {
-		st, _, _ := do(t, "GET", leader.URL+P+"v:B.Lost", f1.Key, "")
-		cs := status(t, leader)
-		return st == 404 && cs.Snapshots == 1 && cs.Role == "follower"
+	var lastSt int
+	var lastCS host.ClusterStatus
+	defer func() {
+		if t.Failed() {
+			t.Logf("last observed: GET v:B.Lost=%d, role=%s, snapshots=%d, last_error=%q", lastSt, lastCS.Role, lastCS.Snapshots, lastCS.LastError)
+		}
+	}()
+	// Windows runners install the snapshot noticeably slower; the condition itself is unchanged.
+	eventually(t, "old leader resynced via snapshot, acked write discarded", 20*time.Second, func() bool {
+		lastSt, _, _ = do(t, "GET", leader.URL+P+"v:B.Lost", f1.Key, "")
+		lastCS = status(t, leader)
+		return lastSt == 404 && lastCS.Snapshots == 1 && lastCS.Role == "follower"
 	})
 	if st, _, _ := do(t, "GET", leader.URL+P+"v:B.Shared", f1.Key, ""); st != 200 {
 		t.Fatal("shared data survives")
