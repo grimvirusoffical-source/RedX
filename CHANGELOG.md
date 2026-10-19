@@ -6,6 +6,8 @@
 * Clustering: a promoted node now fences the old leader. When the old leader is reachable it stops accepting writes (`503`, `FENCED` in `redx node status`) until it is repointed; the fence survives restarts. See [Clustering](docs/clustering.md#failover-promote-fencing-and-repoint).
 * `redx node repoint` and `redx node join --local` accept `--leader-pin` (alias `--fingerprint`) or a join link, so a node can follow a new leader that uses a self-signed certificate. A fenced old leader reuses the fingerprint it learned from the fence.
 * `redx doctor` checks the TLS certificate also before the data directory exists, accepts `--tls` / `--tls-cert`, and reports the certificate the running daemon serves.
+* Fixed a race where a replication pull still in flight during `promote` could overwrite the promoted node's new replication id.
+* The macOS app's executable is the launcher again (the `redx` CLI moved to `RedX.app/Contents/Resources/bin`), and the `.pkg` always installs into `/Applications`.
 * `redx node status` no longer shows a stale "last error" after a successful promote.
 * Added the app connect handshake (`/v1/connect/*`): an app asks for its own workspace, the owner approves on a consent page in the console, and the app exchanges a one-time code plus its PKCE verifier for a key limited to that workspace. Apps can revoke their own key, and the console lists them under *Connected apps*. See [Connecting apps](docs/connect.md).
 

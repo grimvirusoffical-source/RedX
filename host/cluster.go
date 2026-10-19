@@ -644,6 +644,12 @@ func (c *Cluster) pullOnce(ctx context.Context, stop <-chan struct{}) error {
 		return fmt.Errorf("leader answered %d: %s", resp.StatusCode, lr.Error)
 	}
 	c.mu.Lock()
+	select {
+	case <-stop: // promoted or repointed while this pull was in flight: its answer belongs to the old leader
+		c.mu.Unlock()
+		return nil
+	default:
+	}
 	if lr.ReplID != "" && lr.ReplID != c.meta.ReplID {
 		c.meta.ReplID = lr.ReplID // partial resync across a failover
 		_ = c.saveMeta()
@@ -657,6 +663,11 @@ func (c *Cluster) pullOnce(ctx context.Context, stop <-chan struct{}) error {
 	}
 	c.mu.Unlock()
 	for _, e := range lr.Entries {
+		select {
+		case <-stop:
+			return nil
+		default:
+		}
 		if err := c.applyEntry(e); err != nil {
 			if errors.Is(err, ErrNeedResync) {
 				c.h.Logf("replication: backend asked for a full resync at seq %d", e.Seq)
