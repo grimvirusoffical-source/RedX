@@ -114,6 +114,16 @@ type Server struct {
 	// EmailResendAfter, when set, makes POST /v1/email/resend answer 429 with that Retry-After.
 	EmailResendAfter  string
 	EmailResendLogins []string
+	// ResumeIncludesTOTP attaches totp to a resumed sign-up so tests can prove the proxy drops it.
+	ResumeIncludesTOTP bool
+	Resumes            int
+	pendingAccts       []pendingAcct
+}
+
+// pendingAcct is one unverified sign-up. v1.2.1 does not reserve the email: another sign-up with the
+// same address is a second pending account, unless the email and password both match (a resume).
+type pendingAcct struct {
+	email, username, password, twoFactor string
 }
 
 // New returns a fake with one ES256 signing key.
@@ -145,6 +155,13 @@ func (s *Server) SetEmailSendFails(on bool) {
 func (s *Server) SetEmailResendAfter(after string) {
 	s.mu.Lock()
 	s.EmailResendAfter = after
+	s.mu.Unlock()
+}
+
+// SetResumeIncludesTOTP controls whether a resumed sign-up response includes totp.
+func (s *Server) SetResumeIncludesTOTP(on bool) {
+	s.mu.Lock()
+	s.ResumeIncludesTOTP = on
 	s.mu.Unlock()
 }
 
@@ -575,49 +592,92 @@ func (s *Server) signup(w http.ResponseWriter, r *http.Request) {
 		e(w, 400, "tos_grant_invalid", "Agree to the terms again.")
 		return
 	}
+	em := strings.ToLower(strings.TrimSpace(b.Email))
+	if !s.LegacySignup {
+		for _, p := range s.pendingAccts {
+			if p.email == em && p.password == b.Password {
+				g.used = true
+				s.Resumes++
+				kept := b
+				kept.Username, kept.TwoFactor = p.username, p.twoFactor
+				kept.Password, kept.PasswordConfirm = "(redacted)", "(redacted)"
+				j(w, 201, s.verifyOut(kept, true))
+				return
+			}
+		}
+	}
 	if s.taken[strings.ToLower(b.Username)] {
 		j(w, 409, map[string]string{"error": "username_taken", "message": "That username is taken.", "field": "username"})
 		return
 	}
-	if s.taken[strings.ToLower(b.Email)] {
+	// v1.1 reserved the address. v1.2.1 does not: a second pending sign-up may use the same email.
+	if s.LegacySignup && s.taken[em] {
 		j(w, 409, map[string]string{"error": "email_taken", "message": "That email is already used.", "field": "email"})
 		return
 	}
 	g.used = true
-	s.taken[strings.ToLower(b.Username)], s.taken[strings.ToLower(b.Email)] = true, true
+	s.taken[strings.ToLower(b.Username)] = true
+	if s.LegacySignup {
+		s.taken[em] = true
+	} else {
+		s.pendingAccts = append(s.pendingAccts, pendingAcct{email: em, username: b.Username, password: b.Password, twoFactor: b.TwoFactor})
+	}
 	b.Password, b.PasswordConfirm = "(redacted)", "(redacted)"
 	s.Signups = append(s.Signups, b)
+	if s.LegacySignup {
+		sess := rnd("rxa_s_")
+		s.sessions[sess] = b.Username
+		pending := []string{}
+		if b.TwoFactor != "none" {
+			pending = []string{"2fa_setup"}
+		}
+		out := map[string]interface{}{
+			"account": map[string]interface{}{
+				"id": rnd("rxa_"), "username": b.Username, "email": b.Email, "emailVerified": false,
+				"firstName": b.FirstName, "middleName": b.MiddleName, "lastName": b.LastName,
+			},
+			"session": sess, "pending": pending,
+		}
+		if b.TwoFactor == "app" {
+			out["totp"] = totpFor(b.Username)
+		}
+		j(w, 201, out)
+		return
+	}
+	j(w, 201, s.verifyOut(b, false))
+}
+
+func totpFor(username string) map[string]string {
+	return map[string]string{"secret": "JBSWY3DPEHPK3PXP", "otpauthUri": "otpauth://totp/Red-XAI:" + url.PathEscape(username) + "?secret=JBSWY3DPEHPK3PXP&issuer=Red-XAI"}
+}
+
+// verifyOut is the v1.2.1 sign-up body. A resume does not include the authenticator key unless a test asks for it.
+func (s *Server) verifyOut(b host.SignupRequest, resumed bool) map[string]interface{} {
 	pending := []string{"verify_email"}
 	if b.TwoFactor != "none" {
 		pending = append(pending, "2fa_setup")
 	}
-	sess := ""
-	if s.LegacySignup {
-		sess = rnd("rxa_s_")
-		s.sessions[sess] = b.Username
-		if b.TwoFactor != "none" {
-			pending = []string{"2fa_setup"}
-		} else {
-			pending = []string{}
-		}
-	}
 	out := map[string]interface{}{
+		"step": "verify_email", "session": "",
 		"account": map[string]interface{}{
 			"id": rnd("rxa_"), "username": b.Username, "email": b.Email, "emailVerified": false,
 			"firstName": b.FirstName, "middleName": b.MiddleName, "lastName": b.LastName,
 		},
-		"session": sess, "pending": pending,
+		"pending": pending, "emailSent": !s.EmailSendFails, "emailMasked": maskEmail(b.Email),
+		"pendingUntilMs": time.Now().Add(24 * time.Hour).UnixMilli(),
 	}
-	if !s.LegacySignup {
-		out["step"] = "verify_email"
-		out["emailSent"] = !s.EmailSendFails
-		out["emailMasked"] = maskEmail(b.Email)
-		out["pendingUntilMs"] = time.Now().Add(24 * time.Hour).UnixMilli()
+	if resumed {
+		out["resumed"] = true
+		out["message"] = "This sign-up is already waiting for the email link. The first username was kept."
+		if s.ResumeIncludesTOTP && b.TwoFactor == "app" {
+			out["totp"] = totpFor(b.Username)
+		}
+		return out
 	}
 	if b.TwoFactor == "app" {
-		out["totp"] = map[string]string{"secret": "JBSWY3DPEHPK3PXP", "otpauthUri": "otpauth://totp/Red-XAI:" + url.PathEscape(b.Username) + "?secret=JBSWY3DPEHPK3PXP&issuer=Red-XAI"}
+		out["totp"] = totpFor(b.Username)
 	}
-	j(w, 201, out)
+	return out
 }
 
 func maskEmail(e string) string {

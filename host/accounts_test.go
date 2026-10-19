@@ -524,16 +524,16 @@ func TestAccountsSignupProxy(t *testing.T) {
 	if len(f.Signups) != 1 || f.Signups[0].App != "redx" || f.Signups[0].FirstName != "Josh" || f.Signups[0].LastName != "Franklinn" || !f.Signups[0].AcknowledgeFalseInfo || f.Signups[0].TwoFactor != "app" {
 		t.Fatalf("forwarded: %+v", f.Signups)
 	}
-	rst, raw, _ := do(t, "POST", A+"/email/resend", "", `{"login":"new@example.com"}`, "Content-Type", "application/json")
+	rst, raw, _ := do(t, "POST", A+"/email/resend", "", `{"login":"grim_player1"}`, "Content-Type", "application/json")
 	rm := jsonOf(t, raw)
-	if rst != 200 || rm["ok"] != true || len(f.EmailResendLogins) != 1 || f.EmailResendLogins[0] != "new@example.com" {
+	if rst != 200 || rm["ok"] != true || len(f.EmailResendLogins) != 1 || f.EmailResendLogins[0] != "grim_player1" {
 		t.Fatalf("resend: %d %v logins=%v", rst, rm, f.EmailResendLogins)
 	}
 	if len(f.ClientIPs) == 0 || f.ClientIPs[len(f.ClientIPs)-1] == "" {
 		t.Fatal("resend must forward the client IP")
 	}
 	f.SetEmailResendAfter("120")
-	rst, raw, rh := do(t, "POST", A+"/email/resend", "", `{"login":"new@example.com"}`, "Content-Type", "application/json")
+	rst, raw, rh := do(t, "POST", A+"/email/resend", "", `{"login":"grim_player1"}`, "Content-Type", "application/json")
 	rm = jsonOf(t, raw)
 	if rst != 429 || rm["error"] != "rate_limited" || rh.Get("Retry-After") != "120" || rm["retryAfter"] != float64(120) {
 		t.Fatalf("resend limited: %d %v retry=%q", rst, rm, rh.Get("Retry-After"))
@@ -550,6 +550,29 @@ func TestAccountsSignupProxy(t *testing.T) {
 		t.Fatalf("signup email not sent: %d %v", st, m)
 	}
 	f.SetEmailSendFails(false)
+	// same email and password resumes the pending sign-up and does not return the authenticator key again
+	st, m = postJSON(t, A+"/signup", body(map[string]interface{}{"tosGrant": grant(), "username": "other_user1"}))
+	if st != 201 || m["resumed"] != true || m["totp"] != nil || m["step"] != "verify_email" {
+		t.Fatalf("resume: %d %v", st, m)
+	}
+	acct, _ = m["account"].(map[string]interface{})
+	if acct["username"] != "grim_player1" || f.Resumes != 1 {
+		t.Fatalf("resume kept the first username: %v resumes=%d", acct, f.Resumes)
+	}
+	// even if an Accounts build still attaches totp to a resume, RedX does not show it
+	f.SetResumeIncludesTOTP(true)
+	st, m = postJSON(t, A+"/signup", body(map[string]interface{}{"tosGrant": grant(), "username": "third_user1"}))
+	if st != 201 || m["resumed"] != true || m["totp"] != nil {
+		t.Fatalf("resume must not carry totp: %d %v", st, m)
+	}
+	f.SetResumeIncludesTOTP(false)
+	// a different password is another pending sign-up for the same email, not a conflict
+	st, m = postJSON(t, A+"/signup", body(map[string]interface{}{"tosGrant": grant(), "username": "rival_user1",
+		"password": "Abcdefgh124!", "passwordConfirm": "Abcdefgh124!"}))
+	rb, _ := json.Marshal(m)
+	if st != 201 || m["resumed"] == true || m["totp"] == nil || strings.Contains(string(rb), "email_pending") {
+		t.Fatalf("second pending signup: %d %s", st, rb)
+	}
 	// an older Accounts server still returns a session: 2FA is confirmed during sign-up, as before
 	f.SetLegacySignup(true)
 	st, m = postJSON(t, A+"/signup", body(map[string]interface{}{"tosGrant": grant(), "username": "legacy_user", "email": "legacy@example.com",

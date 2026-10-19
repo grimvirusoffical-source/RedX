@@ -43,7 +43,14 @@ const OWNER = 'owner@example.com'; // placeholder; real owner addresses live in 
     // expected refusals (wrong 2FA code, a regular account asking for owner data) show up as 4xx resource errors
     p.on('console', (m) => { if ((m.type() === 'error' || m.type() === 'warning') && !/Failed to load resource: the server responded with a status of 4\d\d/.test(m.text())) fail(`[${where}] console ${m.type()}: ${m.text()}`); });
     p.on('pageerror', (e) => fail(`[${where}] uncaught exception: ${e.message}`));
-    p.on('request', (r) => { const u = r.url(); if (!u.startsWith(url) && !u.startsWith(issuer) && !u.startsWith('data:') && !u.startsWith('blob:')) fail(`[${where}] request left the host: ${u}`); });
+    const resendLogins = [];
+    p.on('request', (r) => {
+      const u = r.url();
+      if (r.method() === 'POST' && u.startsWith(url + '/v1/auth/email/resend')) {
+        try { resendLogins.push(JSON.parse(r.postData() || '{}').login); } catch { resendLogins.push(''); }
+      }
+      if (!u.startsWith(url) && !u.startsWith(issuer) && !u.startsWith('data:') && !u.startsWith('blob:')) fail(`[${where}] request left the host: ${u}`);
+    });
     p.on('response', (r) => { if (r.url().startsWith(url) && r.status() >= 500) fail(`[${where}] ${r.status()} from ${r.url()}`); });
     const expect = (cond, msg) => (cond ? ok(msg) : fail(msg));
     const hints = (id) => p.$$eval(`#${id} li`, (ls) => ls.map((l) => ({ id: l.dataset.check, cls: l.className, color: getComputedStyle(l).color })));
@@ -57,13 +64,20 @@ const OWNER = 'owner@example.com'; // placeholder; real owner addresses live in 
     // A hash-only change does not run boot() again, so reload with the error in the address.
     await p.goto(url + '/#/signin?error=email_unverified&login=new.player%40example.com');
     await p.reload({ waitUntil: 'networkidle' });
-    await p.waitForSelector('#email-resend', { timeout: 10000 });
-    expect(/not confirmed/.test(await p.textContent('.form-err')), 'an unverified sign-in explains that the email must be confirmed');
-    expect(await p.inputValue('#email-resend-login') === 'new.player@example.com', 'resend is prefilled from the sign-in error');
+    await p.waitForSelector('#su-check-email', { timeout: 10000 });
+    expect(/not confirmed/.test(await p.textContent('.auth-card')), 'an unverified sign-in opens the check-email screen');
+    expect((await p.textContent('#su-check-address')).includes('new.player@example.com'), 'check-email shows the address from the sign-in');
+    expect(await p.inputValue('#email-resend-login') === '', 'resend asks for the username, not the email');
+    await p.fill('#email-resend-login', 'new.player@example.com');
+    await p.click('#email-resend');
+    expect(/username, not the email/.test(await p.textContent('#email-resend-err')), 'an email address is refused for resend');
+    await p.fill('#email-resend-login', 'grim_player1');
     await p.click('#email-resend');
     await p.waitForFunction(() => /on its way/.test(document.querySelector('#email-resend-note').textContent));
-    expect(await p.$eval('#email-resend', (e) => e.disabled), 'resend on the sign-in page has a cooldown');
-    ok('unverified sign-in offers Resend');
+    expect(await p.$eval('#email-resend', (e) => e.disabled), 'resend on the check-email screen has a cooldown');
+    expect(resendLogins.at(-1) === 'grim_player1', 'the unverified sign-in resend sends the username');
+    ok('unverified sign-in opens check-email and resends with the username');
+    await p.click('#su-check-back');
 
     // ---- sign-up: ToS gate ----
     where = 'signup-tos';
@@ -151,9 +165,11 @@ const OWNER = 'owner@example.com'; // placeholder; real owner addresses live in 
     expect((await p.textContent('#su-check-address')).includes('new.player@example.com'), 'check your email shows the address');
     expect(/held until/.test(await p.textContent('#su-pending-until')), 'the pending sign-up expiry is shown');
     expect(await p.$('#su-2fa-go') === null, 'sign-up does not ask for a 2FA code');
-    expect(await p.$('#su-totp-secret') !== null, 'the authenticator key can be saved before sign-in');
+    expect(await p.$('#su-totp-secret') !== null, 'the authenticator key is shown once, on this sign-up');
+    expect(await p.$('#su-2fa-reenroll') === null, 'the first sign-up does not send the user away to re-enrol');
     await p.click('#email-resend');
     await p.waitForFunction(() => /on its way/.test(document.querySelector('#email-resend-note').textContent));
+    expect(resendLogins.at(-1) === 'grim_player1' && !resendLogins.some((login) => String(login).includes('@')), 'check-email resend uses the username');
     expect(await p.$eval('#email-resend', (e) => e.disabled), 'resend has a cooldown');
     await p.waitForSelector('#su-signin');
     ok('account created; sign-in is offered only after the email link');

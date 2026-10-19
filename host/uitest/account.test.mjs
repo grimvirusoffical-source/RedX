@@ -68,8 +68,12 @@ test('an unverified account can resend the confirmation email', () => {
   assert.match(account, /Check your email/);
   assert.match(account, /\/v1\/auth\/email\/resend/);
   assert.match(account, /r\.step === 'verify_email' && !r\.handle/);
+  assert.match(account, /!r\.resumed && r\.totp/);
+  assert.match(account, /su-2fa-reenroll/);
+  assert.equal(account.includes('email_pending'), false);
   assert.match(main, /email_unverified/);
-  assert.match(main, /resendLogin/);
+  assert.match(main, /renderUnverified/);
+  assert.equal(main.includes('resendLogin'), false);
 });
 
 test('the redxd-down hint is not used for a failed fetch', () => {

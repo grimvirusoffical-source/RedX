@@ -172,9 +172,9 @@ function copyArrow(from, to, label, after) {
   return h('button', { class: 'icon-btn copy-arrow', type: 'button', title: label, 'aria-label': label, onclick: () => { to.value = from.value; after(); } }, '⇅');
 }
 
-/** Resend the verification link. known hides the login box (the address is already on screen). */
+/** Resend the verification link. The login is the username. known hides the box when the sign-up already has it. */
 export function emailResendControl({ login = '', known = false } = {}) {
-  const input = h('input', { class: 'input', id: 'email-resend-login', type: 'text', autocomplete: 'username', maxlength: 254, value: login, 'aria-label': 'Email or username' });
+  const input = h('input', { class: 'input', id: 'email-resend-login', type: 'text', autocomplete: 'username', maxlength: 32, value: login, 'aria-label': 'Username' });
   const btn = h('button', { class: 'btn', id: 'email-resend', type: 'button' }, 'Resend verification email');
   const note = h('p', { class: 'muted small', id: 'email-resend-note' });
   const err = h('div', { class: 'form-err', id: 'email-resend-err', role: 'alert', hidden: true });
@@ -199,8 +199,8 @@ export function emailResendControl({ login = '', known = false } = {}) {
     const who = (known ? login : input.value).trim();
     err.hidden = true;
     note.textContent = '';
-    if (!who || who.length > 254) {
-      err.textContent = 'Enter the email address or username for the account.';
+    if (!who || who.includes('@')) {
+      err.textContent = 'Enter your username. Resend uses the username, not the email address.';
       err.hidden = false;
       return;
     }
@@ -219,7 +219,7 @@ export function emailResendControl({ login = '', known = false } = {}) {
     }
   };
   const kids = [];
-  if (!known) kids.push(h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Email or username'), input));
+  if (!known) kids.push(h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Username'), input));
   kids.push(btn, note, err);
   return h('div', { class: 'email-resend', id: 'email-resend-box' }, kids);
 }
@@ -431,28 +431,57 @@ function formStep(card, back, tos, rules, accepted) {
   update();
 }
 
-function checkEmailStep(card, r) {
+/** Check-your-email page after sign-up, and after an unverified sign-in (email_unverified). */
+export function renderUnverified(login, onBack) {
+  const card = h('div', { class: 'auth-card wide signup' });
+  const back = h('button', { class: 'btn small', id: 'su-check-back', type: 'button', onclick: onBack }, '← Back to sign in');
+  const raw = String(login || '').trim();
+  const email = raw.includes('@') ? raw : '';
+  checkEmailStep(card, { account: { email, username: email ? '' : raw }, emailSent: true, signIn: true }, back);
+  return h('div', { class: 'auth' }, card);
+}
+
+function checkEmailStep(card, r, back) {
   const email = (r.account && r.account.email) || '';
-  const shown = email || r.emailMasked || 'your email address';
+  const username = (r.account && r.account.username) || '';
+  const shown = email || r.emailMasked || '';
   const failed = r.emailSent === false;
-  const parts = [h('h2', { id: 'su-check-email' }, 'Check your email')];
-  parts.push(failed
-    ? h('p', null, 'The verification email to ', h('b', { id: 'su-check-address' }, shown), ' could not be sent just now.')
-    : h('p', null, 'We sent a verification link to ', h('b', { id: 'su-check-address' }, shown), '.'));
+  const parts = [];
+  if (back) parts.push(h('div', { class: 'row gap' }, back));
+  parts.push(h('h2', { id: 'su-check-email' }, 'Check your email'));
+  if (r.signIn) parts.push(h('p', null, 'This account’s email is not confirmed yet. Open the link we sent, then sign in.'));
+  if (shown) {
+    parts.push(failed
+      ? h('p', null, 'The verification email to ', h('b', { id: 'su-check-address' }, shown), ' could not be sent just now.')
+      : h('p', null, 'We sent a verification link to ', h('b', { id: 'su-check-address' }, shown), '.'));
+  } else {
+    parts.push(h('p', { id: 'su-check-address' }, failed
+      ? 'The verification email could not be sent just now.'
+      : 'We sent a verification link to the email address on this account.'));
+  }
   parts.push(h('p', null, failed
     ? 'Use Resend to try again. The account cannot sign in until you open the link.'
     : 'Open the link in that email, then sign in. The account cannot sign in until the link is opened.'));
   if (r.message) parts.push(h('p', { class: 'muted' }, r.message));
   const hold = pendingUntilText(r.pendingUntilMs);
   if (hold) parts.push(h('p', { class: 'muted small', id: 'su-pending-until' }, hold));
-  if (r.totp && r.totp.secret) {
+  // The authenticator key is returned once, on the first sign-up. A resume does not include it.
+  if (!r.resumed && r.totp && r.totp.secret) {
     const cv = h('canvas', { class: 'qr', id: 'su-totp-qr', 'aria-label': 'QR code for your authenticator app' });
     try { drawQR(cv, r.totp.otpauthUri, { scale: 5 }); } catch { /* the secret below still works */ }
     parts.push(h('h3', null, 'Authenticator app'),
-      h('p', null, 'Add this key to your authenticator app now. You confirm the code after you sign in, not during sign-up.'),
+      h('p', null, 'Add this key to your authenticator app now. It is shown only this once. You confirm the code after you sign in, not during sign-up.'),
       cv, h('div', { class: 'keybox' }, h('code', { id: 'su-totp-secret' }, r.totp.secret)));
+  } else if (r.resumed && r.twoFactor === 'app') {
+    const link = h('a', { id: 'su-2fa-reenroll', rel: 'noopener' }, 'Red-XAI Account');
+    if (cfgCache && cfgCache.hosted_account) link.href = cfgCache.hosted_account;
+    parts.push(h('p', { id: 'su-2fa-reenroll-note' },
+      'The authenticator key was shown once, when this sign-up was created. If you do not have it, open the email link and then turn two-factor authentication on again from your ', link, ' page.'));
+    if (!cfgCache || !cfgCache.hosted_account) {
+      accountsConfig().then((cfg) => { if (cfg && cfg.hosted_account) link.href = cfg.hosted_account; }).catch(() => {});
+    }
   }
-  parts.push(emailResendControl({ login: email, known: !!email }));
+  parts.push(emailResendControl({ login: username, known: !!username }));
   parts.push(h('a', { class: 'btn primary big', id: 'su-signin', href: '/v1/auth/login' }, 'Sign in with Red-XAI Account'),
     h('p', { class: 'muted small' }, 'Sign in only after you open the link in the email.'));
   card.replaceChildren(...parts);

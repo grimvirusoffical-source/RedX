@@ -706,16 +706,17 @@ func (h *Host) authSignup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	out := map[string]interface{}{"pending": res.Pending, "twoFactor": req.TwoFactor, "account": acct}
-	if res.TOTP != nil {
-		out["totp"] = res.TOTP // the authenticator key, so it can be saved before the email link is opened
-	}
 	if res.Session != "" {
-		// An older Accounts server still returns a session and confirms 2FA during sign-up.
+		// An older Accounts server (v1.1) still returns a session and confirms 2FA during sign-up.
+		if res.TOTP != nil {
+			out["totp"] = res.TOTP
+		}
 		if containsStr(res.Pending, "2fa_setup") {
 			out["handle"] = h.accts.addSignup(res.Session)
 		}
 	} else {
-		// v1.2: sign-up never signs in. The person opens the email link, then signs in.
+		// v1.2.1: sign-up never signs in. The person opens the email link, then signs in.
+		// A resumed sign-up does not include the authenticator key; it was shown once, on the first response.
 		out["step"] = "verify_email"
 		if res.Step != "" {
 			out["step"] = res.Step
@@ -736,6 +737,8 @@ func (h *Host) authSignup(w http.ResponseWriter, r *http.Request) {
 		}
 		if res.Resumed {
 			out["resumed"] = true
+		} else if res.TOTP != nil {
+			out["totp"] = res.TOTP
 		}
 	}
 	h.Audit.Log(AuditEvent{Event: "account.signup", Remote: remoteIP(r), Detail: "new Red-XAI Account via RedX (2FA: " + req.TwoFactor + ")"})
@@ -752,7 +755,7 @@ func (h *Host) authEmailResend(w http.ResponseWriter, r *http.Request) {
 	}
 	login := strings.TrimSpace(b.Login)
 	if login == "" || len(login) > EmailMax || strings.ContainsAny(login, "\r\n\x00") {
-		acctErr(w, 400, "bad_request", "Enter the email address or username.")
+		acctErr(w, 400, "bad_request", "Enter the username.")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
