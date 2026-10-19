@@ -57,6 +57,14 @@ func (h *Host) routes() http.Handler {
 			lim = int64(h.Cfg.MaxUploadMB) << 20
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, lim)
+		if t := bearer(r); h.accts != nil && strings.HasPrefix(t, acctTokenPrefix) {
+			// requests made with a console session end when the session ends (WebSockets included)
+			ctx, cancel := context.WithCancel(r.Context())
+			untrack := h.accts.trackStream(t, cancel)
+			defer untrack()
+			defer cancel()
+			r = r.WithContext(ctx)
+		}
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
@@ -131,13 +139,31 @@ func (h *Host) authz(w http.ResponseWriter, r *http.Request, need, db, path stri
 		writeErr(w, http.StatusForbidden, "forbidden")
 		return nil, false
 	}
-	if db != AllDBs && pr.Hides(db) {
-		// The master accounts database answers exactly like a database that does not exist.
-		h.Audit.Log(AuditEvent{Event: "auth.denied", KeyID: pr.Key.ID, DB: db, Remote: remoteIP(r), Method: r.Method, Route: routeOf(r), Reason: "protected database"})
-		writeErr(w, 404, "database not found")
+	if !h.refuseHiddenDB(w, r, pr, db) {
 		return nil, false
 	}
 	return pr, true
+}
+
+// refuseHiddenDB is the single gate for the master accounts database on every read/write path that
+// names a database. New endpoints must call this (via authz / authzScope) so they cannot forget it.
+func (h *Host) refuseHiddenDB(w http.ResponseWriter, r *http.Request, pr *Principal, db string) bool {
+	if db == "" || db == AllDBs || !pr.Hides(db) {
+		return true
+	}
+	h.Audit.Log(AuditEvent{Event: "auth.denied", KeyID: pr.Key.ID, DB: db, Remote: remoteIP(r), Method: r.Method, Route: routeOf(r), Reason: "protected database"})
+	writeErr(w, 404, "database not found")
+	return false
+}
+
+// refuseMasterMutation refuses drop/recreate of the master accounts DB for anyone who is not an owner.
+func (h *Host) refuseMasterMutation(w http.ResponseWriter, r *http.Request, pr *Principal, db string) bool {
+	if !h.IsMasterDB(db) || pr.IsOwner() {
+		return true
+	}
+	h.Audit.Log(AuditEvent{Event: "auth.denied", KeyID: pr.Key.ID, DB: db, Remote: remoteIP(r), Method: r.Method, Route: routeOf(r), Reason: "master database mutation"})
+	writeErr(w, 403, "forbidden: only an owner login can delete or recreate the master accounts database")
+	return false
 }
 
 // ownerOnlyOK guards host-wide operations whose output includes every database (online backup, cluster join
@@ -691,7 +717,8 @@ func (h *Host) clusterRoute(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 405, "method not allowed")
 			return
 		}
-		if pr, ok := h.authz(w, r, ScopeAdmin, AllDBs, "", true); ok {
+		if pr, ok := h.authz(w, r, ScopeAdmin, AllDBs, "", true); ok && h.ownerOnlyOK(w, r, pr) {
+			h.Audit.Log(AuditEvent{Event: "node.promote", KeyID: pr.Key.ID, Actor: auditActor(pr), Remote: remoteIP(r)})
 			c.handlePromote(w, r, pr)
 		}
 	case "superseded":
@@ -706,7 +733,7 @@ func (h *Host) clusterRoute(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		pr, ok := h.authz(w, r, ScopeAdmin, AllDBs, "", true)
-		if !ok {
+		if !ok || !h.ownerOnlyOK(w, r, pr) {
 			return
 		}
 		var b struct {
@@ -722,7 +749,7 @@ func (h *Host) clusterRoute(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 400, err.Error())
 			return
 		}
-		h.Audit.Log(AuditEvent{Event: "node.repoint", KeyID: pr.Key.ID, Remote: remoteIP(r), Detail: b.URL})
+		h.Audit.Log(AuditEvent{Event: "node.repoint", KeyID: pr.Key.ID, Actor: auditActor(pr), Remote: remoteIP(r), Detail: b.URL})
 		writeJSON(w, 200, map[string]interface{}{"ok": true, "role": "follower", "leader": b.URL})
 	default:
 		writeErr(w, 404, "not found")

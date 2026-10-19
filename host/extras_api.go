@@ -63,6 +63,10 @@ func (h *Host) authzScope(w http.ResponseWriter, r *http.Request, need, db strin
 		writeErr(w, http.StatusForbidden, "forbidden")
 		return nil, false
 	}
+	// Same master-DB gate as authz: BX / subscribe / pulse / media / code must not see it either.
+	if !h.refuseHiddenDB(w, r, pr, db) {
+		return nil, false
+	}
 	return pr, true
 }
 

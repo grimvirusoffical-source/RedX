@@ -165,27 +165,45 @@ type tokenResponse struct {
 	AccessToken string `json:"access_token"`
 	TokenType   string `json:"token_type"`
 	IDToken     string `json:"id_token"`
+	Refresh     string `json:"refresh_token"`
 	ExpiresIn   int    `json:"expires_in"`
 	Scope       string `json:"scope"`
 	Error       string `json:"error"`
 	ErrorDesc   string `json:"error_description"`
 }
 
+// ClientIPHeader carries the end user's IP on every sign-up and sign-in call RedX forwards to Red-XAI Accounts.
+const ClientIPHeader = "X-RedXAI-Client-IP"
+
 // exchange trades the authorization code (with the PKCE verifier) for tokens.
-func (c *oidcClient) exchange(ctx context.Context, code, redirect, verifier string) (*tokenResponse, error) {
+func (c *oidcClient) exchange(ctx context.Context, code, redirect, verifier, clientIP string) (*tokenResponse, error) {
+	f := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {redirect}, "client_id": {c.clientID}, "code_verifier": {verifier}}
+	t, err := c.tokenCall(ctx, f, clientIP)
+	if err == nil && t.IDToken == "" {
+		return nil, errors.New("the sign-in could not be completed (no ID token)")
+	}
+	return t, err
+}
+
+// refresh rotates a refresh token (confidential client).
+func (c *oidcClient) refresh(ctx context.Context, refreshToken, clientIP string) (*tokenResponse, error) {
+	return c.tokenCall(ctx, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refreshToken}, "client_id": {c.clientID}}, clientIP)
+}
+
+func (c *oidcClient) tokenCall(ctx context.Context, f url.Values, clientIP string) (*tokenResponse, error) {
 	d, err := c.discovery(ctx)
 	if err != nil {
 		return nil, err
 	}
-	f := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {redirect}, "client_id": {c.clientID}, "code_verifier": {verifier}}
 	req, err := http.NewRequestWithContext(ctx, "POST", d.TokenEndpoint, strings.NewReader(f.Encode()))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
-	if c.secret != "" {
-		req.SetBasicAuth(url.QueryEscape(c.clientID), url.QueryEscape(c.secret))
+	c.clientAuth(req)
+	if clientIP != "" {
+		req.Header.Set(ClientIPHeader, clientIP)
 	}
 	res, err := c.hc.Do(req)
 	if err != nil {
@@ -194,7 +212,7 @@ func (c *oidcClient) exchange(ctx context.Context, code, redirect, verifier stri
 	defer res.Body.Close()
 	var t tokenResponse
 	_ = json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(&t)
-	if res.StatusCode != 200 || t.IDToken == "" {
+	if res.StatusCode != 200 || t.AccessToken == "" {
 		if t.Error == "" {
 			t.Error = fmt.Sprintf("status %d", res.StatusCode)
 		}
@@ -331,9 +349,9 @@ func (c *oidcClient) userinfo(ctx context.Context, access string) (map[string]in
 	return m, json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(&m)
 }
 
-// call makes a JSON request to the Red-XAI Accounts API (path relative to the issuer). It returns the
-// status and raw JSON body; errAccountsUnavailable when the service cannot be reached.
-func (c *oidcClient) call(ctx context.Context, method, path string, body interface{}, bearer string) (int, []byte, error) {
+// call makes a JSON request to the Red-XAI Accounts API (path relative to the issuer), with the end user's IP
+// in X-RedXAI-Client-IP. It returns the status and raw JSON body; errAccountsUnavailable when unreachable.
+func (c *oidcClient) call(ctx context.Context, method, path string, body interface{}, bearer, clientIP string) (int, []byte, error) {
 	var rd io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -353,12 +371,39 @@ func (c *oidcClient) call(ctx context.Context, method, path string, body interfa
 	if bearer != "" {
 		req.Header.Set("Authorization", "Bearer "+bearer)
 	}
+	if clientIP != "" {
+		req.Header.Set(ClientIPHeader, clientIP)
+	}
 	res, err := c.hc.Do(req)
 	if err != nil {
 		return 0, nil, errAccountsUnavailable
 	}
 	defer res.Body.Close()
 	b, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+	return res.StatusCode, b, nil
+}
+
+// clientAuth adds HTTP Basic client authentication (RFC 6749 2.3.1: both parts form-encoded).
+func (c *oidcClient) clientAuth(req *http.Request) {
+	if c.secret != "" {
+		req.SetBasicAuth(url.QueryEscape(c.clientID), url.QueryEscape(c.secret))
+	}
+}
+
+// backChannel makes an app back-channel call (HTTP Basic client authentication) and returns status and body.
+func (c *oidcClient) backChannel(ctx context.Context, method, path string) (int, []byte, error) {
+	req, err := http.NewRequestWithContext(ctx, method, c.issuer+path, nil)
+	if err != nil {
+		return 0, nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	c.clientAuth(req)
+	res, err := c.hc.Do(req)
+	if err != nil {
+		return 0, nil, errAccountsUnavailable
+	}
+	defer res.Body.Close()
+	b, _ := io.ReadAll(io.LimitReader(res.Body, 4<<20))
 	return res.StatusCode, b, nil
 }
 

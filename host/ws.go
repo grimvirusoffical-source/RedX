@@ -97,6 +97,8 @@ func (h *Host) subscribeHandler(w http.ResponseWriter, r *http.Request, db strin
 			}
 		case <-done:
 			return
+		case <-r.Context().Done(): // the console session ended (sign-out, ban, termination)
+			return
 		}
 	}
 }
@@ -159,6 +161,8 @@ func (h *Host) pulseSubscribe(w http.ResponseWriter, r *http.Request, db string)
 			}
 		case <-done:
 			return
+		case <-r.Context().Done(): // the console session ended (sign-out, ban, termination)
+			return
 		}
 	}
 }
@@ -206,6 +210,8 @@ func pumpWS[T any](w http.ResponseWriter, r *http.Request, ch <-chan T, filter f
 				return
 			}
 		case <-done:
+			return
+		case <-r.Context().Done(): // the console session ended (sign-out, ban, termination)
 			return
 		}
 	}

@@ -21,10 +21,14 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
 )
+
+// OwnerScope is the OIDC scope Red-XAI Accounts grants only to owner logins; owner rights need it on the token.
+const OwnerScope = "owner"
 
 // DefaultAccountsMasterDB is the RedX database the Red-XAI Accounts service stores its records in.
 const DefaultAccountsMasterDB = "redxai_accounts"
@@ -60,6 +64,9 @@ func (c *Config) validateAccounts() error {
 		if !strings.Contains(e, "@") || strings.ContainsAny(e, " \t,") {
 			return fmt.Errorf("owner_emails: %q is not an email address", e)
 		}
+		if !emailASCII(e) {
+			return fmt.Errorf("owner_emails: %q must be ASCII (Unicode lookalikes are refused)", e)
+		}
 		owners = append(owners, e)
 	}
 	c.OwnerEmails = owners
@@ -68,6 +75,28 @@ func (c *Config) validateAccounts() error {
 	}
 	if err := checkIssuerURL(c.AccountsIssuer); err != nil {
 		return fmt.Errorf("accounts_issuer: %w", err)
+	}
+	if c.AccountsClientSecret == "" && c.AccountsClientSecretFile != "" {
+		b, err := os.ReadFile(c.AccountsClientSecretFile)
+		if err != nil {
+			return fmt.Errorf("accounts_client_secret_file: %w", err)
+		}
+		c.AccountsClientSecret = strings.TrimSpace(string(b))
+	}
+	if c.AccountsClientSecret == "" {
+		return fmt.Errorf("accounts_issuer is set but RedX has no client secret: set REDX_ACCOUNTS_CLIENT_SECRET or accounts_client_secret_file (RedX is a confidential Red-XAI Accounts client)")
+	}
+	if c.AccountsSMSResendPath == "" {
+		c.AccountsSMSResendPath = "/v1/signup/resend-sms" // contract v1.1; set env to "off" to hide the button
+	}
+	if c.AccountsSMSResendPath == "off" {
+		c.AccountsSMSResendPath = ""
+	}
+	if p := c.AccountsSMSResendPath; p != "" && (!strings.HasPrefix(p, "/v1/") || strings.ContainsAny(p, "?#") || strings.Contains(p, "..")) {
+		return fmt.Errorf("accounts_sms_resend_path must be a Red-XAI Accounts path such as /v1/..., got %q", p)
+	}
+	if c.AccountsEventsPoll <= 0 {
+		c.AccountsEventsPoll = 15
 	}
 	if c.AccountsRedirect != "" {
 		u, err := url.Parse(c.AccountsRedirect)
@@ -100,7 +129,31 @@ func checkIssuerURL(s string) error {
 	return fmt.Errorf("must use https, got %q", s)
 }
 
-func foldEmail(e string) string { return strings.ToLower(strings.TrimSpace(e)) }
+// foldEmail trims and lowercases only ASCII A–Z. Unicode lookalikes (Kelvin K→k via strings.ToLower,
+// fullwidth letters, etc.) must NOT match a listed owner address. Owner config is also rejected if it
+// contains a non-ASCII rune (see validateAccounts).
+func foldEmail(e string) string {
+	e = strings.TrimSpace(e)
+	b := make([]byte, len(e))
+	for i := 0; i < len(e); i++ {
+		c := e[i]
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		b[i] = c
+	}
+	return string(b)
+}
+
+// emailASCII reports whether s is all ASCII (owner emails must be; IdP emails with non-ASCII never match).
+func emailASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] > 127 {
+			return false
+		}
+	}
+	return true
+}
 
 // AccountIdentity is a signed-in Red-XAI Account (claims from a verified ID token).
 type AccountIdentity struct {
@@ -110,6 +163,7 @@ type AccountIdentity struct {
 	EmailVerified bool      `json:"email_verified"`
 	AMR           []string  `json:"amr,omitempty"`
 	AgeBand       string    `json:"age_band,omitempty"`
+	Scopes        []string  `json:"scopes,omitempty"` // scopes granted on the access token (the "owner" scope matters)
 	Created       time.Time `json:"created"`
 	// set per request by the authenticator (not stored)
 	Owner        bool   `json:"owner"`
@@ -131,6 +185,9 @@ func ownerStatus(a *AccountIdentity, owners []string) (owner bool, blocked strin
 	if a == nil || a.Email == "" {
 		return false, ""
 	}
+	if !emailASCII(a.Email) {
+		return false, "" // Kelvin / fullwidth / etc. never match a listed owner
+	}
 	e := foldEmail(a.Email)
 	listed := false
 	for _, o := range owners {
@@ -146,6 +203,8 @@ func ownerStatus(a *AccountIdentity, owners []string) (owner bool, blocked strin
 		return false, "owner_email_unverified"
 	case !a.used2FA():
 		return false, "owner_2fa_required"
+	case !containsStr(a.Scopes, OwnerScope):
+		return false, "owner_scope_missing"
 	}
 	return true, ""
 }
@@ -154,6 +213,15 @@ type acctSession struct {
 	id       AccountIdentity
 	created  time.Time
 	lastSeen time.Time
+	// Red-XAI Accounts tokens, kept in memory only for owner sessions (moderation calls need them).
+	access, refresh string
+	accessExp       time.Time
+}
+
+// acctTokens are an owner session's Red-XAI Accounts tokens.
+type acctTokens struct {
+	Access, Refresh string
+	AccessExp       time.Time
 }
 
 type acctPending struct {
@@ -179,12 +247,14 @@ type accountStore struct {
 	pending  map[string]*acctPending
 	handoff  map[string]*acctHandoff
 	signups  map[string]*acctSignup
+	streams  map[string]map[int]func() // session hash -> cancel funcs of its open requests (WebSockets)
+	streamN  int
 	now      func() time.Time
 }
 
 func newAccountStore() *accountStore {
 	return &accountStore{sessions: map[string]*acctSession{}, pending: map[string]*acctPending{}, handoff: map[string]*acctHandoff{},
-		signups: map[string]*acctSignup{}, now: time.Now}
+		signups: map[string]*acctSignup{}, streams: map[string]map[int]func(){}, now: time.Now}
 }
 
 func tokHash(t string) string { s := sha256.Sum256([]byte(t)); return hex.EncodeToString(s[:]) }
@@ -248,6 +318,10 @@ func (s *accountStore) takePending(state string) *acctPending {
 
 // newSession stores a console session and returns a single-use handoff code for the browser.
 func (s *accountStore) newSession(id AccountIdentity) (token, handoff string) {
+	return s.newSessionWithTokens(id, nil)
+}
+
+func (s *accountStore) newSessionWithTokens(id AccountIdentity, t *acctTokens) (token, handoff string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.gcLocked()
@@ -255,7 +329,11 @@ func (s *accountStore) newSession(id AccountIdentity) (token, handoff string) {
 	id.Created = now
 	id.Owner, id.OwnerBlocked = false, ""
 	token = randToken(acctTokenPrefix)
-	s.sessions[tokHash(token)] = &acctSession{id: id, created: now, lastSeen: now}
+	se := &acctSession{id: id, created: now, lastSeen: now}
+	if t != nil {
+		se.access, se.refresh, se.accessExp = t.Access, t.Refresh, t.AccessExp
+	}
+	s.sessions[tokHash(token)] = se
 	handoff = randToken("rxh_")
 	s.handoff[tokHash(handoff)] = &acctHandoff{token: token, created: now}
 	return token, handoff
@@ -294,11 +372,87 @@ func (s *accountStore) lookup(token string) (*AccountIdentity, bool) {
 
 func (s *accountStore) endSession(token string) bool {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	k := tokHash(token)
 	_, ok := s.sessions[k]
 	delete(s.sessions, k)
+	cancels := s.takeStreamsLocked(k)
+	s.mu.Unlock()
+	for _, c := range cancels {
+		c()
+	}
 	return ok
+}
+
+func (s *accountStore) takeStreamsLocked(k string) []func() {
+	var out []func()
+	for _, c := range s.streams[k] {
+		out = append(out, c)
+	}
+	delete(s.streams, k)
+	return out
+}
+
+// endSessionsForSub ends every console session of one Red-XAI Account and closes its open WebSockets.
+func (s *accountStore) endSessionsForSub(sub string) int {
+	s.mu.Lock()
+	var cancels []func()
+	n := 0
+	for k, v := range s.sessions {
+		if v.id.Sub == sub {
+			delete(s.sessions, k)
+			cancels = append(cancels, s.takeStreamsLocked(k)...)
+			n++
+		}
+	}
+	s.mu.Unlock()
+	for _, c := range cancels {
+		c()
+	}
+	return n
+}
+
+// trackStream registers cancel for a long-lived request (a WebSocket) made with a console session; it runs
+// when the session ends. The returned func unregisters it.
+func (s *accountStore) trackStream(token string, cancel func()) func() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k := tokHash(token)
+	if s.streams[k] == nil {
+		s.streams[k] = map[int]func(){}
+	}
+	s.streamN++
+	id := s.streamN
+	s.streams[k][id] = cancel
+	return func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if m := s.streams[k]; m != nil {
+			delete(m, id)
+			if len(m) == 0 {
+				delete(s.streams, k)
+			}
+		}
+	}
+}
+
+// tokens returns an owner session's Red-XAI Accounts tokens.
+func (s *accountStore) tokens(token string) (acctTokens, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v := s.sessions[tokHash(token)]
+	if v == nil || v.access == "" {
+		return acctTokens{}, false
+	}
+	return acctTokens{Access: v.access, Refresh: v.refresh, AccessExp: v.accessExp}, true
+}
+
+// setTokens stores rotated tokens (refresh tokens rotate on every use).
+func (s *accountStore) setTokens(token string, t acctTokens) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if v := s.sessions[tokHash(token)]; v != nil {
+		v.access, v.refresh, v.accessExp = t.Access, t.Refresh, t.AccessExp
+	}
 }
 
 func (s *accountStore) addSignup(accSession string) string {

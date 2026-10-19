@@ -36,6 +36,7 @@ type Host struct {
 	connect     *connectStore // app connect handshake (connect.go)
 	accts       *accountStore // Red-XAI Accounts console sessions (accounts.go)
 	acctLim     *Limiter      // per-IP limits for the sign-in and sign-up endpoints
+	evCursor    *eventCursor  // Red-XAI Accounts event feed cursor (accounts_events.go)
 	oidc        *oidcClient   // Red-XAI Accounts OIDC relying party (accounts_oidc.go)
 	webSetup    bool          // an empty keystore may be set up from the browser (loopback only)
 	bootMu      sync.Mutex    // serialises the web bootstrap
@@ -163,6 +164,11 @@ func New(cfg Config, opener Opener, logf func(string, ...interface{})) (*Host, e
 	h.Cluster.start(ctx)
 	h.wg.Add(1)
 	go h.maintenance(ctx)
+	if h.AccountsEnabled() {
+		h.evCursor = loadEventCursor(cfg.DataDir)
+		h.wg.Add(1)
+		go h.accountEventsLoop(ctx)
+	}
 	return h, nil
 }
 

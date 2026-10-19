@@ -74,8 +74,14 @@ type Config struct {
 	// OwnerEmails lists the owner logins (deploy config or REDXAI_OWNER_EMAILS only; never commit real addresses).
 	// An owner must also have a verified email and have finished this sign-in with 2FA.
 	OwnerEmails []string `toml:"owner_emails"`
-	// AccountsClientSecret is read from REDX_ACCOUNTS_CLIENT_SECRET only (confidential clients); never from a file or flag.
-	AccountsClientSecret string `toml:"-"`
+	// RedX is a confidential Red-XAI Accounts client. The secret comes from env REDX_ACCOUNTS_CLIENT_SECRET or from
+	// the file named by accounts_client_secret_file (mode 0600); it is never put in redx.toml itself or committed.
+	AccountsClientSecret     string `toml:"-"`
+	AccountsClientSecretFile string `toml:"accounts_client_secret_file"`
+	// AccountsSMSResendPath overrides the Red-XAI Accounts SMS resend route (default /v1/signup/resend-sms; "" disables the button).
+	AccountsSMSResendPath string `toml:"accounts_sms_resend_path"`
+	// AccountsEventsPoll is how often (seconds) redxd polls /v1/apps/events for bans and terminations (default 15).
+	AccountsEventsPoll int `toml:"accounts_events_poll_seconds"`
 
 	ConfigFile string `toml:"-"`
 }
@@ -223,6 +229,15 @@ func (c *Config) ApplyEnv(get func(string) string) error {
 	s("REDX_ACCOUNTS_REDIRECT_URL", &c.AccountsRedirect)
 	s("REDX_ACCOUNTS_MASTER_DB", &c.AccountsMasterDB)
 	s("REDX_ACCOUNTS_CLIENT_SECRET", &c.AccountsClientSecret)
+	s("REDX_ACCOUNTS_CLIENT_SECRET_FILE", &c.AccountsClientSecretFile)
+	s("REDX_ACCOUNTS_SMS_RESEND_PATH", &c.AccountsSMSResendPath)
+	if v := get("REDX_ACCOUNTS_EVENTS_POLL_SECONDS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("REDX_ACCOUNTS_EVENTS_POLL_SECONDS: %w", err)
+		}
+		c.AccountsEventsPoll = n
+	}
 	if v := get("REDXAI_OWNER_EMAILS"); v != "" {
 		_ = (*csv)(&c.OwnerEmails).Set(v)
 	}

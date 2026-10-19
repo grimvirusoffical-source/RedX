@@ -100,12 +100,13 @@ func TestOwnerStatus(t *testing.T) {
 		owner   bool
 		blocked string
 	}{
-		{AccountIdentity{Email: "OWNER@example.com", EmailVerified: true, AMR: []string{"pwd", "otp"}}, true, ""},
-		{AccountIdentity{Email: "support-owner@example.com", EmailVerified: true, AMR: []string{"sms"}}, true, ""},
+		{AccountIdentity{Email: "OWNER@example.com", EmailVerified: true, AMR: []string{"pwd", "otp"}, Scopes: []string{"owner"}}, true, ""},
+		{AccountIdentity{Email: "support-owner@example.com", EmailVerified: true, AMR: []string{"sms"}, Scopes: []string{"openid", "owner"}}, true, ""},
+		{AccountIdentity{Email: "owner@example.com", EmailVerified: true, AMR: []string{"pwd", "otp"}}, false, "owner_scope_missing"},
 		{AccountIdentity{Email: "owner@example.com", EmailVerified: true, AMR: []string{"pwd"}}, false, "owner_2fa_required"},
 		{AccountIdentity{Email: "owner@example.com", EmailVerified: true, AMR: []string{"mfa"}}, false, "owner_2fa_required"},
-		{AccountIdentity{Email: "owner@example.com", EmailVerified: false, AMR: []string{"otp"}}, false, "owner_email_unverified"},
-		{AccountIdentity{Email: "someone@example.com", EmailVerified: true, AMR: []string{"otp"}}, false, ""},
+		{AccountIdentity{Email: "owner@example.com", EmailVerified: false, AMR: []string{"otp"}, Scopes: []string{"owner"}}, false, "owner_email_unverified"},
+		{AccountIdentity{Email: "someone@example.com", EmailVerified: true, AMR: []string{"otp"}, Scopes: []string{"owner"}}, false, ""},
 		{AccountIdentity{Email: "", EmailVerified: true, AMR: []string{"otp"}}, false, ""},
 	} {
 		id := c.id

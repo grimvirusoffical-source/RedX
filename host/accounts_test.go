@@ -1,6 +1,7 @@
 package host_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/cookiejar"
@@ -34,6 +35,8 @@ func startAcctNode(t *testing.T, issuer string) *node {
 	t.Helper()
 	return startNode(t, t.TempDir(), func(c *host.Config, u string) {
 		c.AccountsIssuer = issuer
+		c.AccountsClientSecret = "test-client-secret"
+		c.AccountsEventsPoll = 3600 // tests call PollAccountEventsNow; don't race the loop
 		c.OwnerEmails = []string{ownerA, ownerB}
 	})
 }
@@ -91,11 +94,12 @@ func browse(t *testing.T, start string) string {
 }
 
 var (
-	regular     = accountsfake.Identity{Sub: "rxa_REGULAR00000000000000000001", Email: "user@example.com", EmailVerified: true, Username: "regular_user", AMR: []string{"pwd"}}
-	ownerNo2FA  = accountsfake.Identity{Sub: "rxa_OWNER0000000000000000000001", Email: ownerA, EmailVerified: true, Username: "owner_account", AMR: []string{"pwd"}}
-	ownerUnverf = accountsfake.Identity{Sub: "rxa_OWNER0000000000000000000001", Email: ownerA, EmailVerified: false, Username: "owner_account", AMR: []string{"pwd", "otp"}}
-	ownerOK     = accountsfake.Identity{Sub: "rxa_OWNER0000000000000000000001", Email: "Owner@Example.com", EmailVerified: true, Username: "owner_account", AMR: []string{"pwd", "otp"}}
-	owner2SMS   = accountsfake.Identity{Sub: "rxa_OWNER0000000000000000000002", Email: ownerB, EmailVerified: true, Username: "support_owner", AMR: []string{"pwd", "sms"}}
+	regular      = accountsfake.Identity{Sub: "rxa_REGULAR00000000000000000001", Email: "user@example.com", EmailVerified: true, Username: "regular_user", AMR: []string{"pwd"}}
+	ownerNo2FA   = accountsfake.Identity{Sub: "rxa_OWNER0000000000000000000001", Email: ownerA, EmailVerified: true, Username: "owner_account", AMR: []string{"pwd"}}
+	ownerUnverf  = accountsfake.Identity{Sub: "rxa_OWNER0000000000000000000001", Email: ownerA, EmailVerified: false, Username: "owner_account", AMR: []string{"pwd", "otp"}}
+	ownerOK      = accountsfake.Identity{Sub: "rxa_OWNER0000000000000000000001", Email: "Owner@Example.com", EmailVerified: true, Username: "owner_account", AMR: []string{"pwd", "otp"}, OwnerScope: true}
+	owner2SMS    = accountsfake.Identity{Sub: "rxa_OWNER0000000000000000000002", Email: ownerB, EmailVerified: true, Username: "support_owner", AMR: []string{"pwd", "sms"}, OwnerScope: true}
+	ownerNoScope = accountsfake.Identity{Sub: "rxa_OWNER0000000000000000000001", Email: ownerA, EmailVerified: true, Username: "owner_account", AMR: []string{"pwd", "otp"}}
 )
 
 func TestAccountsConfigEndpoint(t *testing.T) {
@@ -131,7 +135,8 @@ func TestAccountsConfigEndpoint(t *testing.T) {
 func TestAccountsConfigValidation(t *testing.T) {
 	get := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
 	c := host.DefaultConfig()
-	if err := c.ApplyEnv(get(map[string]string{"REDXAI_OWNER_EMAILS": " Owner@Example.com , " + ownerB, "REDX_ACCOUNTS_ISSUER": "https://accounts.red-xai.example/"})); err != nil {
+	if err := c.ApplyEnv(get(map[string]string{"REDXAI_OWNER_EMAILS": " Owner@Example.com , " + ownerB, "REDX_ACCOUNTS_ISSUER": "https://accounts.red-xai.example/",
+		"REDX_ACCOUNTS_CLIENT_SECRET": "not-a-real-secret"})); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.Validate(); err != nil {
@@ -154,8 +159,14 @@ func TestAccountsConfigValidation(t *testing.T) {
 	}
 	c = host.DefaultConfig()
 	c.AccountsIssuer = "http://127.0.0.1:9"
+	c.AccountsClientSecret = "dev-secret"
 	if err := c.Validate(); err != nil {
 		t.Fatalf("loopback http issuer is fine for development: %v", err)
+	}
+	c = host.DefaultConfig()
+	c.AccountsIssuer = "https://accounts.red-xai.example"
+	if err := c.Validate(); err == nil {
+		t.Fatal("confidential client must refuse to start without a client secret")
 	}
 }
 
@@ -204,7 +215,7 @@ func TestAccountsOwnerNeeds2FAAndVerifiedEmail(t *testing.T) {
 	for _, c := range []struct {
 		id     accountsfake.Identity
 		reason string
-	}{{ownerNo2FA, "owner_2fa_required"}, {ownerUnverf, "owner_email_unverified"}} {
+	}{{ownerNo2FA, "owner_2fa_required"}, {ownerUnverf, "owner_email_unverified"}, {ownerNoScope, "owner_scope_missing"}} {
 		tok, acct := signIn(t, n, f, c.id)
 		if acct["owner"] != false || acct["owner_blocked"] != c.reason {
 			t.Fatalf("%s: %v", c.reason, acct)
@@ -214,7 +225,7 @@ func TestAccountsOwnerNeeds2FAAndVerifiedEmail(t *testing.T) {
 			t.Fatalf("%s: owner route = %d %s", c.reason, st, b)
 		}
 		if st, _, _ := do(t, "GET", n.URL+"/v1/dbs", tok, ""); st != 403 {
-			t.Fatalf("%s: no host rights without 2FA, got %d", c.reason, st)
+			t.Fatalf("%s: no host rights without owner rights, got %d", c.reason, st)
 		}
 	}
 }
@@ -387,7 +398,7 @@ func TestAccountsCallbackRejectsForgedState(t *testing.T) {
 	u, _ := url.Parse(res.Header.Get("Location"))
 	q := u.Query()
 	if q.Get("code_challenge_method") != "S256" || len(q.Get("code_challenge")) != 43 || q.Get("redirect_uri") != n.URL+"/v1/auth/callback" ||
-		q.Get("client_id") != "redx" || q.Get("nonce") == "" || q.Get("state") == "" || q.Get("scope") != "openid profile email" {
+		q.Get("client_id") != "redx" || q.Get("nonce") == "" || q.Get("state") == "" || q.Get("scope") != "openid profile email owner" {
 		t.Fatalf("authorize request: %s", u)
 	}
 	ck := res.Header.Get("Set-Cookie")
@@ -509,5 +520,111 @@ func TestAccountsSignupProxy(t *testing.T) {
 	}
 	if st, _, _ := do(t, "POST", A+"/signup", "", body(nil), "Content-Type", "text/plain"); st != 415 {
 		t.Fatal("non-JSON POST must be refused")
+	}
+}
+
+func TestAccountsClientIPAndUserinfoFallback(t *testing.T) {
+	f, iss := startFake(t)
+	n := startAcctNode(t, iss)
+	id := regular
+	id.ProfileOnlyInUserinfo = true
+	id.Email, id.Username = "user@example.com", "regular_user"
+	tok, acct := signIn(t, n, f, id)
+	if acct["email"] != "user@example.com" || acct["username"] != "regular_user" {
+		t.Fatalf("userinfo fallback: %v", acct)
+	}
+	_ = tok
+	if len(f.ClientIPs) == 0 || f.ClientIPs[len(f.ClientIPs)-1] == "" {
+		t.Fatalf("token exchange must forward X-RedXAI-Client-IP: %v", f.ClientIPs)
+	}
+	A := n.URL + "/v1/auth"
+	_, m := postJSON(t, A+"/tos/read", `{"version":"2026-10-19"}`)
+	g := m["grant"].(string)
+	postJSON(t, A+"/tos/agree", `{"grant":"`+g+`"}`)
+	body, _ := json.Marshal(map[string]interface{}{"username": "ip_user1", "password": "Abcdefgh123!", "passwordConfirm": "Abcdefgh123!",
+		"email": "ip@example.com", "emailConfirm": "ip@example.com", "dob": "07/04/2001", "tosGrant": g,
+		"twoFactor": "none", "acceptNo2faRisk": true, "acknowledgeFalseInfo": true})
+	st, _ := postJSON(t, A+"/signup", string(body))
+	if st != 201 {
+		t.Fatalf("signup: %d", st)
+	}
+	if len(f.ClientIPs) < 2 || f.ClientIPs[len(f.ClientIPs)-1] == "" {
+		t.Fatalf("signup must forward client IP: %v", f.ClientIPs)
+	}
+}
+
+func TestAccountsSMSResend(t *testing.T) {
+	f, iss := startFake(t)
+	n := startAcctNode(t, iss)
+	A := n.URL + "/v1/auth"
+	_, m := postJSON(t, A+"/tos/read", `{"version":"2026-10-19"}`)
+	g := m["grant"].(string)
+	postJSON(t, A+"/tos/agree", `{"grant":"`+g+`"}`)
+	body, _ := json.Marshal(map[string]interface{}{"username": "phone_user1", "password": "Abcdefgh123!", "passwordConfirm": "Abcdefgh123!",
+		"email": "phone@example.com", "emailConfirm": "phone@example.com", "dob": "07/04/2001", "tosGrant": g,
+		"twoFactor": "phone", "phone": "+15551234567", "acknowledgeFalseInfo": true})
+	st, m := postJSON(t, A+"/signup", string(body))
+	if st != 201 || m["handle"] == nil {
+		t.Fatalf("signup phone: %d %v", st, m)
+	}
+	h := m["handle"].(string)
+	st, m = postJSON(t, A+"/signup/2fa/resend", `{"handle":"`+h+`"}`)
+	if st != 202 && st != 200 {
+		t.Fatalf("resend: %d %v", st, m)
+	}
+	if f.Resends != 1 {
+		t.Fatalf("fake resends: %d", f.Resends)
+	}
+	cfg := jsonOf(t, mustDo(t, "GET", A+"/config", "", ""))
+	if cfg["sms_resend"] != true {
+		t.Fatalf("config sms_resend: %v", cfg)
+	}
+}
+
+func mustDo(t *testing.T, method, url, key, body string) string {
+	t.Helper()
+	_, b, _ := do(t, method, url, key, body)
+	return b
+}
+
+func TestAccountsModerationAndEvents(t *testing.T) {
+	f, iss := startFake(t)
+	n := startAcctNode(t, iss)
+	ownerTok, _ := signIn(t, n, f, ownerOK)
+	userTok, acct := signIn(t, n, f, regular)
+	sub, _ := acct["sub"].(string)
+	if sub == "" {
+		t.Fatal("no sub")
+	}
+	// kick through RedX owner API
+	st, b, _ := do(t, "POST", n.URL+"/v1/owner/accounts/"+sub+"/kick", ownerTok, `{"reason":"spam"}`, "Content-Type", "application/json")
+	if st != 200 {
+		t.Fatalf("kick: %d %s", st, b)
+	}
+	if len(f.Moderations) != 1 || f.Moderations[0].Action != "kick" || f.Moderations[0].Account != sub {
+		t.Fatalf("moderations: %+v", f.Moderations)
+	}
+	if st, _, _ := do(t, "GET", n.URL+"/v1/ui/whoami", userTok, ""); st != 401 {
+		t.Fatalf("kicked session must end immediately, got %d", st)
+	}
+	// ban via event poller (another account still signed in)
+	userTok2, acct2 := signIn(t, n, f, accountsfake.Identity{Sub: "rxa_REGULAR00000000000000000002", Email: "u2@example.com", EmailVerified: true, Username: "user_two", AMR: []string{"pwd"}})
+	sub2 := acct2["sub"].(string)
+	f.AddEvent("account.banned", sub2)
+	ended, err := n.H.PollAccountEventsNow(context.Background())
+	if err != nil || ended < 1 {
+		t.Fatalf("poll: ended=%d err=%v", ended, err)
+	}
+	if st, _, _ := do(t, "GET", n.URL+"/v1/ui/whoami", userTok2, ""); st != 401 {
+		t.Fatalf("banned session must end via events, got %d", st)
+	}
+	// cursor persisted
+	ended2, err := n.H.PollAccountEventsNow(context.Background())
+	if err != nil || ended2 != 0 {
+		t.Fatalf("second poll must be a no-op: ended=%d err=%v", ended2, err)
+	}
+	raw, _ := os.ReadFile(n.Dir + "/accounts/events.json")
+	if !strings.Contains(string(raw), `"since"`) {
+		t.Fatalf("cursor file: %s", raw)
 	}
 }
