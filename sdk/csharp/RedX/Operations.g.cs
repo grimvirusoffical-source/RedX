@@ -209,10 +209,6 @@ namespace RedX
         public Task<RedXResult> PathQueryAsync(string? db = null, object? body = null, CancellationToken ct = default) =>
             CallAsync("pathQuery", null, db, body, null, null, false, ct);
 
-        /// <summary>Run one BoxQL command or {Tx[]} transaction with $params. (POST /v1/db/{db}/bx; auth read; danger write)</summary>
-        public Task<RedXResult> BxAsync(string? db = null, object? body = null, CancellationToken ct = default) =>
-            CallAsync("bx", null, db, body, null, null, false, ct);
-
         /// <summary>File packs of a database. (GET /v1/db/{db}/pack; auth read; danger safe)</summary>
         public Task<RedXResult> ListPacksAsync(string? db = null, CancellationToken ct = default) =>
             CallAsync("listPacks", null, db, null, null, null, false, ct);
