@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased (0.4.4)
+
+* Subscriptions (`/v1/subscribe`) are armed before the WebSocket handshake completes, so a write made right after `subscribe()` returns is always delivered.
+* macOS installers: every Mach-O is signed explicitly, inside out, including `Contents/Resources/bin/redx` and the `.pkg`'s `/usr/local/bin` binaries (`codesign --deep` did not reach them). Optional `MACOS_SIGN_IDENTITY` / `MACOS_INSTALLER_IDENTITY`; installers stay unsigned (ad-hoc) by default.
+* Release builds refuse a dirty git tree (`REDX_ALLOW_DIRTY=1` overrides and stamps `-dirty`).
+* Removed a stray development binary from the repository root; root build outputs are ignored.
+
 ## 0.4.3
 
 * Security: `redx` and `redxd` help output (`-h`) no longer prints secrets taken from the environment or `redx.toml` as flag defaults. `--key` shows "(currently set from $REDX_KEY)" and `--join` "(currently set from $REDX_JOIN or redx.toml)".

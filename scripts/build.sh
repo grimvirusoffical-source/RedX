@@ -3,10 +3,13 @@
 # usage: scripts/build.sh [--tags "redx_stub"] [--only linux/amd64,...] [--version X] [--no-archive]
 # output: dist/redx-<version>-<os>-<arch>/{redxd,redx,redx-launcher}[.exe], docs, redx.{ico,icns,svg} + dist/*.tar.gz|zip + dist/SHA256SUMS
 # (the web console is embedded in redxd itself; scripts/sync-ui-docs.sh is run first so its Help docs match docs/)
+# A release build (--version or VERSION=...) refuses a dirty git tree; REDX_ALLOW_DIRTY=1 overrides and stamps "-dirty".
 set -euo pipefail
 cd "$(dirname "$0")/.."
+. scripts/clean-tree.sh
 
-VERSION="${VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo 0.1.0-dev)}"
+RELEASE=0; [ -n "${VERSION:-}" ] && RELEASE=1
+VERSION="${VERSION:-$(git describe --tags --always 2>/dev/null || echo 0.1.0-dev)}"
 TAGS="${TAGS:-}"
 ONLY=""
 ARCHIVE=1
@@ -14,7 +17,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --tags) TAGS="$2"; shift 2;;
     --only) ONLY="$2"; shift 2;;
-    --version) VERSION="$2"; shift 2;;
+    --version) VERSION="$2"; RELEASE=1; shift 2;;
     --no-archive) ARCHIVE=0; shift;;
     *) echo "unknown arg $1" >&2; exit 2;;
   esac
@@ -27,6 +30,7 @@ if [ -n "$ONLY" ]; then
 fi
 
 [ -x scripts/sync-ui-docs.sh ] && scripts/sync-ui-docs.sh >/dev/null
+require_clean_tree "$RELEASE"  # after the docs sync: a sync that changed files means the tree was not release-ready
 rm -rf dist; mkdir -p dist; FAILED=""
 LDFLAGS="-s -w -X redx/host.Version=${VERSION} -X main.version=${VERSION}"  # main.version: redx-launcher
 for t in "${TARGETS[@]}"; do
