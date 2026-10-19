@@ -629,7 +629,7 @@ func csOps(s *Spec) string {
 	}
 	b.WriteString("        };\n    }\n\n    public partial class RedXClient\n    {\n")
 	for _, o := range s.Operations {
-		if o.Response == "websocket" {
+		if o.Response == "websocket" || goHandwritten[o.ID] { // Bx has a typed hand-written method in every SDK
 			continue
 		}
 		var sig, params []string
