@@ -2,7 +2,10 @@
 
 ## Unreleased (0.4.4)
 
+## Unreleased (0.4.4)
+
 * Connect: added the `quicklaunch` provider (QuickLaunch developer tool) and a strict loopback callback rule: `http://127.0.0.1`, `http://[::1]` or `http://localhost` on any port with exactly the registered path; everything else is refused.
+* The console Help page has an About card with the ownership notice, also in the README.
 * Subscriptions (`/v1/subscribe`) are armed before the WebSocket handshake completes, so a write made right after `subscribe()` returns is always delivered.
 * macOS installers: every Mach-O is signed explicitly, inside out, including `Contents/Resources/bin/redx` and the `.pkg`'s `/usr/local/bin` binaries (`codesign --deep` did not reach them). Optional `MACOS_SIGN_IDENTITY` (hardened runtime) / `MACOS_INSTALLER_IDENTITY` (`productbuild --sign`); installers stay unsigned (ad-hoc) by default.
 * Release builds refuse a dirty git tree (`REDX_ALLOW_DIRTY=1` overrides and stamps `-dirty`).

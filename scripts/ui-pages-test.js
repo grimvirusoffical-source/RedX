@@ -17,6 +17,7 @@ const [,, redxd, redx] = process.argv;
 if (!redx) { console.error('usage: node scripts/ui-pages-test.js <redxd> <redx>'); process.exit(2); }
 const free = () => new Promise((r) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); }); });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const ABOUT = 'RedX is developed and maintained by Red-XAI LLC. Red-XAI LLC is wholly owned by GRIM-VIRUS, an independent recording artist who leads development under the alias MainDirectory. © Red-XAI LLC. All rights reserved.';
 const PAGES = ['dashboard', 'databases', 'data', 'studio', 'keys', 'devices', 'backups', 'settings', 'help', 'watch', 'raw', 'policy', 'cluster', 'presets', 'wizard', 'apps', 'connect'];
 (async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'redx-pages-'));
@@ -55,6 +56,10 @@ const PAGES = ['dashboard', 'databases', 'data', 'studio', 'keys', 'devices', 'b
         if (!info.shell) fail(`[${theme}/${pg}] console shell did not render`);
         if (info.errbox.length) fail(`[${theme}/${pg}] error box on the page: ${info.errbox.join(' | ')}`);
         if (info.text < 20) fail(`[${theme}/${pg}] page is empty`);
+        if (pg === 'help') {
+          const about = await p.evaluate(() => { const e = document.querySelector('#about .about-copy'); return e ? e.textContent : ''; });
+          if (about !== ABOUT) fail(`[${theme}/help] About text differs: ${JSON.stringify(about)}`);
+        }
       }
       await ctx.close();
     }

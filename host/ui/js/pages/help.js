@@ -2,6 +2,8 @@ import { h, icon, mount, errorBox, spinner, terminalPanel } from '../util.js';
 import { renderMarkdown } from '../md.js';
 import { pageHead, page } from './shared.js';
 
+export const ABOUT = 'RedX is developed and maintained by Red-XAI LLC. Red-XAI LLC is wholly owned by GRIM-VIRUS, an independent recording artist who leads development under the alias MainDirectory. © Red-XAI LLC. All rights reserved.';
+
 export const DOCS = [
   ['console', 'Using the console', 'Every page, the security model, presets and the terminal equivalents.'],
   ['boxql', 'BoxQL guide', 'The query and command language: read, add, set, delete, transactions, watch.'],
@@ -23,6 +25,7 @@ export default async function render(ctx) {
           h('dt', null, 'What is BoxQL?'), h('dd', null, 'RedX\'s own query language. ', h('a', { href: '#/help/boxql' }, 'Read the guide'), ' or open the ', h('a', { href: '#/studio' }, 'BoxQL Studio'), ' and try the snippets.'),
           h('dt', null, 'Do I need a terminal?'), h('dd', null, 'No. Every page shows the terminal equivalent in a collapsible panel if you want it.'),
           h('dt', null, 'Is my data sent anywhere?'), h('dd', null, 'No. The console talks only to this host. It loads no fonts, scripts or images from the internet.'))),
+      h('div', { class: 'card', id: 'about', style: { marginTop: '16px' } }, h('h3', null, 'About RedX'), h('p', { class: 'about-copy' }, ABOUT)),
       terminalPanel([{ label: 'Open this console', cmd: 'redxd open' }, { label: 'Check your setup', cmd: 'redxd doctor' }]));
     return root;
   }
