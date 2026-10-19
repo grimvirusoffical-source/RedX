@@ -5,6 +5,10 @@
 * Cluster: installing a full snapshot now swaps the databases directory atomically. A read racing the install could reopen the pre-snapshot databases and keep serving them, so a write discarded by the resync stayed readable (seen on Windows CI). Reads also wait while a snapshot is being swapped in.
 * C# and Swift SDKs: a stream reconnecting while the host restarts no longer gives up. A dial that failed while the host was starting, followed by a probe that reached the restarted host, was misread as a refusal (400) and ended the stream.
 * Tests: deterministic regressions for both, and for subscriptions armed before the WebSocket handshake.
+* `GET /v1/dbs` (SDK `listDatabases`) works with database-scoped keys: a key lists only the databases in its scope, never the master accounts database (`redxai_accounts`); host-admin keys still see every database. It used to answer 403 for every key except host admin.
+* Windows: the `.exe` version resources (Properties > Details) are generated at build time from the release version and say "Copyright (c) 2026 Red-XAI LLC". 0.4.4's executables still said 0.4.3.0 and "RedX" (stale committed `.syso` files, which are no longer committed).
+* Every release asset ships the LICENSE: each archive, the Windows install folder (`LICENSE.txt`), `RedX.app/Contents/Resources/LICENSE` (and the .dmg), `/usr/local/share/doc/redx/LICENSE` from the .pkg, and `/usr/share/doc/redx/copyright` in the .debs.
+* Note: an SDK's `dangerous` confirm is a client-side safety prompt, not a server-enforced security boundary; a raw admin key can call those endpoints directly. The server enforces key scope.
 
 ## 0.4.4
 
