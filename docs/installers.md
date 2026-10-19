@@ -48,3 +48,16 @@ uninstall have **not** been run on Windows. The macOS `.app`, `.dmg` and `.pkg` 
 built or run. The `.deb` was built and its contents checked on Linux; it has not been installed on a Raspberry Pi. Docker and
 iOS are untested. `scripts/verify-windows.ps1` and `scripts/verify-macos.sh` (run by the `release-build` workflow) do the real
 install-and-launch checks once the workflows can run.
+
+## Building installers yourself
+
+`scripts/build.sh --version X` (and the macOS installer script) refuse to build from a git working tree with uncommitted or
+untracked files, so the commit stamped into every binary is exactly the source that was built. `REDX_ALLOW_DIRTY=1`
+builds anyway and stamps the version as `X-dirty`. A build without `--version` (a development build) is stamped `-dirty`
+instead of refused.
+
+macOS builds are ad-hoc signed only (still **unsigned** in the sense above). Signing with your own Apple Developer ID is
+opt-in: set `MACOS_SIGN_IDENTITY="Developer ID Application: …"` (and `MACOS_INSTALLER_IDENTITY="Developer ID Installer: …"`
+for the `.pkg`). Every Mach-O is then signed on its own, inside out (`Contents/Resources/bin/redx`, `Contents/MacOS/redxd`,
+then the app) with the hardened runtime, and the `/usr/local/bin` copies in the `.pkg` are the same signed binaries.
+Notarization is not done by these scripts.
