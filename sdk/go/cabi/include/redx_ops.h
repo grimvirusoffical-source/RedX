@@ -110,6 +110,11 @@
 #define REDX_OP_ADD_HOSTED_DOMAIN "addHostedDomain" /* POST /v1/hosted/apps/{id}/domains, write */
 #define REDX_OP_DELETE_HOSTED_DOMAIN "deleteHostedDomain" /* DELETE /v1/hosted/apps/{id}/domains/{domain}, write */
 #define REDX_OP_VERIFY_HOSTED_DOMAIN "verifyHostedDomain" /* POST /v1/hosted/apps/{id}/domains/{domain}/verify, write */
+#define REDX_OP_GET_HOSTED_ENV "getHostedEnv" /* GET /v1/hosted/apps/{id}/env, safe */
+#define REDX_OP_PUT_HOSTED_ENV "putHostedEnv" /* PUT /v1/hosted/apps/{id}/env, write */
+#define REDX_OP_LIST_HOSTED_SECRETS "listHostedSecrets" /* GET /v1/hosted/apps/{id}/secrets, safe */
+#define REDX_OP_PUT_HOSTED_SECRET "putHostedSecret" /* PUT /v1/hosted/apps/{id}/secrets/{name}, write */
+#define REDX_OP_DELETE_HOSTED_SECRET "deleteHostedSecret" /* DELETE /v1/hosted/apps/{id}/secrets/{name}, write */
 #define REDX_OP_GET_HOSTED_USAGE "getHostedUsage" /* GET /v1/hosted/apps/{id}/usage, safe */
 #define REDX_OP_GET_HOSTED_HEALTH "getHostedHealth" /* GET /v1/hosted/apps/{id}/health, safe */
 #define REDX_OP_HOSTED_T_L_S_ASK "hostedTLSAsk" /* GET /v1/hosted/tls/ask, safe */

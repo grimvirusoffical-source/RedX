@@ -149,6 +149,8 @@ func usage() {
   redx app deploy ID (--archive FILE | --github REPO --ref REF | --image IMG | --dockerfile REPO --ref REF) [--strategy direct|canary|blue_green] [--canary PERCENT]
   redx app rollback ID (--deploy ID | --snapshot ID) | promote ID | start ID | stop ID | delete ID
   redx app domain add ID NAME [--method txt|cname|http] | domain verify ID NAME | domain rm ID NAME
+  redx app env show ID | env set ID KEY=VALUE ...
+  redx app secret set ID NAME   (value on stdin) | secret rm ID NAME
   redx app caddy
   redx backup --out FILE [--offline]      redx restore FILE [--force]
   redx doctor [--config FILE]

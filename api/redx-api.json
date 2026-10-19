@@ -1324,6 +1324,62 @@
    "response": "json"
   },
   {
+   "id": "getHostedEnv",
+   "group": "hosted",
+   "method": "GET",
+   "path": "/v1/hosted/apps/{id}/env",
+   "auth": "key",
+   "danger": "safe",
+   "summary": "Non-secret environment variables. Secrets are not included.",
+   "response": "json"
+  },
+  {
+   "id": "putHostedEnv",
+   "group": "hosted",
+   "method": "PUT",
+   "path": "/v1/hosted/apps/{id}/env",
+   "auth": "key",
+   "danger": "write",
+   "summary": "Replace non-secret environment variables. REDX_KEY cannot be set here.",
+   "response": "json",
+   "body": {
+    "vars": "object"
+   }
+  },
+  {
+   "id": "listHostedSecrets",
+   "group": "hosted",
+   "method": "GET",
+   "path": "/v1/hosted/apps/{id}/secrets",
+   "auth": "key",
+   "danger": "safe",
+   "summary": "Secret names. Values are always masked and never returned.",
+   "response": "json"
+  },
+  {
+   "id": "putHostedSecret",
+   "group": "hosted",
+   "method": "PUT",
+   "path": "/v1/hosted/apps/{id}/secrets/{name}",
+   "auth": "key",
+   "danger": "write",
+   "summary": "Set a secret. The value is encrypted at rest and the response shows only a mask.",
+   "response": "json",
+   "body": {
+    "value": "string"
+   }
+  },
+  {
+   "id": "deleteHostedSecret",
+   "group": "hosted",
+   "method": "DELETE",
+   "path": "/v1/hosted/apps/{id}/secrets/{name}",
+   "auth": "key",
+   "danger": "write",
+   "summary": "Delete a secret.",
+   "response": "json"
+  },
+  {
    "id": "getHostedUsage",
    "group": "hosted",
    "method": "GET",

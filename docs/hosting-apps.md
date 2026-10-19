@@ -4,7 +4,7 @@ Paying subscribers on a RedX host can run their own sites and apps next to their
 VPS at `host.rottenapplestore.org` is the first machine that does this. Databases stay as they are.
 BoxQL is still the only user-facing query language; apps are not queried with it.
 
-The console pages are **Apps**, **Deploy**, **Domains**. The CLI is `redx app`. The HTTP API is `/v1/hosted`
+The console pages are **Apps**, **Deploy**, **Domains**, **Env & Secrets**. The CLI is `redx app`. The HTTP API is `/v1/hosted`
 ([API](api.md#hosted-apps-v1hosted)).
 
 ## What a tenant can deploy

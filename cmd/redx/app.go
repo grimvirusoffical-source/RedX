@@ -37,6 +37,10 @@ func cmdApp(args []string) {
 		appSimple(rest, "delete")
 	case "domain":
 		appDomain(rest)
+	case "env":
+		appEnv(rest)
+	case "secret":
+		appSecret(rest)
 	case "caddy":
 		appCaddy(rest)
 	default:

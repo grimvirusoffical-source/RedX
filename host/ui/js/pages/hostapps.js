@@ -72,6 +72,7 @@ async function renderOne(root, id) {
     const links = [
       ['hostdeploy/' + enc(id), 'Deploy', 'upload'],
       ['hostdomains/' + enc(id), 'Domains', 'globe'],
+      ['hostsecrets/' + enc(id), 'Env & Secrets', 'lock'],
     ];
     mount(body,
       planBanners(app),
