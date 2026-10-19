@@ -251,25 +251,58 @@ type price struct {
 // priceKey is "tier|interval", e.g. "gold|month".
 func priceKey(tier, interval string) string { return tier + "|" + interval }
 
-func (s *Service) prices(ctx context.Context) (map[string]price, error) {
-	q := url.Values{"active": {"true"}, "limit": {"100"}}
-	i := 0
+// stripeMaxLookupKeys is Stripe's cap on a lookup_keys array. GET /v1/prices
+// answers 400 invalid_request_error above it. The other Stripe calls in this
+// repo are retrieves or creates; scripts/stripe-create-annual-prices.sh sends
+// one lookup key per request.
+const stripeMaxLookupKeys = 10
+
+// hostedLookupKeys is every hosted price lookup key, tier order, monthly then annual.
+func hostedLookupKeys() []string {
+	keys := make([]string, 0, len(Tiers)*2)
 	for _, t := range Tiers {
-		q.Set("lookup_keys["+strconv.Itoa(i)+"]", t.MonthlyLookup)
-		i++
-		q.Set("lookup_keys["+strconv.Itoa(i)+"]", t.AnnualLookup)
-		i++
+		keys = append(keys, t.MonthlyLookup, t.AnnualLookup)
 	}
-	var out struct {
-		Data []price `json:"data"`
+	return keys
+}
+
+// chunks splits s into contiguous groups of at most n. The split is by length,
+// not by what the elements mean, so adding a tier cannot rebuild one oversized request.
+func chunks[T any](s []T, n int) [][]T {
+	if len(s) == 0 {
+		return nil
 	}
-	if err := s.stripe.Do(ctx, "GET", "/v1/prices", q, "", &out); err != nil {
-		return nil, err
+	if n < 1 {
+		n = 1
 	}
+	out := make([][]T, 0, (len(s)+n-1)/n)
+	for i := 0; i < len(s); i += n {
+		end := i + n
+		if end > len(s) {
+			end = len(s)
+		}
+		out = append(out, s[i:end])
+	}
+	return out
+}
+
+func (s *Service) prices(ctx context.Context) (map[string]price, error) {
 	m := map[string]price{}
-	for _, p := range out.Data {
-		if t, iv, ok := tierByLookup(p.LookupKey); ok {
-			m[priceKey(t.Key, iv)] = p
+	for _, part := range chunks(hostedLookupKeys(), stripeMaxLookupKeys) {
+		q := url.Values{"active": {"true"}, "limit": {"100"}}
+		for i, k := range part {
+			q.Set("lookup_keys["+strconv.Itoa(i)+"]", k)
+		}
+		var out struct {
+			Data []price `json:"data"`
+		}
+		if err := s.stripe.Do(ctx, "GET", "/v1/prices", q, "", &out); err != nil {
+			return nil, err
+		}
+		for _, p := range out.Data {
+			if t, iv, ok := tierByLookup(p.LookupKey); ok {
+				m[priceKey(t.Key, iv)] = p
+			}
 		}
 	}
 	return m, nil

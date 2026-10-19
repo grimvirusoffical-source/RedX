@@ -4,9 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -15,13 +19,23 @@ import (
 
 // fakeStripe answers the few endpoints billing calls, from in-memory state.
 type fakeStripe struct {
-	mu       sync.Mutex
-	prices   []price
-	subs     map[string]map[string]interface{}
-	sessions map[string]map[string]interface{}
-	posts    []url.Values
-	idem     map[string]string
+	mu                 sync.Mutex
+	prices             []price
+	subs               map[string]map[string]interface{}
+	sessions           map[string]map[string]interface{}
+	posts              []url.Values
+	idem               map[string]string
+	priceLists         [][]string // lookup keys on each GET /v1/prices, in request order
+	priceListFail      bool       // after priceListFailAfter successes, further list calls error
+	priceListFailAfter int
 }
+
+// stripeLookupKeyLimit is the real Stripe cap. It is a literal on purpose: sharing
+// stripeMaxLookupKeys would let a too-large production chunk size hide in tests.
+const stripeLookupKeyLimit = 10
+
+// stripeLookupKeyLimitMessage is the message Stripe returns for that 400.
+const stripeLookupKeyLimitMessage = "Array lookup_keys exceeded maximum 10 allowed elements."
 
 func newFake() *fakeStripe {
 	f := &fakeStripe{subs: map[string]map[string]interface{}{}, sessions: map[string]map[string]interface{}{}, idem: map[string]string{}}
@@ -47,12 +61,25 @@ func (f *fakeStripe) Do(_ context.Context, method, path string, form url.Values,
 	var v interface{}
 	switch {
 	case method == "GET" && path == "/v1/prices":
+		keys := lookupKeyValues(form)
+		if len(keys) > stripeLookupKeyLimit {
+			return &Error{Status: 400, Type: "invalid_request_error", Message: stripeLookupKeyLimitMessage}
+		}
+		if f.priceListFail {
+			if f.priceListFailAfter <= 0 {
+				return &Error{Status: 500, Type: "api_error", Message: "injected stripe failure"}
+			}
+			f.priceListFailAfter--
+		}
+		f.priceLists = append(f.priceLists, append([]string(nil), keys...))
+		want := map[string]bool{}
+		for _, k := range keys {
+			want[k] = true
+		}
 		var data []price
 		for _, p := range f.prices {
-			for k, vs := range form {
-				if strings.HasPrefix(k, "lookup_keys[") && vs[0] == p.LookupKey {
-					data = append(data, p)
-				}
+			if want[p.LookupKey] {
+				data = append(data, p)
 			}
 		}
 		v = map[string]interface{}{"data": data}
@@ -525,5 +552,140 @@ func TestMetadataPlanAndAccessGrace(t *testing.T) {
 	}
 	if s.AccessFor("acct-meta") != "none" || !s.KnownAccount("acct-meta") {
 		t.Fatalf("after grace: access=%s known=%v", s.AccessFor("acct-meta"), s.KnownAccount("acct-meta"))
+	}
+}
+
+// lookupKeyValues reads lookup_keys[i] in index order. A non-contiguous index still
+// counts toward Stripe's array cap (the returned slice is at least that long).
+func lookupKeyValues(form url.Values) []string {
+	var out []string
+	for i := 0; ; i++ {
+		vs, ok := form["lookup_keys["+strconv.Itoa(i)+"]"]
+		if !ok {
+			break
+		}
+		out = append(out, vs...)
+	}
+	n := 0
+	for k, vs := range form {
+		if strings.HasPrefix(k, "lookup_keys[") {
+			n += len(vs)
+		}
+	}
+	for len(out) < n {
+		out = append(out, "")
+	}
+	return out
+}
+
+func TestChunksByLength(t *testing.T) {
+	if chunks([]int{}, 10) != nil {
+		t.Fatal("empty input")
+	}
+	got := chunks([]string{"a", "b", "c", "d", "e"}, 2)
+	want := [][]string{{"a", "b"}, {"c", "d"}, {"e"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("chunks = %v", got)
+	}
+	wide := chunks(make([]int, 25), 10)
+	if len(wide) != 3 || len(wide[0]) != 10 || len(wide[1]) != 10 || len(wide[2]) != 5 {
+		t.Fatalf("25/10 = %d chunks", len(wide))
+	}
+}
+
+func TestTwelveLookupKeys(t *testing.T) {
+	s, f, h := testService(t)
+	wantKeys := make([]string, 0, len(Tiers)*2)
+	for _, tier := range Tiers {
+		wantKeys = append(wantKeys, tier.MonthlyLookup, tier.AnnualLookup)
+	}
+	if len(wantKeys) != 12 {
+		t.Fatalf("hosted lookup keys = %d, want 12", len(wantKeys))
+	}
+	ps, err := s.prices(context.Background())
+	if err != nil || len(ps) != 12 {
+		t.Fatalf("prices: %v len %d", err, len(ps))
+	}
+	amt := map[string]int64{
+		"basic|month": 2000, "basic|year": 20000,
+		"bronze|month": 4500, "bronze|year": 45000,
+		"silver|month": 6000, "silver|year": 60000,
+		"gold|month": 8000, "gold|year": 80000,
+		"platinum|month": 9000, "platinum|year": 90000,
+		"emerald|month": 10000, "emerald|year": 100000,
+	}
+	for k, want := range amt {
+		p, ok := ps[k]
+		if !ok || p.UnitAmount != want || p.Currency != "usd" {
+			t.Fatalf("%s: ok=%v %+v", k, ok, p)
+		}
+	}
+	if !reflect.DeepEqual(f.priceLists, [][]string{wantKeys[:10], wantKeys[10:]}) {
+		t.Fatalf("batches = %#v, want a full chunk of 10 then the remaining 2 (not monthly|annual)", f.priceLists)
+	}
+	c, out := call(t, h, "GET", "/v1/billing/plans", "", nil)
+	plans, _ := out["plans"].([]interface{})
+	if c != 200 || len(plans) != 12 {
+		t.Fatalf("plans: %d %v", c, out)
+	}
+	for i, tier := range Tiers {
+		for j, iv := range []string{"month", "year"} {
+			row := plans[i*2+j].(map[string]interface{})
+			if row["key"] != tier.Key || row["interval"] != iv || row["available"] != true || row["amount"].(float64) != float64(amt[tier.Key+"|"+iv]) {
+				t.Fatalf("plan[%d] = %v", i*2+j, row)
+			}
+		}
+	}
+}
+
+func TestFakeStripeLookupKeyLimit(t *testing.T) {
+	f := newFake()
+	var sink struct {
+		Data []price `json:"data"`
+	}
+	q := url.Values{"active": {"true"}, "limit": {"100"}}
+	keys := hostedLookupKeys()
+	for i, k := range keys[:10] {
+		q.Set("lookup_keys["+strconv.Itoa(i)+"]", k)
+	}
+	if err := f.Do(context.Background(), "GET", "/v1/prices", q, "", &sink); err != nil || len(sink.Data) != 10 {
+		t.Fatalf("10 keys: %v data %d", err, len(sink.Data))
+	}
+	q.Set("lookup_keys[10]", "redx_hosted_extra")
+	err := f.Do(context.Background(), "GET", "/v1/prices", q, "", &sink)
+	var se *Error
+	if !errors.As(err, &se) || se.Status != 400 || se.Type != "invalid_request_error" || se.Message != stripeLookupKeyLimitMessage {
+		t.Fatalf("11 keys: %#v", err)
+	}
+	// A gap still counts: lookup_keys[0] and lookup_keys[20] are two elements, not 21.
+	gapped := url.Values{}
+	for i := 0; i < 11; i++ {
+		gapped.Set(fmt.Sprintf("lookup_keys[%d]", i*2), fmt.Sprintf("k%d", i))
+	}
+	err = f.Do(context.Background(), "GET", "/v1/prices", gapped, "", &sink)
+	se = nil
+	if !errors.As(err, &se) || se.Status != 400 || se.Type != "invalid_request_error" {
+		t.Fatalf("gapped 11 keys: %#v", err)
+	}
+}
+
+func TestPriceBatchErrorIsNotPartial(t *testing.T) {
+	s, f, h := testService(t)
+	f.priceListFail = true
+	f.priceListFailAfter = 1 // first chunk succeeds; the rest fail
+	ps, err := s.prices(context.Background())
+	if err == nil || ps != nil {
+		t.Fatalf("partial prices: err=%v map=%v", err, ps)
+	}
+	c, out := call(t, h, "GET", "/v1/billing/plans", "", nil)
+	if c != 502 || out["error"] != "stripe_error" {
+		t.Fatalf("plans: %d %v", c, out)
+	}
+	if _, ok := out["plans"]; ok {
+		t.Fatalf("partial plan list: %v", out)
+	}
+	c, out = call(t, h, "POST", "/v1/billing/checkout", "acct1", map[string]string{"plan": "gold", "idempotencyKey": "abcdefgh1"})
+	if c != 502 || out["error"] != "stripe_error" {
+		t.Fatalf("checkout: %d %v", c, out)
 	}
 }
