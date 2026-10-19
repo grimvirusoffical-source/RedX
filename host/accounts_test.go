@@ -390,6 +390,18 @@ func TestAccountsCallbackRejectsForgedState(t *testing.T) {
 	if loc := browse(t, n.URL+"/v1/auth/login"); !strings.Contains(loc, "error=access_denied") {
 		t.Fatalf("access_denied: %s", loc)
 	}
+	f.SetNext(accountsfake.Identity{Error: "email_unverified", Login: "new@example.com"})
+	if loc := browse(t, n.URL+"/v1/auth/login"); !strings.Contains(loc, "error=email_unverified") || !strings.Contains(loc, "login=new%40example.com") {
+		t.Fatalf("email_unverified: %s", loc)
+	}
+	f.SetNext(accountsfake.Identity{Error: "email_unverified", Login: "https://evil.example/phish"})
+	if loc := browse(t, n.URL+"/v1/auth/login"); !strings.Contains(loc, "error=email_unverified") || strings.Contains(loc, "login=") {
+		t.Fatalf("unsafe login hint must be dropped: %s", loc)
+	}
+	f.SetNext(accountsfake.Identity{Error: "server_error"})
+	if loc := browse(t, n.URL+"/v1/auth/login"); !strings.Contains(loc, "error=provider") {
+		t.Fatalf("other provider error: %s", loc)
+	}
 	// login sends PKCE S256 and the exact redirect
 	c := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	res, err := c.Get(n.URL + "/v1/auth/login")
@@ -456,7 +468,7 @@ func TestAccountsSignupProxy(t *testing.T) {
 		t.Fatalf("dob: %v", m)
 	}
 	body := func(mod map[string]interface{}) string {
-		r := map[string]interface{}{"username": "grim_player1", "password": "Abcdefgh123!", "passwordConfirm": "Abcdefgh123!",
+		r := map[string]interface{}{"firstName": "Josh", "lastName": "Franklinn", "username": "grim_player1", "password": "Abcdefgh123!", "passwordConfirm": "Abcdefgh123!",
 			"email": "new@example.com", "emailConfirm": "new@example.com", "dob": "07/04/2001", "tosGrant": "x",
 			"twoFactor": "app", "acknowledgeFalseInfo": true}
 		for k, v := range mod {
@@ -470,6 +482,11 @@ func TestAccountsSignupProxy(t *testing.T) {
 		st   int
 		code string
 	}{
+		{map[string]interface{}{"firstName": ""}, 400, "first_name_required"},
+		{map[string]interface{}{"lastName": " "}, 400, "last_name_required"},
+		{map[string]interface{}{"firstName": "Josh2"}, 400, "first_name_chars"},
+		{map[string]interface{}{"middleName": "---"}, 400, "middle_name_chars"},
+		{map[string]interface{}{"lastName": strings.Repeat("a", 51)}, 400, "last_name_long"},
 		{map[string]interface{}{"dob": under}, 403, "under_min_age"},
 		{map[string]interface{}{"twoFactor": "redxai_auth"}, 400, "twofactor_unavailable"},
 		{map[string]interface{}{"twoFactor": "none"}, 400, "no2fa_ack_required"},
@@ -490,14 +507,55 @@ func TestAccountsSignupProxy(t *testing.T) {
 		t.Fatal("invalid sign-ups must not create accounts")
 	}
 	st, m := postJSON(t, A+"/signup", body(map[string]interface{}{"tosGrant": grant()}))
-	if st != 201 || m["handle"] == nil || m["totp"] == nil {
+	if st != 201 || m["handle"] != nil || m["step"] != "verify_email" || m["emailSent"] != true || m["totp"] == nil {
 		t.Fatalf("signup: %d %v", st, m)
 	}
 	if _, has := m["session"]; has {
 		t.Fatal("the Red-XAI session must stay on the server")
 	}
-	if len(f.Signups) != 1 || f.Signups[0].App != "redx" || !f.Signups[0].AcknowledgeFalseInfo || f.Signups[0].TwoFactor != "app" {
+	until, _ := m["pendingUntilMs"].(float64)
+	if until < float64(time.Now().Add(23*time.Hour).UnixMilli()) {
+		t.Fatalf("pendingUntilMs: %v", m["pendingUntilMs"])
+	}
+	acct, _ := m["account"].(map[string]interface{})
+	if acct["email"] != "new@example.com" || acct["firstName"] != "Josh" {
+		t.Fatalf("account: %v", acct)
+	}
+	if len(f.Signups) != 1 || f.Signups[0].App != "redx" || f.Signups[0].FirstName != "Josh" || f.Signups[0].LastName != "Franklinn" || !f.Signups[0].AcknowledgeFalseInfo || f.Signups[0].TwoFactor != "app" {
 		t.Fatalf("forwarded: %+v", f.Signups)
+	}
+	rst, raw, _ := do(t, "POST", A+"/email/resend", "", `{"login":"new@example.com"}`, "Content-Type", "application/json")
+	rm := jsonOf(t, raw)
+	if rst != 200 || rm["ok"] != true || len(f.EmailResendLogins) != 1 || f.EmailResendLogins[0] != "new@example.com" {
+		t.Fatalf("resend: %d %v logins=%v", rst, rm, f.EmailResendLogins)
+	}
+	if len(f.ClientIPs) == 0 || f.ClientIPs[len(f.ClientIPs)-1] == "" {
+		t.Fatal("resend must forward the client IP")
+	}
+	f.SetEmailResendAfter("120")
+	rst, raw, rh := do(t, "POST", A+"/email/resend", "", `{"login":"new@example.com"}`, "Content-Type", "application/json")
+	rm = jsonOf(t, raw)
+	if rst != 429 || rm["error"] != "rate_limited" || rh.Get("Retry-After") != "120" || rm["retryAfter"] != float64(120) {
+		t.Fatalf("resend limited: %d %v retry=%q", rst, rm, rh.Get("Retry-After"))
+	}
+	f.SetEmailResendAfter("")
+	if st, m := postJSON(t, A+"/email/resend", `{"login":""}`); st != 400 || m["error"] != "bad_request" {
+		t.Fatalf("empty resend: %d %v", st, m)
+	}
+	// the mail server can refuse the first send; the screen still has Resend
+	f.SetEmailSendFails(true)
+	st, m = postJSON(t, A+"/signup", body(map[string]interface{}{"tosGrant": grant(), "username": "second_user", "email": "two@example.com",
+		"emailConfirm": "two@example.com", "twoFactor": "none", "acceptNo2faRisk": true}))
+	if st != 201 || m["handle"] != nil || m["step"] != "verify_email" || m["emailSent"] != false {
+		t.Fatalf("signup email not sent: %d %v", st, m)
+	}
+	f.SetEmailSendFails(false)
+	// an older Accounts server still returns a session: 2FA is confirmed during sign-up, as before
+	f.SetLegacySignup(true)
+	st, m = postJSON(t, A+"/signup", body(map[string]interface{}{"tosGrant": grant(), "username": "legacy_user", "email": "legacy@example.com",
+		"emailConfirm": "legacy@example.com"}))
+	if st != 201 || m["handle"] == nil || m["totp"] == nil || m["step"] != nil {
+		t.Fatalf("legacy signup: %d %v", st, m)
 	}
 	h := m["handle"].(string)
 	if st, m := postJSON(t, A+"/signup/2fa", `{"handle":"`+h+`","code":"000000"}`); st != 400 || m["error"] != "code_invalid" {
@@ -509,12 +567,7 @@ func TestAccountsSignupProxy(t *testing.T) {
 	if st, _ := postJSON(t, A+"/signup/2fa", `{"handle":"`+h+`","code":"123456"}`); st != 401 {
 		t.Fatal("handle must be single use after 2FA is set up")
 	}
-	// 2FA "none" with the risk accepted needs no setup step
-	st, m = postJSON(t, A+"/signup", body(map[string]interface{}{"tosGrant": grant(), "username": "second_user", "email": "two@example.com",
-		"emailConfirm": "two@example.com", "twoFactor": "none", "acceptNo2faRisk": true}))
-	if st != 201 || m["handle"] != nil {
-		t.Fatalf("signup none: %d %v", st, m)
-	}
+	f.SetLegacySignup(false)
 	// duplicate username is refused by Red-XAI Accounts and relayed
 	st, m = postJSON(t, A+"/signup", body(map[string]interface{}{"tosGrant": grant(), "email": "three@example.com", "emailConfirm": "three@example.com"}))
 	if st != 409 || m["error"] != "username_taken" || m["field"] != "username" {
@@ -543,7 +596,7 @@ func TestAccountsClientIPAndUserinfoFallback(t *testing.T) {
 	_, m := postJSON(t, A+"/tos/read", `{"version":"2026-10-19"}`)
 	g := m["grant"].(string)
 	postJSON(t, A+"/tos/agree", `{"grant":"`+g+`"}`)
-	body, _ := json.Marshal(map[string]interface{}{"username": "ip_user1", "password": "Abcdefgh123!", "passwordConfirm": "Abcdefgh123!",
+	body, _ := json.Marshal(map[string]interface{}{"firstName": "Ada", "lastName": "Lovelace", "username": "ip_user1", "password": "Abcdefgh123!", "passwordConfirm": "Abcdefgh123!",
 		"email": "ip@example.com", "emailConfirm": "ip@example.com", "dob": "07/04/2001", "tosGrant": g,
 		"twoFactor": "none", "acceptNo2faRisk": true, "acknowledgeFalseInfo": true})
 	st, _ := postJSON(t, A+"/signup", string(body))
@@ -557,12 +610,13 @@ func TestAccountsClientIPAndUserinfoFallback(t *testing.T) {
 
 func TestAccountsSMSResend(t *testing.T) {
 	f, iss := startFake(t)
+	f.SetLegacySignup(true) // phone 2FA is confirmed during sign-up only when the server still returns a session
 	n := startAcctNode(t, iss)
 	A := n.URL + "/v1/auth"
 	_, m := postJSON(t, A+"/tos/read", `{"version":"2026-10-19"}`)
 	g := m["grant"].(string)
 	postJSON(t, A+"/tos/agree", `{"grant":"`+g+`"}`)
-	body, _ := json.Marshal(map[string]interface{}{"username": "phone_user1", "password": "Abcdefgh123!", "passwordConfirm": "Abcdefgh123!",
+	body, _ := json.Marshal(map[string]interface{}{"firstName": "Ada", "lastName": "Lovelace", "username": "phone_user1", "password": "Abcdefgh123!", "passwordConfirm": "Abcdefgh123!",
 		"email": "phone@example.com", "emailConfirm": "phone@example.com", "dob": "07/04/2001", "tosGrant": g,
 		"twoFactor": "phone", "phone": "+15551234567", "acknowledgeFalseInfo": true})
 	st, m := postJSON(t, A+"/signup", string(body))

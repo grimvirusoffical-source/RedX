@@ -31,6 +31,7 @@ type Identity struct {
 	AMR           []string `json:"amr"`
 	AgeBand       string   `json:"age_band"`
 	Error         string   `json:"error"`       // e.g. access_denied: authorize redirects back with this error
+	Login         string   `json:"login"`       // optional login echoed on an error redirect (email_unverified)
 	OwnerScope    bool     `json:"owner_scope"` // grant the "owner" scope when it is requested
 	// ProfileOnlyInUserinfo leaves email/email_verified/preferred_username out of the ID token (userinfo has them).
 	ProfileOnlyInUserinfo bool `json:"profile_only_in_userinfo"`
@@ -106,6 +107,13 @@ type Server struct {
 	Signups       []host.SignupRequest
 	Confirmed     []string
 	Tokens        int // successful token exchanges
+	// LegacySignup makes POST /v1/signup return a session (Accounts before v1.2).
+	LegacySignup bool
+	// EmailSendFails makes a v1.2 sign-up report emailSent: false.
+	EmailSendFails bool
+	// EmailResendAfter, when set, makes POST /v1/email/resend answer 429 with that Retry-After.
+	EmailResendAfter  string
+	EmailResendLogins []string
 }
 
 // New returns a fake with one ES256 signing key.
@@ -122,6 +130,23 @@ func New() *Server {
 
 // SetNext sets the identity of the next sign-in.
 func (s *Server) SetNext(id Identity) { s.mu.Lock(); s.next = id; s.mu.Unlock() }
+
+// SetLegacySignup switches POST /v1/signup between v1.2 (no session) and a pre-v1.2 session.
+func (s *Server) SetLegacySignup(on bool) { s.mu.Lock(); s.LegacySignup = on; s.mu.Unlock() }
+
+// SetEmailSendFails controls emailSent on the next v1.2 sign-up responses.
+func (s *Server) SetEmailSendFails(on bool) {
+	s.mu.Lock()
+	s.EmailSendFails = on
+	s.mu.Unlock()
+}
+
+// SetEmailResendAfter makes /v1/email/resend return 429 with this Retry-After (empty = 200).
+func (s *Server) SetEmailResendAfter(after string) {
+	s.mu.Lock()
+	s.EmailResendAfter = after
+	s.mu.Unlock()
+}
 
 func rnd(p string) string {
 	b := make([]byte, 24)
@@ -197,6 +222,7 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("/v1/tos/agree", s.tosAgree)
 	m.HandleFunc("/v1/validate/", s.validate)
 	m.HandleFunc("/v1/signup", s.signup)
+	m.HandleFunc("/v1/email/resend", s.emailResend)
 	m.HandleFunc("/v1/me/2fa/confirm", s.confirm)
 	m.HandleFunc("/v1/signup/resend-sms", s.resend)
 	m.HandleFunc("/v1/logout", func(w http.ResponseWriter, r *http.Request) {
@@ -245,6 +271,9 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 	v.Set("state", q.Get("state"))
 	if s.next.Error != "" {
 		v.Set("error", s.next.Error)
+		if s.next.Login != "" {
+			v.Set("login", s.next.Login)
+		}
 	} else {
 		c := rnd("c_")
 		s.codes[c] = &code{id: s.next, clientID: s.ClientID, redirect: redir, challenge: q.Get("code_challenge"), nonce: q.Get("nonce"), scope: q.Get("scope")}
@@ -558,17 +587,66 @@ func (s *Server) signup(w http.ResponseWriter, r *http.Request) {
 	s.taken[strings.ToLower(b.Username)], s.taken[strings.ToLower(b.Email)] = true, true
 	b.Password, b.PasswordConfirm = "(redacted)", "(redacted)"
 	s.Signups = append(s.Signups, b)
-	sess := rnd("rxa_s_")
-	s.sessions[sess] = b.Username
-	out := map[string]interface{}{"account": map[string]interface{}{"id": rnd("rxa_"), "username": b.Username, "email": b.Email, "emailVerified": false},
-		"session": sess, "pending": []string{}}
+	pending := []string{"verify_email"}
 	if b.TwoFactor != "none" {
-		out["pending"] = []string{"2fa_setup"}
+		pending = append(pending, "2fa_setup")
+	}
+	sess := ""
+	if s.LegacySignup {
+		sess = rnd("rxa_s_")
+		s.sessions[sess] = b.Username
+		if b.TwoFactor != "none" {
+			pending = []string{"2fa_setup"}
+		} else {
+			pending = []string{}
+		}
+	}
+	out := map[string]interface{}{
+		"account": map[string]interface{}{
+			"id": rnd("rxa_"), "username": b.Username, "email": b.Email, "emailVerified": false,
+			"firstName": b.FirstName, "middleName": b.MiddleName, "lastName": b.LastName,
+		},
+		"session": sess, "pending": pending,
+	}
+	if !s.LegacySignup {
+		out["step"] = "verify_email"
+		out["emailSent"] = !s.EmailSendFails
+		out["emailMasked"] = maskEmail(b.Email)
+		out["pendingUntilMs"] = time.Now().Add(24 * time.Hour).UnixMilli()
 	}
 	if b.TwoFactor == "app" {
 		out["totp"] = map[string]string{"secret": "JBSWY3DPEHPK3PXP", "otpauthUri": "otpauth://totp/Red-XAI:" + url.PathEscape(b.Username) + "?secret=JBSWY3DPEHPK3PXP&issuer=Red-XAI"}
 	}
 	j(w, 201, out)
+}
+
+func maskEmail(e string) string {
+	e = strings.TrimSpace(e)
+	at := strings.Index(e, "@")
+	if at <= 0 {
+		return ""
+	}
+	return e[:1] + "***" + e[at:]
+}
+
+func (s *Server) emailResend(w http.ResponseWriter, r *http.Request) {
+	var b struct {
+		Login string `json:"login"`
+	}
+	if !decode(w, r, &b) {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ClientIPs = append(s.ClientIPs, r.Header.Get("X-RedXAI-Client-IP"))
+	login := strings.TrimSpace(b.Login)
+	s.EmailResendLogins = append(s.EmailResendLogins, login)
+	if s.EmailResendAfter != "" {
+		w.Header().Set("Retry-After", s.EmailResendAfter)
+		e(w, 429, "rate_limited", "Too many verification emails. Try again later.")
+		return
+	}
+	j(w, 200, map[string]bool{"ok": true})
 }
 
 func (s *Server) confirm(w http.ResponseWriter, r *http.Request) {

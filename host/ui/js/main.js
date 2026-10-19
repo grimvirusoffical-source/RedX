@@ -53,7 +53,12 @@ async function boot() {
   if (dl.page === 'signin') {
     history.replaceState(null, '', location.pathname);
     const { SIGNIN_ERRORS } = await import('./pages/account.js');
-    if (dl.query.error) return showLogin(SIGNIN_ERRORS[dl.query.error] || 'The sign-in did not work. Please try again.');
+    if (dl.query.error) {
+      const code = dl.query.error;
+      const text = SIGNIN_ERRORS[code] || 'The sign-in did not work. Please try again.';
+      const opts = code === 'email_unverified' ? { resendLogin: typeof dl.query.login === 'string' ? dl.query.login : '' } : undefined;
+      return showLogin(text, opts);
+    }
     try {
       const r = await api('POST', '/v1/auth/handoff', { key: '', noAuthRedirect: true, json: { code: dl.query.handoff || '' } });
       session.set(r.token, false);
@@ -104,11 +109,11 @@ export async function showWelcome() {
   app.className = 'plain';
   app.append(renderWelcome(async () => { await loadWho(); await startShell(true); }));
 }
-export async function showLogin(msg) {
+export async function showLogin(msg, opts) {
   const { renderLogin } = await import('./pages/auth.js');
   clear(app);
   app.className = 'plain';
-  app.append(renderLogin(msg, async () => { await loadWho(); await startShell(); }));
+  app.append(renderLogin(msg, async () => { await loadWho(); await startShell(); }, opts));
 }
 
 // ---------- shell ----------

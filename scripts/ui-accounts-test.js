@@ -1,6 +1,6 @@
 // Headless-Chrome test of Red-XAI Accounts in the console, against the in-memory fake (scripts/fake-accounts):
 //   sign-up (ToS scroll -> Read ToS -> Agree to ToS, red/green hints, copy arrows, DOB typed + calendar, under-13 block,
-//   2FA options with Red-XAI Auth disabled, "None" warning, TOTP confirm), sign-in as a regular account (no Owner page),
+//   2FA options with Red-XAI Auth disabled, "None" warning, check-your-email and resend), sign-in as a regular account (no Owner page),
 //   then sign-in as an owner with 2FA (Owner page, master DB, audit trail). Dark theme by default.
 //   PLAYWRIGHT_CORE=/path/to/node_modules/playwright-core CHROME=/usr/bin/google-chrome \
 //   node scripts/ui-accounts-test.js <redxd binary> <fake-accounts binary>
@@ -54,9 +54,20 @@ const OWNER = 'owner@example.com'; // placeholder; real owner addresses live in 
     await p.waitForSelector('#acct-signin', { timeout: 10000 });
     expect(await p.evaluate(() => document.documentElement.dataset.theme) === 'dark', 'dark theme by default (even when the device prefers light)');
     expect(await p.$('input[aria-label="API key or pairing code"]') !== null, 'API-key sign-in is still offered');
+    // A hash-only change does not run boot() again, so reload with the error in the address.
+    await p.goto(url + '/#/signin?error=email_unverified&login=new.player%40example.com');
+    await p.reload({ waitUntil: 'networkidle' });
+    await p.waitForSelector('#email-resend', { timeout: 10000 });
+    expect(/not confirmed/.test(await p.textContent('.form-err')), 'an unverified sign-in explains that the email must be confirmed');
+    expect(await p.inputValue('#email-resend-login') === 'new.player@example.com', 'resend is prefilled from the sign-in error');
+    await p.click('#email-resend');
+    await p.waitForFunction(() => /on its way/.test(document.querySelector('#email-resend-note').textContent));
+    expect(await p.$eval('#email-resend', (e) => e.disabled), 'resend on the sign-in page has a cooldown');
+    ok('unverified sign-in offers Resend');
 
     // ---- sign-up: ToS gate ----
     where = 'signup-tos';
+    await p.waitForSelector('#acct-signup', { timeout: 10000 });
     await p.click('#acct-signup');
     await p.waitForSelector('#tos-box');
     expect(await p.$eval('#tos-read', (e) => e.disabled) && await p.$eval('#tos-agree', (e) => e.disabled), 'Read ToS and Agree to ToS start disabled');
@@ -69,7 +80,15 @@ const OWNER = 'owner@example.com'; // placeholder; real owner addresses live in 
     ok('after Read ToS, Agree to ToS is enabled');
     await p.click('#tos-agree');
     await p.waitForSelector('#su-username');
+    await p.waitForSelector('#su-first');
     expect(/version 2026-10-19/.test(await p.textContent('#tos-accepted')), 'the accepted ToS version and time are shown');
+    await p.fill('#su-first', 'J0');
+    expect((await hints('hints-first')).find((x) => x.id === 'chars').cls.includes('bad'), 'a digit in a name is refused');
+    await p.fill('#su-first', 'Josh');
+    await p.fill('#su-last', 'Franklinn');
+    await p.waitForFunction(() => [...document.querySelectorAll('#hints-first li, #hints-last li')].every((x) => x.classList.contains('good')));
+    expect((await hints('hints-middle')).every((x) => x.cls.includes('good')), 'middle name is optional');
+    ok('first and last name hints follow the name rules');
 
     // ---- sign-up: fields and hints ----
     where = 'signup-form';
@@ -128,16 +147,16 @@ const OWNER = 'owner@example.com'; // placeholder; real owner addresses live in 
     await p.waitForFunction(() => !document.querySelector('#su-submit').disabled);
     ok('everything valid: Create account enabled');
     await p.click('#su-submit');
-    await p.waitForSelector('#su-totp-secret', { timeout: 10000 });
-    ok('account created; authenticator key shown');
-    await p.fill('#su-2fa-code', '000000');
-    await p.click('#su-2fa-go');
-    await p.waitForFunction(() => { const e = document.querySelector('.form-err:not([hidden])'); return e && e.textContent.length > 0; });
-    ok('a wrong 2FA code is refused');
-    await p.fill('#su-2fa-code', '123456');
-    await p.click('#su-2fa-go');
+    await p.waitForSelector('#su-check-email', { timeout: 10000 });
+    expect((await p.textContent('#su-check-address')).includes('new.player@example.com'), 'check your email shows the address');
+    expect(/held until/.test(await p.textContent('#su-pending-until')), 'the pending sign-up expiry is shown');
+    expect(await p.$('#su-2fa-go') === null, 'sign-up does not ask for a 2FA code');
+    expect(await p.$('#su-totp-secret') !== null, 'the authenticator key can be saved before sign-in');
+    await p.click('#email-resend');
+    await p.waitForFunction(() => /on its way/.test(document.querySelector('#email-resend-note').textContent));
+    expect(await p.$eval('#email-resend', (e) => e.disabled), 'resend has a cooldown');
     await p.waitForSelector('#su-signin');
-    ok('2FA confirmed; sign-in offered');
+    ok('account created; sign-in is offered only after the email link');
 
     // ---- sign in as a regular account ----
     where = 'signin-regular';

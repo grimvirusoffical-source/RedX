@@ -45,7 +45,7 @@ export function renderWelcome(onDone) {
   return h('div', { class: 'auth' }, card);
 }
 
-export function renderLogin(msg, onDone) {
+export function renderLogin(msg, onDone, opts) {
   const input = h('input', { class: 'input mono', type: 'password', placeholder: 'rx_live_…  or  RP-XXXXX-XXXXX', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'API key or pairing code' });
   const remember = h('input', { type: 'checkbox' });
   const err = h('div', { class: 'form-err', role: 'alert', hidden: !msg }, msg || '');
@@ -72,11 +72,16 @@ export function renderLogin(msg, onDone) {
   setTimeout(() => input.focus(), 50);
   const wrap = h('div', { class: 'auth' }, card);
   // Red-XAI Accounts sign-in, when this host has it configured
-  import('./account.js').then(async ({ accountsConfig, accountButtons, renderSignup }) => {
+  import('./account.js').then(async ({ accountsConfig, accountButtons, renderSignup, emailResendControl }) => {
+    if (opts && Object.prototype.hasOwnProperty.call(opts, 'resendLogin')) {
+      card.append(h('div', { class: 'warn-box', id: 'signin-email-unverified' },
+        h('p', null, 'Resend the confirmation link, open it, then sign in again.'),
+        emailResendControl({ login: opts.resendLogin || '' })));
+    }
     const cfg = await accountsConfig();
     if (!cfg.enabled) return;
     card.append(accountButtons(cfg, () => {
-      const su = renderSignup(() => su.replaceWith(renderLogin(msg, onDone)));
+      const su = renderSignup(() => su.replaceWith(renderLogin(msg, onDone, opts)));
       wrap.replaceWith(su);
     }));
   }).catch(() => {});

@@ -83,6 +83,8 @@ func (h *Host) authRoute(w http.ResponseWriter, r *http.Request) {
 		h.authValidate(w, r, strings.TrimPrefix(rest, "validate/"))
 	case rest == "signup" && r.Method == "POST":
 		h.authSignup(w, r)
+	case rest == "email/resend" && r.Method == "POST":
+		h.authEmailResend(w, r)
 	case rest == "signup/2fa" && r.Method == "POST":
 		h.authSignup2FA(w, r)
 	case rest == "signup/2fa/resend" && r.Method == "POST":
@@ -315,7 +317,31 @@ func (h *Host) restartLogin(w http.ResponseWriter, r *http.Request, code string)
 }
 
 func (h *Host) failSignin(w http.ResponseWriter, r *http.Request, code string) {
-	http.Redirect(w, r, "/#/signin?error="+url.QueryEscape(code), http.StatusFound)
+	dest := "/#/signin?error=" + url.QueryEscape(code)
+	if code == "email_unverified" {
+		if login := safeLoginHint(r.URL.Query().Get("login")); login != "" {
+			dest += "&login=" + url.QueryEscape(login)
+		}
+	}
+	http.Redirect(w, r, dest, http.StatusFound)
+}
+
+// safeLoginHint is an email or username the provider may echo on error=email_unverified.
+// Anything else is dropped so the sign-in page cannot be turned into an open redirect.
+func safeLoginHint(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" || len(s) > EmailMax {
+		return ""
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '@' || r == '.' || r == '_' || r == '-' || r == '+' || r == '!':
+		default:
+			return ""
+		}
+	}
+	return s
 }
 
 // safeReturn: a console page name such as "owner" or "databases" (never a URL).
@@ -380,9 +406,12 @@ func (h *Host) authCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	if e := q.Get("error"); e != "" {
 		h.Audit.Log(AuditEvent{Event: "account.signin.fail", Remote: remoteIP(r), Reason: "provider error: " + truncate(e, 64)})
-		if e == "access_denied" {
+		switch e {
+		case "access_denied":
 			fail("access_denied")
-		} else {
+		case "email_unverified":
+			fail("email_unverified")
+		default:
 			fail("provider")
 		}
 		return
@@ -495,6 +524,7 @@ func (h *Host) signupRules(ctx context.Context) map[string]interface{} {
 	minAge := h.appMinAge(ctx)
 	return map[string]interface{}{
 		"username":      map[string]interface{}{"min": UsernameMin, "max": UsernameMax, "letters": UsernameLetters, "chars": "A-Z a-z 0-9 _ . -"},
+		"name":          map[string]interface{}{"max": NameMax, "chars": "letters, spaces, apostrophes, hyphens and periods"},
 		"password":      map[string]interface{}{"min": PasswordMin, "max": PasswordMax, "safeSpecials": SafeSpecials},
 		"email":         map[string]interface{}{"max": EmailMax},
 		"dob":           map[string]interface{}{"format": "MM/DD/YYYY", "maxAge": MaxAge},
@@ -649,25 +679,112 @@ func (h *Host) authSignup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var res struct {
-		Account map[string]interface{} `json:"account"`
-		Session string                 `json:"session"`
-		Pending []string               `json:"pending"`
-		TOTP    map[string]interface{} `json:"totp"`
+		Step           string                 `json:"step"`
+		Account        map[string]interface{} `json:"account"`
+		Session        string                 `json:"session"`
+		Pending        []string               `json:"pending"`
+		TOTP           map[string]interface{} `json:"totp"`
+		EmailMasked    string                 `json:"emailMasked"`
+		EmailSent      *bool                  `json:"emailSent"`
+		PendingUntilMs int64                  `json:"pendingUntilMs"`
+		Resumed        bool                   `json:"resumed"`
+		Message        string                 `json:"message"`
 	}
 	if json.Unmarshal(b, &res) != nil {
 		acctErr(w, 502, "bad_gateway", "Red-XAI Accounts sent an answer RedX could not read.")
 		return
 	}
-	out := map[string]interface{}{"pending": res.Pending, "twoFactor": req.TwoFactor,
-		"account": map[string]interface{}{"username": res.Account["username"], "email": res.Account["email"], "emailVerified": res.Account["emailVerified"]}}
-	if res.TOTP != nil {
-		out["totp"] = res.TOTP // shown once so the person can add it to an authenticator app
+	acct := map[string]interface{}{}
+	if res.Account != nil {
+		acct["username"] = res.Account["username"]
+		acct["email"] = res.Account["email"]
+		acct["emailVerified"] = res.Account["emailVerified"]
+		for _, k := range []string{"firstName", "middleName", "lastName"} {
+			if v, ok := res.Account[k]; ok {
+				acct[k] = v
+			}
+		}
 	}
-	if res.Session != "" && containsStr(res.Pending, "2fa_setup") {
-		out["handle"] = h.accts.addSignup(res.Session)
+	out := map[string]interface{}{"pending": res.Pending, "twoFactor": req.TwoFactor, "account": acct}
+	if res.TOTP != nil {
+		out["totp"] = res.TOTP // the authenticator key, so it can be saved before the email link is opened
+	}
+	if res.Session != "" {
+		// An older Accounts server still returns a session and confirms 2FA during sign-up.
+		if containsStr(res.Pending, "2fa_setup") {
+			out["handle"] = h.accts.addSignup(res.Session)
+		}
+	} else {
+		// v1.2: sign-up never signs in. The person opens the email link, then signs in.
+		out["step"] = "verify_email"
+		if res.Step != "" {
+			out["step"] = res.Step
+		}
+		sent := true
+		if res.EmailSent != nil {
+			sent = *res.EmailSent
+		}
+		out["emailSent"] = sent
+		if res.PendingUntilMs > 0 {
+			out["pendingUntilMs"] = res.PendingUntilMs
+		}
+		if res.EmailMasked != "" {
+			out["emailMasked"] = res.EmailMasked
+		}
+		if res.Message != "" {
+			out["message"] = res.Message
+		}
+		if res.Resumed {
+			out["resumed"] = true
+		}
 	}
 	h.Audit.Log(AuditEvent{Event: "account.signup", Remote: remoteIP(r), Detail: "new Red-XAI Account via RedX (2FA: " + req.TwoFactor + ")"})
 	writeJSON(w, 201, out)
+}
+
+// authEmailResend proxies POST /v1/email/resend {login}. No session: the account is not signed in yet.
+func (h *Host) authEmailResend(w http.ResponseWriter, r *http.Request) {
+	var b struct {
+		Login string `json:"login"`
+	}
+	if h.acctThrottle(w, r, "emailresend", 10.0/3600, 10) || !readJSON(w, r, &b) {
+		return
+	}
+	login := strings.TrimSpace(b.Login)
+	if login == "" || len(login) > EmailMax || strings.ContainsAny(login, "\r\n\x00") {
+		acctErr(w, 400, "bad_request", "Enter the email address or username.")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	st, rb, hdr, err := h.oidc.callRaw(ctx, "POST", "/v1/email/resend", map[string]string{"login": login}, "", remoteIP(r))
+	if err != nil {
+		acctErr(w, 503, "unavailable", errAccountsUnavailable.Error())
+		return
+	}
+	var m map[string]interface{}
+	if json.Unmarshal(rb, &m) != nil {
+		acctErr(w, 502, "bad_gateway", "Red-XAI Accounts sent an answer RedX could not read.")
+		return
+	}
+	if hdr != nil {
+		if ra := strings.TrimSpace(hdr.Get("Retry-After")); ra != "" {
+			w.Header().Set("Retry-After", ra)
+			if sec, nerr := strconv.Atoi(ra); nerr == nil && sec > 0 {
+				m["retryAfter"] = sec
+			}
+		}
+	}
+	if st == 429 {
+		if m["error"] == nil || m["error"] == "" {
+			m["error"] = "rate_limited"
+		}
+		if m["message"] == nil || m["message"] == "" {
+			m["message"] = "Too many verification emails from this network. Wait and try again."
+		}
+	}
+	h.Audit.Log(AuditEvent{Event: "account.email.resend", Remote: remoteIP(r)})
+	writeJSON(w, st, m)
 }
 
 func (h *Host) authSignup2FA(w http.ResponseWriter, r *http.Request) {
