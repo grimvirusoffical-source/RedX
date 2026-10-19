@@ -88,6 +88,10 @@ The console sign-up UI mirrors the Accounts rules (ToS gate, live hints, confirm
 `minAge` from `/v1/rules?app=` (never below the central 13). Phone 2FA shows a **Resend text message** button
 when `sms_resend` is on in `/v1/auth/config` (forwards to `POST /v1/signup/resend-sms`).
 
+## Hosted tenants
+
+A signed-in account that is not an owner can create databases and API keys only while its RedX Hosted plan is `active` or `trialing` (see [billing](billing.md) for the 3-day read-only grace and for what happens after it). The account sees and manages only its own databases. Names are stored namespaced, so two accounts may both choose `game`. Owners keep full visibility, and every owner request is an audit line. Owner emails are never written into the repository; set them with `REDXAI_OWNER_EMAILS` on the server.
+
 ## What stays local
 
 - Console session tokens (`rxs_…`) are hashed (SHA-256) in memory; Red-XAI tokens are kept only for owner

@@ -55,6 +55,9 @@ func (h *Host) updatePublish(w http.ResponseWriter, r *http.Request, app string)
 	if !h.refuseHiddenDB(w, r, pr, app) || !h.ownerOnlyOK(w, r, pr) {
 		return
 	}
+	if requireDangerConfirm(w, r) {
+		return
+	}
 	if !h.appAllowlisted(app) {
 		writeUpdateErr(w, http.StatusConflict, "not_hosted", "app is not hosted with Red-XAI")
 		return

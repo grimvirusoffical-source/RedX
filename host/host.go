@@ -40,6 +40,7 @@ type Host struct {
 	evCursor    *eventCursor     // Red-XAI Accounts event feed cursor (accounts_events.go)
 	oidc        *oidcClient      // Red-XAI Accounts OIDC relying party (accounts_oidc.go)
 	billing     *billing.Service // RedX Hosted plans on Stripe (billing_api.go)
+	tenants     *tenantStore     // which hosted account owns which database (tenant.go)
 	webSetup    bool             // an empty keystore may be set up from the browser (loopback only)
 	bootMu      sync.Mutex       // serialises the web bootstrap
 	runMu       sync.Mutex
@@ -123,6 +124,9 @@ func New(cfg Config, opener Opener, logf func(string, ...interface{})) (*Host, e
 	h.Auth.master = h.masterDB
 	h.connect = openConnectStore(cfg.DataDir)
 	if h.billing, err = newBilling(cfg, logf); err != nil {
+		return fail(err)
+	}
+	if h.tenants, err = openTenants(filepath.Join(cfg.DataDir, "tenants.json")); err != nil {
 		return fail(err)
 	}
 	h.Tracker = NewTTLTracker(filepath.Join(cfg.DataDir, "cluster", "ttl.json"))
@@ -254,6 +258,7 @@ func (h *Host) maintenance(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case now := <-t.C:
+			h.pollLocalBackup()
 			if h.Cluster.IsLeader() {
 				h.expireDue(now)
 				h.tickUpdates(now)

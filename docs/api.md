@@ -25,6 +25,29 @@ WebSocket: `GET /v1/subscribe?path=<prefix>` with the same `Authorization` heade
 Errors: `401` bad/missing/revoked/expired key (deliberately identical), `403` key lacks scope/db/prefix, `404`, `400` (bad path, bad Box text, engine validation),
 `429` rate limit (`Retry-After`) or too many failed auths from your IP (20/min), `503` follower with no leader.
 
+Dangerous operations (create/revoke/rotate a key, drop a database, pairing, policy replace, cluster join-token/promote/repoint, connect approve/revoke, update apply/promote/rollback/publish) check **authentication and authorisation before confirmation**. A missing credential is `401`. A credential that may not do the operation is `403`. Only a caller who would otherwise be allowed, and who omitted `X-RedX-Confirm: <operation-id>` (or `?confirm=<operation-id>`), gets `428` `confirm_required`.
+
+### RedX Hosted tenants
+
+On a host with Red-XAI Accounts enabled, a signed-in account that is **not** an owner is a tenant. Owners (deploy-config `REDXAI_OWNER_EMAILS` only) stay host-admin and see every database; each of those requests is audit-logged as `owner.read` or `owner.write` with the owner's email. A tenant never sees another tenant's databases, the master `redxai_accounts` database, `default`, or the admin, audit, update, cluster and owner routes (those are `403` or the same `404` as a missing database).
+
+`POST /v1/dbs` with `{"name":"<logical>"}` requires an **active or trialing** plan. The stored name is namespaced (`t` + 10 hex of the account + `_` + logical) so two tenants can both ask for `game` and neither learns that the other did. The response is `{"ok":true,"name":"<physical>","logical":"<logical>","seq":N}`. Use `name` in `/v1/db/{name}/…`. `GET /v1/dbs` returns `dbs` (physical names), `logical` (physical → logical), and `readonly: true` or `suspended: true` when the plan is not fully open. Reserved logical names (`default`, `admin`, `redxai_accounts`, …) and a name this account cannot take answer `409` `name_unavailable` with the same text, which does not say whether some other database exists.
+
+API keys created by a tenant are bound to one database that tenant owns (`db: "*"` and anyone else's name are `404`). The key carries the account, so the same quotas apply when the key is used. BoxQL (`POST /v1/db/{name}/bx`) is unchanged.
+
+Plan gate (see [billing](billing.md)):
+
+| Situation | Create database or key | Read | Write / drop |
+|---|---|---|---|
+| No plan row | `402` `plan_required` | `403` on `GET /v1/dbs` (same as a session with no database rights) | `403` |
+| `active` or `trialing`, inside the period (plus 3 days) | allowed, quotas apply | allowed | allowed |
+| Lapsed (`past_due`, `canceled`, `unpaid`, `paused`, `incomplete`) and still before period end + 3 days | `402` `plan_readonly` | allowed | `402` `plan_readonly` |
+| After that grace, or no tier | `402` `plan_required` | `402` `plan_required`; `GET /v1/dbs` is `200` with `suspended: true` | `402` `plan_required` |
+
+Databases are never deleted because a plan lapsed. A later active or trialing subscription opens them again.
+
+Over a limit: `402` or `429` with `code: "quota_exceeded"` and `limit` of `storage_quota` (402), `traffic_quota` (429) or `host_switch_quota` (402). `error` stays the specific limit name. Monthly and annual prices share one quota. `GET /v1/billing/me` adds `access`: `full`, `readonly`, `suspended` or `none`. `active` is unchanged (it is still true for `past_due` until the grace ends, so the billing page can show the tier).
+
 ## Indexes, packs, links and rules
 
 These features are available in the default build. With the in-memory stub backend (`-tags redx_stub`) every

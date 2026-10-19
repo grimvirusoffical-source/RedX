@@ -1,9 +1,12 @@
 package host_test
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -394,26 +397,59 @@ func TestOfflineBackupRestore(t *testing.T) {
 	if st != 200 {
 		t.Fatalf("online backup %d", st)
 	}
-	var buf strings.Builder
-	_ = buf
-	// offline path requires the daemon to be stopped (or force)
 	f, err := os.CreateTemp(t.TempDir(), "bk")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer f.Close() // Windows cannot remove the temp dir while the file is open
-	if err := host.OfflineBackup(dir, f, "", false); err == nil {
-		t.Fatal("offline backup must refuse while daemon runs")
-	}
-	n.Stop()
-	f.Seek(0, 0)
+	// The daemon is running and there is no API key requirement: it pauses writes and answers.
 	if err := host.OfflineBackup(dir, f, "", false); err != nil {
 		t.Fatal(err)
 	}
-	f.Seek(0, 0)
+	if _, err := f.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr := tar.NewReader(gz)
+	var sawKey, sawDB, sawSign bool
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch {
+		case hdr.Name == "keys.json":
+			sawKey = true
+		case strings.HasPrefix(hdr.Name, "dbs/"):
+			sawDB = true
+		case hdr.Name == "updates/signing.key":
+			sawSign = true
+			got, _ := io.ReadAll(tr)
+			onDisk, err := os.ReadFile(filepath.Join(dir, "updates", "signing.key"))
+			if err != nil || strings.TrimSpace(string(got)) != strings.TrimSpace(string(onDisk)) {
+				t.Fatalf("signing key in the archive: %q disk %q err %v", got, onDisk, err)
+			}
+		}
+	}
+	if !sawKey || !sawDB || !sawSign {
+		t.Fatalf("archive missing pieces: keys=%v dbs=%v signing=%v", sawKey, sawDB, sawSign)
+	}
+	if _, err := f.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	n.Stop()
 	dir2 := t.TempDir()
 	if _, err := host.OfflineRestore(dir2, f, "", false); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir2, "updates", "signing.key")); err != nil {
+		t.Fatal("restore must write updates/signing.key:", err)
 	}
 	n2 := startNode(t, dir2, nil)
 	if n2.Key != "" {

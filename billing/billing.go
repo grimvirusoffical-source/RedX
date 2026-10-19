@@ -166,6 +166,58 @@ func (s *Service) ActivePlan(account string) (Plan, bool) {
 // Usage returns the usage store (never nil after New).
 func (s *Service) Usage() *UsageStore { return s.usage }
 
+// PutPlan stores a plan row. Webhooks are the normal writer; tests and a
+// reconcile job use this. It is not an HTTP route.
+func (s *Service) PutPlan(p Plan) error {
+	if s == nil || s.store == nil {
+		return errors.New("billing store is not open")
+	}
+	return s.store.Put(p)
+}
+
+// AccessFor is the tenant gate for a Red-XAI Account.
+//
+//	full     — subscription status active or trialing, inside the paid window
+//	           (period end plus the 3-day grace, so a late webhook does not cut off a payer)
+//	readonly — the plan has lapsed (past_due, canceled, unpaid, paused, incomplete)
+//	           and now is still before period end + 3 days. Databases stay readable.
+//	none     — no plan, or the grace window has ended. Databases are kept on disk
+//	           and are suspended until a plan is active or trialing again.
+//
+// Monthly and annual prices share one quota. PlanFor still reports the tier during
+// the past_due grace so the billing page can show it; writes use AccessFor.
+func (s *Service) AccessFor(account string) string {
+	if s == nil || account == "" {
+		return "none"
+	}
+	p, ok := s.store.Get(account)
+	if !ok || p.Tier == "" {
+		return "none"
+	}
+	now := s.now()
+	open := p.PeriodEnd.IsZero() || now.Before(p.PeriodEnd.Add(Grace))
+	switch p.Status {
+	case "active", "trialing":
+		if open {
+			return "full"
+		}
+	default:
+		if open && (p.Subscription != "" || p.Status != "") {
+			return "readonly"
+		}
+	}
+	return "none"
+}
+
+// KnownAccount reports whether this account has a stored plan row (including a lapsed one).
+func (s *Service) KnownAccount(account string) bool {
+	if s == nil || account == "" {
+		return false
+	}
+	p, ok := s.store.Get(account)
+	return ok && (p.Subscription != "" || p.Tier != "" || p.Status != "")
+}
+
 // UsageStatusFor returns quota + usage for a paid-up account (ok false if none).
 func (s *Service) UsageStatusFor(account string) (UsageStatus, bool) {
 	p, ok := s.ActivePlan(account)
@@ -437,6 +489,18 @@ func (s *Service) statusRoute(w http.ResponseWriter, r *http.Request, id Identit
 func (s *Service) meRoute(w http.ResponseWriter, id Identity) {
 	p, _ := s.store.Get(id.Sub)
 	out := map[string]interface{}{"enabled": s.Enabled(), "plan": "", "active": false}
+	switch s.AccessFor(id.Sub) {
+	case "full":
+		out["access"] = "full"
+	case "readonly":
+		out["access"] = "readonly"
+	default:
+		if s.KnownAccount(id.Sub) {
+			out["access"] = "suspended"
+		} else {
+			out["access"] = "none"
+		}
+	}
 	if p.Active(s.now()) {
 		out["plan"], out["active"], out["status"], out["cancelAtPeriodEnd"] = p.Tier, true, p.Status, p.CancelAtEnd
 		out["interval"] = p.Interval
@@ -632,7 +696,8 @@ type stripeSub struct {
 		Data []struct {
 			CurrentPeriodEnd int64 `json:"current_period_end"`
 			Price            struct {
-				LookupKey string `json:"lookup_key"`
+				LookupKey string            `json:"lookup_key"`
+				Metadata  map[string]string `json:"metadata"`
 			} `json:"price"`
 		} `json:"data"`
 	} `json:"items"`
@@ -666,13 +731,32 @@ func (s *Service) syncSubscription(ctx context.Context, id string) error {
 			if it.CurrentPeriodEnd > end {
 				end = it.CurrentPeriodEnd
 			}
+			continue
+		}
+		if tier == "" {
+			if t, ok := tierOf(strings.ToLower(it.Price.Metadata["plan"])); ok {
+				tier = t.Key
+			}
+		}
+		if it.CurrentPeriodEnd > end {
+			end = it.CurrentPeriodEnd
+		}
+	}
+	if tier == "" {
+		if t, ok := tierOf(strings.ToLower(sub.Metadata["plan"])); ok {
+			tier = t.Key
 		}
 	}
 	if interval == "" {
-		if sub.Metadata["interval"] == "year" {
+		switch strings.ToLower(sub.Metadata["interval"]) {
+		case "year", "annual":
 			interval = "year"
-		} else if tier != "" {
+		case "month", "monthly":
 			interval = "month"
+		default:
+			if tier != "" {
+				interval = "month"
+			}
 		}
 	}
 	prev, _ := s.store.Get(account)

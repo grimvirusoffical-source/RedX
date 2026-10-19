@@ -232,6 +232,7 @@ var envKeys = map[string]string{
 	"REDX_ADVERTISE": "advertise", "REDX_AUDIT_LOG": "audit_log", "REDX_PEERS": "peers", "REDX_BOOTSTRAP": "bootstrap",
 	"REDX_ACCOUNTS_ISSUER": "accounts_issuer", "REDX_ACCOUNTS_CLIENT_ID": "accounts_client_id", "REDX_ACCOUNTS_REDIRECT_URL": "accounts_redirect_url",
 	"REDX_ACCOUNTS_MASTER_DB": "accounts_master_db", "REDXAI_OWNER_EMAILS": "owner_emails",
+	"REDX_TRUSTED_PROXIES": "trusted_proxies",
 }
 
 // envOverrides lists settings currently pinned by environment variables (they beat the config file).
@@ -598,11 +599,31 @@ func (h *Host) filesRoute(w http.ResponseWriter, r *http.Request, db, rest strin
 }
 
 func (h *Host) dropDBHandler(w http.ResponseWriter, r *http.Request, db string) {
-	pr, ok := h.authz(w, r, ScopeAdmin, AllDBs, "", true)
+	pr, ok := h.authenticate(w, r)
 	if !ok {
 		return
 	}
+	if pr.isTenant() {
+		h.notePrincipal(r, pr)
+		h.tenantDropDB(w, r, pr, db)
+		return
+	}
+	if !pr.Key.IsHostAdmin() {
+		h.Audit.Log(AuditEvent{Event: "auth.denied", KeyID: pr.Key.ID, DB: db, Remote: remoteIP(r), Method: r.Method, Route: routeOf(r), Reason: "scope/db/prefix"})
+		writeErr(w, http.StatusForbidden, "forbidden")
+		return
+	}
 	if !h.refuseMasterMutation(w, r, pr, db) {
+		return
+	}
+	if !h.checkTrafficQuota(w, pr) {
+		return
+	}
+	h.notePrincipal(r, pr)
+	allowHealth(r)
+	// Confirmation comes after authentication and the owner gate: a missing
+	// header is 428 only for a caller who would otherwise be allowed to drop.
+	if requireDangerConfirm(w, r) {
 		return
 	}
 	if h.maybeForward(w, r) {
@@ -622,6 +643,9 @@ func (h *Host) dropDBHandler(w http.ResponseWriter, r *http.Request, db string) 
 	case err != nil:
 		h.mapErr(w, err)
 	default:
+		if h.tenants != nil {
+			h.tenants.forget(db)
+		}
 		h.Audit.Log(AuditEvent{Event: "db.drop", DB: db, Remote: remoteIP(r)})
 		writeJSON(w, 200, map[string]interface{}{"ok": true, "name": db, "seq": seq})
 	}

@@ -173,6 +173,9 @@ func (h *Host) pairingIssue(w http.ResponseWriter, r *http.Request, pr *Principa
 		writeErr(w, 403, "forbidden")
 		return
 	}
+	if requireDangerConfirm(w, r) {
+		return
+	}
 	ttl, err := ParseTTL(req.TTL)
 	if err != nil {
 		writeErr(w, 400, err.Error())

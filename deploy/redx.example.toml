@@ -7,6 +7,8 @@
 
 # data_dir = "/var/lib/redx"          # Windows (user): %LOCALAPPDATA%\RedX\data ; macOS (user): ~/Library/Application Support/RedX/data
 listen = "127.0.0.1:7777"             # loopback by default. For other devices use 0.0.0.0:7777 AND tls = "auto"
+# trusted_proxies = ["127.0.0.1", "::1"]  # Caddy on this machine may set X-Forwarded-For. Empty = ignore forwarding headers.
+#                                     # env: REDX_TRUSTED_PROXIES=127.0.0.1,::1   flag: --trusted-proxies 127.0.0.1,::1
 # tls = "off"                         # off | auto (self-signed, printed fingerprint) | files
 # tls_cert = "/etc/redx/cert.pem"
 # tls_key  = "/etc/redx/key.pem"

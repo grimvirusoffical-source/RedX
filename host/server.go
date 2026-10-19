@@ -54,15 +54,22 @@ func (h *Host) routes() http.Handler {
 		capw := &statusCapture{ResponseWriter: w}
 		w = capw
 		mark := &healthMark{}
+		meter := &reqMeter{}
 		r = r.WithContext(context.WithValue(r.Context(), healthMarkKey{}, mark))
+		r = h.stampClient(r, meter)
 		started := time.Now()
-		defer func() { h.observeRequest(r, capw.code, healthDuration(started, mark)) }()
+		defer func() {
+			h.observeRequest(r, capw.code, healthDuration(started, mark))
+			if meter.pr != nil {
+				h.meterTraffic(meter.pr, meter.req+capw.written)
+			}
+		}()
 		h.reqs.Add(1)
 		lim := int64(h.Cfg.MaxBodyMB) << 20
 		if r.Method == "PUT" && (strings.Contains(r.URL.Path, "/pack/") || strings.Contains(r.URL.Path, "/media/")) {
 			lim = int64(h.Cfg.MaxUploadMB) << 20
 		}
-		r.Body = &bodyClock{ReadCloser: http.MaxBytesReader(w, r.Body, lim), mark: mark}
+		r.Body = &bodyClock{ReadCloser: &countRC{ReadCloser: http.MaxBytesReader(w, r.Body, lim), m: meter}, mark: mark}
 		if t := bearer(r); h.accts != nil && strings.HasPrefix(t, acctTokenPrefix) {
 			// requests made with a console session end when the session ends (WebSockets included)
 			ctx, cancel := context.WithCancel(r.Context())
@@ -76,11 +83,8 @@ func (h *Host) routes() http.Handler {
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Cache-Control", "no-store")
 		p := r.URL.Path
-		// Dangerous operations (createKey, deleteDatabase, promote, …) need an explicit
-		// confirmation regardless of key scope. Checked before any handler runs.
-		if strings.HasPrefix(p, "/v1/") && requireDangerConfirm(w, r) {
-			return
-		}
+		// Dangerous operations confirm themselves after authentication and
+		// authorisation (401, then 403, then 428). See requireDangerConfirm.
 		switch {
 		case isUIPath(p):
 			h.serveUI(w, r)
@@ -149,7 +153,11 @@ func (h *Host) authz(w http.ResponseWriter, r *http.Request, need, db, path stri
 		writeErr(w, http.StatusUnauthorized, "unauthorized")
 		return nil, false
 	}
-	if hostLevel && !pr.Key.IsHostAdmin() || !hostLevel && !pr.Key.Allows(need, db, path) {
+	if handled, ok := h.allowTenant(w, r, pr, need, db, path, hostLevel); handled {
+		if !ok {
+			return nil, false
+		}
+	} else if !callerAllows(pr, need, db, path, hostLevel) {
 		h.Audit.Log(AuditEvent{Event: "auth.denied", KeyID: pr.Key.ID, DB: db, Remote: remoteIP(r), Method: r.Method, Route: routeOf(r), Reason: "scope/db/prefix"})
 		writeErr(w, http.StatusForbidden, "forbidden")
 		return nil, false
@@ -157,17 +165,39 @@ func (h *Host) authz(w http.ResponseWriter, r *http.Request, need, db, path stri
 	if !h.refuseHiddenDB(w, r, pr, db) {
 		return nil, false
 	}
-	// Hosted-plan traffic cap: refuse when already exhausted, then meter this request's body size.
+	// Hosted-plan traffic cap: refuse when the monthly total is already spent.
+	// The bytes of this request are added after the handler returns.
 	if !h.checkTrafficQuota(w, pr) {
 		return nil, false
 	}
-	n := r.ContentLength
-	if n < 0 {
-		n = 0
+	if need != "" && need != ScopeRead && !h.checkStorageQuota(w, pr, requestBytes(r, h.Cfg.MaxBodyMB)) {
+		return nil, false
 	}
-	h.meterTraffic(pr, n+256) // request body + a small floor for the response
+	h.notePrincipal(r, pr)
 	allowHealth(r)
 	return pr, true
+}
+
+// callerAllows is the non-tenant ACL: host-level routes need admin on "*",
+// everything else needs scope, database and prefix.
+func callerAllows(pr *Principal, need, db, path string, hostLevel bool) bool {
+	if hostLevel {
+		return pr.Key.IsHostAdmin()
+	}
+	return pr.Key.Allows(need, db, path)
+}
+
+// requestBytes is the declared body size, or the configured maximum when the
+// client did not say (chunked). Storage checks use it so a missing length
+// cannot walk past the plan cap.
+func requestBytes(r *http.Request, maxMB int) int64 {
+	if r != nil && r.ContentLength > 0 {
+		return r.ContentLength
+	}
+	if maxMB <= 0 {
+		maxMB = 16
+	}
+	return int64(maxMB) << 20
 }
 
 // refuseHiddenDB is the single gate for the master accounts database on every read/write path that
@@ -556,16 +586,13 @@ func (h *Host) dbsRoute(w http.ResponseWriter, r *http.Request) {
 	case "GET":
 		// Authenticate first: authz(ScopeRead, AllDBs) would 403 every db-scoped key.
 		// Then list only databases in the key's scope, never one Hides() (master accounts DB).
-		pr, wait, err := h.Auth.Authenticate(r)
-		switch {
-		case errors.Is(err, ErrThrottled):
-			w.Header().Set("Retry-After", strconv.Itoa(int(wait/time.Second)+1))
-			writeErr(w, http.StatusTooManyRequests, "rate limit exceeded")
+		// A hosted tenant sees only the databases it owns (namespaced), including while suspended.
+		pr, ok := h.authenticate(w, r)
+		if !ok {
 			return
-		case err != nil:
-			h.authBad.Add(1)
-			w.Header().Set("WWW-Authenticate", `Bearer realm="redx"`)
-			writeErr(w, http.StatusUnauthorized, "unauthorized")
+		}
+		if pr.isTenant() {
+			h.tenantListDBs(w, r, pr)
 			return
 		}
 		if scopeRank[pr.Key.Scope] < scopeRank[ScopeRead] {
@@ -574,12 +601,28 @@ func (h *Host) dbsRoute(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		allowHealth(r)
+		h.notePrincipal(r, pr)
 		writeJSON(w, 200, map[string]interface{}{"dbs": h.visibleDBs(pr)})
 	case "POST":
-		pr, ok := h.authz(w, r, ScopeAdmin, AllDBs, "", true)
+		pr, ok := h.authenticate(w, r)
 		if !ok {
 			return
 		}
+		if pr.isTenant() {
+			h.notePrincipal(r, pr)
+			h.tenantCreateDB(w, r, pr)
+			return
+		}
+		if !pr.Key.IsHostAdmin() {
+			h.Audit.Log(AuditEvent{Event: "auth.denied", KeyID: pr.Key.ID, DB: AllDBs, Remote: remoteIP(r), Method: r.Method, Route: routeOf(r), Reason: "scope/db/prefix"})
+			writeErr(w, http.StatusForbidden, "forbidden")
+			return
+		}
+		if !h.checkTrafficQuota(w, pr) {
+			return
+		}
+		h.notePrincipal(r, pr)
+		allowHealth(r)
 		if b, err := peekName(r); err == nil && pr.Hides(b) {
 			writeErr(w, 403, "forbidden: that database name is reserved")
 			return
@@ -610,6 +653,24 @@ func (h *Host) dbsRoute(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeErr(w, 405, "method not allowed")
 	}
+}
+
+// authenticate is the 401/429 half of authz, with no scope check. Handlers that
+// branch (tenant vs host admin) call it once so a denial is not counted twice.
+func (h *Host) authenticate(w http.ResponseWriter, r *http.Request) (*Principal, bool) {
+	pr, wait, err := h.Auth.Authenticate(r)
+	switch {
+	case errors.Is(err, ErrThrottled):
+		w.Header().Set("Retry-After", strconv.Itoa(int(wait/time.Second)+1))
+		writeErr(w, http.StatusTooManyRequests, "rate limit exceeded")
+		return nil, false
+	case err != nil:
+		h.authBad.Add(1)
+		w.Header().Set("WWW-Authenticate", `Bearer realm="redx"`)
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return nil, false
+	}
+	return pr, true
 }
 
 // MasterAccountsDB is the default name of the Red-XAI accounts master database.
@@ -648,12 +709,17 @@ func (h *Host) keysRoute(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 401, "unauthorized")
 		return
 	}
+	if pr.isTenant() {
+		h.tenantKeys(w, r, pr)
+		return
+	}
 	if pr.Key.Scope != ScopeAdmin {
 		h.Audit.Log(AuditEvent{Event: "auth.denied", KeyID: pr.Key.ID, Remote: remoteIP(r), Route: r.URL.Path, Reason: "admin required"})
 		writeErr(w, 403, "forbidden")
 		return
 	}
 	allowHealth(r)
+	h.notePrincipal(r, pr)
 	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/keys"), "/")
 	now := time.Now()
 	switch {
@@ -681,6 +747,9 @@ func (h *Host) keysRoute(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 403, "forbidden")
 			return
 		}
+		if requireDangerConfirm(w, r) {
+			return
+		}
 		ttl, err := ParseTTL(req.TTL)
 		if err != nil {
 			writeErr(w, 400, err.Error())
@@ -689,7 +758,7 @@ func (h *Host) keysRoute(w http.ResponseWriter, r *http.Request) {
 		if h.maybeForward(w, r) {
 			return
 		}
-		key, rec, err := h.KS.Create(CreateSpec{DB: req.DB, Scope: req.Scope, Prefix: req.Prefix, Label: req.Label, Roles: req.Roles, TTL: ttl, RateRPS: req.RateRPS, RateBurst: req.RateBurst})
+		key, rec, err := h.KS.Create(CreateSpec{DB: req.DB, Scope: req.Scope, Prefix: req.Prefix, Label: req.Label, Roles: req.Roles, TTL: ttl, RateRPS: req.RateRPS, RateBurst: req.RateBurst, Owner: pr.Key.Owner})
 		if err != nil {
 			writeErr(w, 400, err.Error())
 			return
@@ -708,6 +777,9 @@ func (h *Host) keysRoute(w http.ResponseWriter, r *http.Request) {
 		case len(parts) == 1 && r.Method == "GET":
 			writeJSON(w, 200, viewOf(target, now))
 		case len(parts) == 1 && r.Method == "DELETE":
+			if requireDangerConfirm(w, r) {
+				return
+			}
 			if h.maybeForward(w, r) {
 				return
 			}
@@ -719,6 +791,9 @@ func (h *Host) keysRoute(w http.ResponseWriter, r *http.Request) {
 			h.Audit.Log(AuditEvent{Event: "key.revoke", KeyID: pr.Key.ID, DB: rec.DB, Remote: remoteIP(r), Detail: "revoked " + id})
 			writeJSON(w, 200, viewOf(rec, now))
 		case len(parts) == 2 && parts[1] == "rotate" && r.Method == "POST":
+			if requireDangerConfirm(w, r) {
+				return
+			}
 			var req struct {
 				Grace string `json:"grace"`
 			}
@@ -765,6 +840,9 @@ func (h *Host) clusterRoute(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if pr, ok := h.authz(w, r, ScopeAdmin, AllDBs, "", true); ok && h.ownerOnlyOK(w, r, pr) {
+			if requireDangerConfirm(w, r) {
+				return
+			}
 			if h.maybeForward(w, r) {
 				return
 			}
@@ -780,6 +858,9 @@ func (h *Host) clusterRoute(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if pr, ok := h.authz(w, r, ScopeAdmin, AllDBs, "", true); ok && h.ownerOnlyOK(w, r, pr) {
+			if requireDangerConfirm(w, r) {
+				return
+			}
 			h.Audit.Log(AuditEvent{Event: "node.promote", KeyID: pr.Key.ID, Actor: auditActor(pr), Remote: remoteIP(r)})
 			c.handlePromote(w, r, pr)
 		}
@@ -796,6 +877,9 @@ func (h *Host) clusterRoute(w http.ResponseWriter, r *http.Request) {
 		}
 		pr, ok := h.authz(w, r, ScopeAdmin, AllDBs, "", true)
 		if !ok || !h.ownerOnlyOK(w, r, pr) {
+			return
+		}
+		if requireDangerConfirm(w, r) {
 			return
 		}
 		var b struct {

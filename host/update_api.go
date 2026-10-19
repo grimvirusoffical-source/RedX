@@ -430,6 +430,9 @@ func (h *Host) updateApply(w http.ResponseWriter, r *http.Request, app string) {
 	if !h.guardUpdateMutation(w, r, pr, app, true, false) {
 		return
 	}
+	if requireDangerConfirm(w, r) {
+		return
+	}
 	in := applyInput{App: app, Version: body.Version, Source: body.Source, Strategy: strategy}
 	if body.Plan || body.DryRun {
 		if _, err := h.upd.prepareApply(in); err != nil {
@@ -479,6 +482,9 @@ func (h *Host) updateRestore(w http.ResponseWriter, r *http.Request, app string)
 	}
 	if json.Unmarshal(readBody(r), &body) != nil || body.SnapshotID == "" {
 		writeUpdateErr(w, 400, "invalid", `body must be {"snapshot_id":"snap_..."}`)
+		return
+	}
+	if requireDangerConfirm(w, r) {
 		return
 	}
 	ver := h.upd.snapshotVersion(app, body.SnapshotID)
@@ -545,6 +551,9 @@ func (h *Host) updateRolloutRoute(w http.ResponseWriter, r *http.Request, id str
 		if !h.guardUpdateMutation(w, r, pr, app, true, false) {
 			return
 		}
+		if requireDangerConfirm(w, r) {
+			return
+		}
 		ver := h.upd.rolloutVersion(id)
 		if planBody.Plan {
 			if app == "" {
@@ -582,6 +591,9 @@ func (h *Host) updateRolloutRoute(w http.ResponseWriter, r *http.Request, id str
 			return
 		}
 		if !h.guardUpdateMutation(w, r, pr, app, true, false) {
+			return
+		}
+		if requireDangerConfirm(w, r) {
 			return
 		}
 		ver := h.upd.rolloutVersion(id)

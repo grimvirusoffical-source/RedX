@@ -223,9 +223,15 @@ func (h *Host) bxHandler(w http.ResponseWriter, r *http.Request, db string) {
 		return
 	}
 	write := !req.Explain && info.Writes
-	if write && scopeRank[pr.Key.Scope] < scopeRank[ScopeWrite] {
+	if write && pr.isTenant() {
+		if !h.tenantMayMutate(w, r, pr, db, int64(len(body))) {
+			return
+		}
+	} else if write && scopeRank[pr.Key.Scope] < scopeRank[ScopeWrite] {
 		h.Audit.Log(AuditEvent{Event: "auth.denied", KeyID: pr.Key.ID, DB: db, Remote: remoteIP(r), Reason: "bx write needs write scope"})
 		writeErr(w, 403, "forbidden")
+		return
+	} else if write && !h.checkStorageQuota(w, pr, int64(len(body))) {
 		return
 	}
 	if write {
@@ -342,6 +348,9 @@ func (h *Host) secRoute(w http.ResponseWriter, r *http.Request, db string) {
 	case "PUT", "DELETE":
 		pr, ok := h.authz(w, r, ScopeAdmin, db, "", false)
 		if !ok {
+			return
+		}
+		if requireDangerConfirm(w, r) {
 			return
 		}
 		if h.maybeForward(w, r) {

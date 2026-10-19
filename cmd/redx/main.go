@@ -602,7 +602,7 @@ func cmdBackup(args []string) {
 	fs := flag.NewFlagSet("backup", flag.ExitOnError)
 	g.bind(fs)
 	out := fs.String("out", "", "output file (.tgz)")
-	force := fs.Bool("force", false, "offline: copy even if redxd holds the data dir (may be inconsistent)")
+	force := fs.Bool("force", false, "offline: if the running redxd does not answer, copy anyway (may be inconsistent)")
 	parse(fs, args)
 	if *out == "" {
 		*out = "redx-backup-" + time.Now().UTC().Format("20060102-150405") + ".tgz"

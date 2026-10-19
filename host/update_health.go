@@ -77,7 +77,8 @@ func healthDuration(started time.Time, mark *healthMark) time.Duration {
 // statusCapture records the HTTP status and still supports websocket upgrade.
 type statusCapture struct {
 	http.ResponseWriter
-	code int
+	code    int
+	written int64
 }
 
 func (s *statusCapture) WriteHeader(code int) {
@@ -91,7 +92,11 @@ func (s *statusCapture) Write(b []byte) (int, error) {
 	if s.code == 0 {
 		s.code = http.StatusOK
 	}
-	return s.ResponseWriter.Write(b)
+	n, err := s.ResponseWriter.Write(b)
+	if n > 0 {
+		s.written += int64(n)
+	}
+	return n, err
 }
 
 func (s *statusCapture) Flush() {

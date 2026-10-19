@@ -1,6 +1,11 @@
 package host
 
-import "time"
+import (
+	"errors"
+	"time"
+
+	"redx/billing"
+)
 
 // ValidPackPathForTest exposes validPackPath to the external test package.
 func ValidPackPathForTest(p string) bool { return validPackPath(p, false) }
@@ -102,4 +107,26 @@ func SetUpdateAllowLoopback(h *Host, on bool) {
 func SetBeforeApplyHook(t interface{ Cleanup(func()) }, fn func()) {
 	beforeApplyHook.Store(&fn)
 	t.Cleanup(func() { beforeApplyHook.Store(nil) })
+}
+
+// SetPlanForTest stores a hosted plan row without Stripe. Tests use it to
+// exercise the tenant gate.
+func SetPlanForTest(h *Host, p billing.Plan) error {
+	if h == nil || h.billing == nil {
+		return errors.New("billing is not open")
+	}
+	return h.billing.PutPlan(p)
+}
+
+// AddTrafficForTest adds bytes to the account's current traffic counter.
+func AddTrafficForTest(h *Host, account string, n int64) error {
+	if h == nil || h.billing == nil {
+		return errors.New("billing is not open")
+	}
+	p, ok := h.billing.ActivePlan(account)
+	if !ok {
+		return errors.New("no active plan")
+	}
+	q, _ := billing.QuotaFor(p.Tier)
+	return h.billing.Usage().AddTraffic(account, q, n, time.Now(), p.PeriodEnd)
 }

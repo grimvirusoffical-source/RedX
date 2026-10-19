@@ -45,6 +45,7 @@ $REDX_KEY)" and `--join` "(currently set from $REDX_JOIN or redx.toml)".
 | — | `REDX_ACCOUNTS_CLIENT_SECRET` (env only) | none (public client with PKCE) |
 | `accounts_master_db` | `REDX_ACCOUNTS_MASTER_DB` | `redxai_accounts` (owners only while accounts are on) |
 | `owner_emails` (deploy config only) | `REDXAI_OWNER_EMAILS` (comma separated) | none |
+| `trusted_proxies` (IPs or CIDRs) | `REDX_TRUSTED_PROXIES`, flag `--trusted-proxies` | empty = ignore `X-Forwarded-For` and `X-Real-IP` ([security](security.md)) |
 | — | `REDX_NO_BOOTSTRAP=1` | disable first-run admin key (web and terminal) |
 | — | `REDX_NO_OPEN=1` | never open a browser automatically |
 

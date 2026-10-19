@@ -100,6 +100,11 @@ type Config struct {
 	GithubRepos []string `toml:"github_repos"`
 	// HostedApps are store slugs this host is allowed to publish and serve as source "host".
 	HostedApps []string `toml:"hosted_apps"`
+	// TrustedProxies are the only peers allowed to set the client IP via
+	// X-Forwarded-For (rightmost untrusted hop) or X-Real-IP. Each entry is
+	// an IP or a CIDR. Empty means every forwarding header is ignored and the
+	// socket peer is the client (so a spoofed header cannot pick the rate-limit key).
+	TrustedProxies []string `toml:"trusted_proxies"`
 
 	ConfigFile string `toml:"-"`
 }
@@ -186,6 +191,7 @@ func (c *Config) RegisterFlags(fs *flag.FlagSet) {
 	fs.StringVar(&c.GithubRepo, "github-repo", c.GithubRepo, "owner/name used when publishing a GitHub release")
 	fs.Var((*csv)(&c.HostedApps), "hosted-apps", "comma separated app ids hosted on this Red-XAI host")
 	fs.Var((*csv)(&c.GithubRepos), "github-repos", "comma separated owner/repo=app allowlist for update publish and webhooks")
+	fs.Var((*csv)(&c.TrustedProxies), "trusted-proxies", "comma separated IPs or CIDRs allowed to set X-Forwarded-For / X-Real-IP")
 }
 
 type csv []string
@@ -285,6 +291,9 @@ func (c *Config) ApplyEnv(get func(string) string) error {
 	}
 	if v := get("REDX_GITHUB_REPOS"); v != "" {
 		_ = (*csv)(&c.GithubRepos).Set(v)
+	}
+	if v := get("REDX_TRUSTED_PROXIES"); v != "" {
+		_ = (*csv)(&c.TrustedProxies).Set(v)
 	}
 	if v := get("REDX_KEYSTORE_ENCRYPT"); v != "" {
 		b, err := strconv.ParseBool(v)
@@ -399,7 +408,30 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("github_repos entry %q must be owner/repo=app", e)
 		}
 	}
+	if err := c.validateProxies(); err != nil {
+		return err
+	}
 	return c.validateAccounts()
+}
+
+func (c *Config) validateProxies() error {
+	var out []string
+	for _, p := range c.TrustedProxies {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if strings.Contains(p, "/") {
+			if _, _, err := net.ParseCIDR(p); err != nil {
+				return fmt.Errorf("trusted_proxies: %q is not an IP or CIDR", p)
+			}
+		} else if net.ParseIP(p) == nil {
+			return fmt.Errorf("trusted_proxies: %q is not an IP or CIDR", p)
+		}
+		out = append(out, p)
+	}
+	c.TrustedProxies = out
+	return nil
 }
 
 // LoadConfig builds a Config from defaults, preset, file, env and flags (in that order, later wins). Precedence, highest first:
@@ -421,7 +453,7 @@ func LoadConfig(args []string, getenv func(string) string, fs *flag.FlagSet) (Co
 	cf := pre.String("config", "", "")
 	pf := pre.String("preset", "", "")
 	ddFlag := pre.String("data-dir", "", "")
-	for _, n := range []string{"listen", "node-id", "role", "peers", "advertise", "tls", "tls-cert", "tls-key", "default-db", "master-key-file", "code-allowed-boxes", "log-level", "bootstrap", "join", "update-signing-key-file", "github-webhook-secret-file", "github-repo", "github-repos", "hosted-apps"} {
+	for _, n := range []string{"listen", "node-id", "role", "peers", "advertise", "tls", "tls-cert", "tls-key", "default-db", "master-key-file", "code-allowed-boxes", "log-level", "bootstrap", "join", "update-signing-key-file", "github-webhook-secret-file", "github-repo", "github-repos", "hosted-apps", "trusted-proxies"} {
 		pre.String(n, "", "")
 	}
 	pre.Bool("keystore-encrypt", false, "")

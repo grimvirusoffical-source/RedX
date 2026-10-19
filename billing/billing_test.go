@@ -480,3 +480,50 @@ func TestHostingRouteSwitchBudget(t *testing.T) {
 		t.Fatalf("usage switches: %v", usage)
 	}
 }
+
+func TestMetadataPlanAndAccessGrace(t *testing.T) {
+	s, f, h := testService(t)
+	end := time.Now().Add(20 * 24 * time.Hour)
+	f.mu.Lock()
+	f.subs["sub_meta"] = map[string]interface{}{
+		"id": "sub_meta", "status": "active", "customer": "cus_test_1",
+		"metadata":           map[string]string{"app": App, "interval": "year", "account": "acct-meta"},
+		"current_period_end": end.Unix(),
+		"items": map[string]interface{}{"data": []interface{}{map[string]interface{}{
+			"current_period_end": end.Unix(),
+			"price":              map[string]interface{}{"lookup_key": "", "metadata": map[string]string{"plan": "silver"}},
+		}}},
+	}
+	f.mu.Unlock()
+	if c := hook(t, h, "evt_meta", "customer.subscription.created", map[string]string{"id": "sub_meta"}, whsec); c != 200 {
+		t.Fatalf("webhook %d", c)
+	}
+	p, ok := s.store.Get("acct-meta")
+	if !ok || p.Tier != "silver" || p.Interval != "year" || p.Status != "active" {
+		t.Fatalf("metadata plan: ok=%v %+v", ok, p)
+	}
+	if s.AccessFor("acct-meta") != "full" {
+		t.Fatal(s.AccessFor("acct-meta"))
+	}
+	p.Status = "past_due"
+	if err := s.PutPlan(p); err != nil {
+		t.Fatal(err)
+	}
+	if s.PlanFor("acct-meta") != "silver" || s.AccessFor("acct-meta") != "readonly" {
+		t.Fatalf("past_due plan=%s access=%s", s.PlanFor("acct-meta"), s.AccessFor("acct-meta"))
+	}
+	p.Status = "canceled"
+	if err := s.PutPlan(p); err != nil {
+		t.Fatal(err)
+	}
+	if s.AccessFor("acct-meta") != "readonly" || !s.KnownAccount("acct-meta") {
+		t.Fatalf("canceled inside grace: access=%s known=%v", s.AccessFor("acct-meta"), s.KnownAccount("acct-meta"))
+	}
+	p.PeriodEnd = time.Now().Add(-4 * 24 * time.Hour)
+	if err := s.PutPlan(p); err != nil {
+		t.Fatal(err)
+	}
+	if s.AccessFor("acct-meta") != "none" || !s.KnownAccount("acct-meta") {
+		t.Fatalf("after grace: access=%s known=%v", s.AccessFor("acct-meta"), s.KnownAccount("acct-meta"))
+	}
+}

@@ -58,7 +58,11 @@ func (h *Host) authzScope(w http.ResponseWriter, r *http.Request, need, db strin
 		writeErr(w, http.StatusUnauthorized, "unauthorized")
 		return nil, false
 	}
-	if scopeRank[pr.Key.Scope] < scopeRank[need] || (pr.Key.DB != AllDBs && pr.Key.DB != db) {
+	if handled, ok := h.allowTenant(w, r, pr, need, db, "", false); handled {
+		if !ok {
+			return nil, false
+		}
+	} else if scopeRank[pr.Key.Scope] < scopeRank[need] || (pr.Key.DB != AllDBs && pr.Key.DB != db) {
 		h.Audit.Log(AuditEvent{Event: "auth.denied", KeyID: pr.Key.ID, DB: db, Remote: remoteIP(r), Method: r.Method, Route: routeOf(r), Reason: "scope/db"})
 		writeErr(w, http.StatusForbidden, "forbidden")
 		return nil, false
@@ -67,6 +71,10 @@ func (h *Host) authzScope(w http.ResponseWriter, r *http.Request, need, db strin
 	if !h.refuseHiddenDB(w, r, pr, db) {
 		return nil, false
 	}
+	if !h.checkTrafficQuota(w, pr) {
+		return nil, false
+	}
+	h.notePrincipal(r, pr)
 	allowHealth(r)
 	return pr, true
 }

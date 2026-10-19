@@ -34,13 +34,28 @@ Bytes are GiB/TiB (1024-based). Traffic and host switches reset each month on th
 | Platinum | 1 TB | 100 GB | 40 |
 | Emerald | 5 TB | 500 GB | unlimited |
 
-Enforcement (signed-in Red-XAI Account with an active Hosted plan only; API keys and owner sessions are not capped):
+Enforcement applies to a signed-in non-owner with a plan, and to API keys that account created (the key stores the account id). Owner sessions and self-hosted keys are not capped. Storage is the bytes on disk for that account's databases, not a counter that only goes up.
 
-- **Storage**: a write that would push stored bytes past the cap is refused with **402** `storage_quota` and an upgrade hint.
-- **Traffic**: HTTP traffic (request body + a small response floor) is metered; when the monthly cap is already reached, further requests get **429** `traffic_quota`.
-- **Host switches**: creating or dropping a database, or `POST /v1/billing/hosting` with `action=on|off`, counts toward the budget; when exhausted, **402** `host_switch_quota`. Emerald is unlimited.
+- **Storage**: a write that would pass the cap is refused with **402**, `code: "quota_exceeded"`, `limit: "storage_quota"`.
+- **Traffic**: request body + response bytes are metered. When the monthly total is already spent, further requests get **429**, `code: "quota_exceeded"`, `limit: "traffic_quota"`.
+- **Host switches**: creating or dropping a database, or `POST /v1/billing/hosting` with `action=on|off`, counts toward the budget. When it is exhausted, **402**, `code: "quota_exceeded"`, `limit: "host_switch_quota"`. The hosting route's `error` field stays `host_switch_quota`. Emerald is unlimited (`hostSwitches: -1`).
 
-`Host.BillingPlan(sub)` returns the paid tier; `Host.BillingUsage(sub)` returns quota + counters for the billing/my-plan page and owners (`GET /v1/owner/accounts/{id}` includes `hosted` when the account is on a plan). Counters live in `<data_dir>/billing/usage.json` (0600).
+### When a plan is not active
+
+`GET /v1/billing/me` includes `access`:
+
+| `access` | When | What the account can do |
+|---|---|---|
+| `full` | status `active` or `trialing`, and now is before period end + 3 days | create, read, write, drop, keys — quotas apply |
+| `readonly` | any other status while now is still before period end + 3 days (`past_due`, `canceled`, `unpaid`, `paused`, `incomplete`) | reads work; create, write, drop and key changes return **402** `plan_readonly` |
+| `suspended` | a plan row exists and the 3-day window has ended | data-plane calls return **402** `plan_required`; `GET /v1/dbs` is 200 with `suspended: true` |
+| `none` | no plan row | create returns **402** `plan_required`; `GET /v1/dbs` stays **403** |
+
+`active` on `/v1/billing/me` is unchanged: it follows `Plan.Active`, which still treats `past_due` as entitled until the grace ends so the billing page can show the tier. Writes use `access`, not `active`.
+
+Nothing is deleted when a plan lapses. The files stay under `<data>/dbs/`. A later `active` or `trialing` subscription (webhook `customer.subscription.updated`, or the checkout return sync) opens them again. `customer.subscription.deleted` and `invoice.payment_failed` update the row the same way; they do not drop databases. The webhook checks `Stripe-Signature` (5 minute tolerance) with `STRIPE_WEBHOOK_SECRET`. The tier is the price lookup key `redx_hosted_<tier>_<monthly|annual>`, or `metadata.plan` on the price or the subscription when the lookup key is empty. `metadata.app` must be `redx`.
+
+`Host.BillingPlan(sub)` returns the paid tier; `Host.BillingUsage(sub)` returns quota + counters for the billing/my-plan page and owners (`GET /v1/owner/accounts/{id}` includes `hosted` when the account is on a plan). Counters live in `<data_dir>/billing/usage.json` (0600). Who owns which database lives in `<data_dir>/tenants.json` (0600).
 
 ## Configuration
 
@@ -63,7 +78,7 @@ Environment only (never the config file, never logged):
   `ui_mode=elements`, metadata `app/plan/interval/account` on the session and the subscription; returns
   `clientSecret`. One subscription per account: a second one answers `409 manage_in_portal`.
 - `GET /v1/billing/checkout/{cs_…}`: return-page status; only the account that started it can read it.
-- `GET /v1/billing/me`, `POST /v1/billing/portal`: current plan (includes `interval`, `quota`, `usage`); Stripe customer portal link.
+- `GET /v1/billing/me`, `POST /v1/billing/portal`: current plan (includes `interval`, `quota`, `usage`, and `access`: `full` | `readonly` | `suspended` | `none`); Stripe customer portal link.
 - `POST /v1/billing/hosting {action: "on"|"off"}`: flip Hosted on/off (counts toward the switch budget).
 - `POST /v1/billing/webhook`: Stripe events, `Stripe-Signature` checked (5 minute tolerance), event ids
   de-duplicated, live/test mode must match the key.

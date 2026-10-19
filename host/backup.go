@@ -4,6 +4,10 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -54,8 +58,21 @@ func addBytes(tw *tar.Writer, name string, b []byte) error {
 	return err
 }
 
+// snapshotExtra is included in a host backup (online or offline) and omitted
+// from a cluster replication snapshot, which must not carry the signing key.
+type snapshotExtra struct {
+	signingKey  []byte
+	signingMeta []byte
+	tenants     []byte
+}
+
 // WriteSnapshot writes the tar.gz to w. dbsRoot is <data>/dbs.
+// Cluster replication uses this form: databases, key hashes and TTL only.
 func WriteSnapshot(w io.Writer, dbsRoot string, keys []KeyRecord, ttlJSON []byte) error {
+	return writeSnapshot(w, dbsRoot, keys, ttlJSON, nil)
+}
+
+func writeSnapshot(w io.Writer, dbsRoot string, keys []KeyRecord, ttlJSON []byte, extra *snapshotExtra) error {
 	gz := gzip.NewWriter(w)
 	tw := tar.NewWriter(gz)
 	err := filepath.Walk(dbsRoot, func(p string, fi os.FileInfo, err error) error {
@@ -88,6 +105,23 @@ func WriteSnapshot(w io.Writer, dbsRoot string, keys []KeyRecord, ttlJSON []byte
 	if err := addBytes(tw, "ttl.json", ttlJSON); err != nil {
 		return err
 	}
+	if extra != nil {
+		if len(extra.signingKey) > 0 {
+			if err := addBytes(tw, "updates/signing.key", extra.signingKey); err != nil {
+				return err
+			}
+		}
+		if len(extra.signingMeta) > 0 {
+			if err := addBytes(tw, "updates/signing.key.meta", extra.signingMeta); err != nil {
+				return err
+			}
+		}
+		if len(extra.tenants) > 0 {
+			if err := addBytes(tw, "tenants.json", extra.tenants); err != nil {
+				return err
+			}
+		}
+	}
 	if err := tw.Close(); err != nil {
 		return err
 	}
@@ -104,8 +138,11 @@ func ptrs(k []KeyRecord) []*KeyRecord {
 
 // SnapshotContents is what ExtractSnapshot found.
 type SnapshotContents struct {
-	Keys []KeyRecord
-	TTL  []byte
+	Keys        []KeyRecord
+	TTL         []byte
+	SigningKey  []byte
+	SigningMeta []byte
+	Tenants     []byte
 }
 
 // ExtractSnapshot unpacks a snapshot: db files go under destDBs; keys/ttl are returned.
@@ -144,6 +181,18 @@ func ExtractSnapshot(r io.Reader, destDBs string) (*SnapshotContents, error) {
 			}
 		case name == "ttl.json":
 			if sc.TTL, err = io.ReadAll(io.LimitReader(tr, 256<<20)); err != nil {
+				return nil, err
+			}
+		case name == "updates/signing.key":
+			if sc.SigningKey, err = io.ReadAll(io.LimitReader(tr, 1<<20)); err != nil {
+				return nil, err
+			}
+		case name == "updates/signing.key.meta":
+			if sc.SigningMeta, err = io.ReadAll(io.LimitReader(tr, 1<<20)); err != nil {
+				return nil, err
+			}
+		case name == "tenants.json":
+			if sc.Tenants, err = io.ReadAll(io.LimitReader(tr, 32<<20)); err != nil {
 				return nil, err
 			}
 		case strings.HasPrefix(name, "dbs/"):
@@ -298,9 +347,10 @@ func (c *Cluster) installSnapshot(ctx context.Context, leader string) error {
 	return nil
 }
 
-// handleBackup streams an online snapshot (host admin only).
+// handleBackup streams an online snapshot (owner only). It includes the update
+// signing key and the tenant map; a cluster snapshot does not.
 func (h *Host) handleBackup(w http.ResponseWriter, r *http.Request, p *Principal) {
-	path, off, err := h.buildSnapshot()
+	path, off, err := h.buildHostBackup()
 	if err != nil {
 		writeErr(w, 500, "backup failed")
 		h.Logf("backup: %v", err)
@@ -310,18 +360,91 @@ func (h *Host) handleBackup(w http.ResponseWriter, r *http.Request, p *Principal
 	h.serveFile(w, path, off, "redx-backup-"+time.Now().UTC().Format("20060102-150405")+".tgz")
 }
 
+// buildHostBackup pauses writes and writes a consistent host archive, including
+// the update signing key and tenants.json. Cluster replication uses buildSnapshot.
+func (h *Host) buildHostBackup() (path string, offset uint64, err error) {
+	f, err := os.CreateTemp(h.Cfg.DataDir, ".backup-*.tgz")
+	if err != nil {
+		return "", 0, err
+	}
+	defer f.Close()
+	if err := h.writeHostArchive(f); err != nil {
+		os.Remove(f.Name())
+		return "", 0, err
+	}
+	return f.Name(), h.Cluster.Offset(), nil
+}
+
+func (h *Host) writeHostArchive(w io.Writer) error {
+	extra := &snapshotExtra{}
+	extra.signingKey, extra.signingMeta = h.signingKeyMaterial()
+	if h.tenants != nil {
+		extra.tenants = h.tenants.bytes()
+	}
+	h.pause.Lock()
+	defer h.pause.Unlock()
+	h.checkpointAll()
+	_ = h.Tracker.Save()
+	ttl, _ := os.ReadFile(filepath.Join(h.Cfg.DataDir, "cluster", "ttl.json"))
+	return writeSnapshot(w, h.Reg.Root(), h.KS.List(), ttl, extra)
+}
+
+func (h *Host) signingKeyMaterial() (key, meta []byte) {
+	if h != nil && h.upd != nil {
+		h.upd.mu.Lock()
+		priv := h.upd.priv
+		until := h.upd.notAfter
+		h.upd.mu.Unlock()
+		if len(priv) == ed25519.PrivateKeySize {
+			key = []byte(base64.StdEncoding.EncodeToString(priv.Seed()) + "\n")
+			b, err := json.Marshal(map[string]string{"not_after": until.UTC().Format(time.RFC3339)})
+			if err == nil {
+				meta = append(b, '\n')
+			}
+			return key, meta
+		}
+	}
+	dir := ""
+	if h != nil {
+		dir = filepath.Join(h.Cfg.DataDir, "updates")
+	}
+	key, _ = os.ReadFile(filepath.Join(dir, "signing.key"))
+	meta, _ = os.ReadFile(filepath.Join(dir, "signing.key.meta"))
+	return key, meta
+}
+
 // ---- offline backup / restore (used by the CLI) ----
 
-// OfflineBackup snapshots dataDir into w. The daemon must not be running unless force is set.
+// backupWait is how long an offline backup waits for the running daemon to
+// write a consistent archive. The daemon pauses writes, so the copy is safe
+// while redxd is up and no API key is required.
+const backupWait = 30 * time.Second
+
+// OfflineBackup snapshots dataDir into w. When redxd is stopped the copy is
+// taken directly. When redxd is running, a request file asks that process to
+// pause writes and produce the archive (databases, key hashes, TTL, the tenant
+// map and the update signing key). --force is the inconsistent fallback used
+// only if the running daemon does not answer.
 func OfflineBackup(dataDir string, w io.Writer, pass string, force bool) error {
 	l := flock.New(filepath.Join(dataDir, "redxd.lock"))
-	if ok, _ := l.TryLock(); !ok {
-		if !force {
-			return errors.New("redxd is running on this data dir: use the online backup (--addr/--key) or stop it")
-		}
-	} else {
-		defer l.Unlock()
+	ok, err := l.TryLock()
+	if err != nil {
+		return err
 	}
+	if ok {
+		defer l.Unlock()
+		return offlineCopy(dataDir, w, pass)
+	}
+	if err := requestLiveBackup(dataDir, w); err != nil {
+		if !force {
+			return err
+		}
+		return offlineCopy(dataDir, w, pass)
+	}
+	return nil
+}
+
+func offlineCopy(dataDir string, w io.Writer, pass string) error {
 	var keys []KeyRecord
 	if _, err := os.Stat(filepath.Join(dataDir, "keys.red-xai-keys")); err == nil {
 		ks, err := OpenKeystore(filepath.Join(dataDir, "keys.red-xai-keys"), KeystoreOptions{Passphrase: pass})
@@ -331,7 +454,107 @@ func OfflineBackup(dataDir string, w io.Writer, pass string, force bool) error {
 		keys = ks.List()
 	}
 	ttl, _ := os.ReadFile(filepath.Join(dataDir, "cluster", "ttl.json"))
-	return WriteSnapshot(w, filepath.Join(dataDir, "dbs"), keys, ttl)
+	key, _ := os.ReadFile(filepath.Join(dataDir, "updates", "signing.key"))
+	meta, _ := os.ReadFile(filepath.Join(dataDir, "updates", "signing.key.meta"))
+	tenants, _ := os.ReadFile(filepath.Join(dataDir, "tenants.json"))
+	return writeSnapshot(w, filepath.Join(dataDir, "dbs"), keys, ttl, &snapshotExtra{signingKey: key, signingMeta: meta, tenants: tenants})
+}
+
+func requestLiveBackup(dataDir string, w io.Writer) error {
+	var buf [16]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return err
+	}
+	id := hex.EncodeToString(buf[:])
+	dir := filepath.Join(dataDir, "backup")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	req := filepath.Join(dir, "req-"+id)
+	if err := os.WriteFile(req, []byte("1\n"), 0o600); err != nil {
+		return err
+	}
+	out := filepath.Join(dir, "out-"+id+".tgz")
+	errf := filepath.Join(dir, "err-"+id)
+	deadline := time.Now().Add(backupWait)
+	for time.Now().Before(deadline) {
+		if b, err := os.ReadFile(errf); err == nil {
+			os.Remove(req)
+			os.Remove(errf)
+			msg := strings.TrimSpace(string(b))
+			if msg == "" {
+				msg = "backup failed"
+			}
+			return errors.New(msg)
+		}
+		f, err := os.Open(out)
+		if err == nil {
+			_, copyErr := io.Copy(w, f)
+			f.Close()
+			os.Remove(out)
+			os.Remove(req)
+			return copyErr
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	os.Remove(req)
+	return errors.New("redxd is running on this data dir and did not produce a backup within 30s; stop it, or pass --force for an inconsistent copy")
+}
+
+// pollLocalBackup serves `redx backup --offline` while this process holds the
+// data-dir lock. The archive is written with writes paused.
+func (h *Host) pollLocalBackup() {
+	if h == nil {
+		return
+	}
+	dir := filepath.Join(h.Cfg.DataDir, "backup")
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range ents {
+		name := e.Name()
+		if e.IsDir() || !strings.HasPrefix(name, "req-") {
+			continue
+		}
+		id := strings.TrimPrefix(name, "req-")
+		if !backupIDOK(id) {
+			continue
+		}
+		out := filepath.Join(dir, "out-"+id+".tgz")
+		tmp := out + ".tmp"
+		f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+		if err != nil {
+			continue
+		}
+		err = h.writeHostArchive(f)
+		closeErr := f.Close()
+		if err == nil {
+			err = closeErr
+		}
+		if err != nil {
+			os.Remove(tmp)
+			_ = os.WriteFile(filepath.Join(dir, "err-"+id), []byte(err.Error()+"\n"), 0o600)
+		} else if err := os.Rename(tmp, out); err != nil {
+			os.Remove(tmp)
+			_ = os.WriteFile(filepath.Join(dir, "err-"+id), []byte(err.Error()+"\n"), 0o600)
+		}
+		os.Remove(filepath.Join(dir, name))
+	}
+}
+
+func backupIDOK(id string) bool {
+	if len(id) != 32 {
+		return false
+	}
+	for _, c := range id {
+		switch {
+		case c >= '0' && c <= '9', c >= 'a' && c <= 'f':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // OfflineRestore restores a snapshot into dataDir. Refuses if redxd is running
@@ -381,6 +604,23 @@ func OfflineRestore(dataDir string, r io.Reader, pass string, force bool) (moved
 	if sc.TTL != nil {
 		_ = os.MkdirAll(cdir, 0o700)
 		_ = os.WriteFile(filepath.Join(cdir, "ttl.json"), sc.TTL, 0o600)
+	}
+	if len(sc.SigningKey) > 0 {
+		udir := filepath.Join(dataDir, "updates")
+		if err := os.MkdirAll(udir, 0o700); err != nil {
+			return movedTo, err
+		}
+		if err := os.WriteFile(filepath.Join(udir, "signing.key"), sc.SigningKey, 0o600); err != nil {
+			return movedTo, err
+		}
+		if len(sc.SigningMeta) > 0 {
+			_ = os.WriteFile(filepath.Join(udir, "signing.key.meta"), sc.SigningMeta, 0o600)
+		}
+	}
+	if len(sc.Tenants) > 0 {
+		if err := os.WriteFile(filepath.Join(dataDir, "tenants.json"), sc.Tenants, 0o600); err != nil {
+			return movedTo, err
+		}
 	}
 	return movedTo, nil
 }

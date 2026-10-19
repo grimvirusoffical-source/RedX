@@ -15,7 +15,7 @@ func writeQuotaErr(w http.ResponseWriter, err error) bool {
 		return false
 	}
 	writeJSON(w, qe.HTTP, map[string]string{
-		"error": qe.Code, "message": qe.Message, "upgrade": "/ui/billing.html",
+		"error": qe.Code, "code": "quota_exceeded", "limit": qe.Code, "message": qe.Message, "upgrade": "/ui/billing.html",
 	})
 	return true
 }
@@ -23,19 +23,27 @@ func writeQuotaErr(w http.ResponseWriter, err error) bool {
 // hostedAccount returns the Red-XAI Account sub when the principal is signed in
 // with a paid Hosted plan. API-key-only callers get ok=false (self-hosted: no caps).
 func (h *Host) hostedAccount(pr *Principal) (account string, q billing.Quota, periodEnd time.Time, ok bool) {
-	if h == nil || h.billing == nil || pr == nil || pr.Account == nil || pr.Account.Sub == "" {
+	if h == nil || h.billing == nil || pr == nil || pr.IsOwner() {
 		return "", billing.Quota{}, time.Time{}, false
 	}
 	// Owners administer the host; quotas apply to paying customers, not to owner sessions.
-	if pr.IsOwner() {
+	// A tenant API key carries the account on Key.Owner so the cap cannot be skipped
+	// by minting a key.
+	acct := ""
+	if pr.Account != nil {
+		acct = pr.Account.Sub
+	} else {
+		acct = pr.Key.Owner
+	}
+	if acct == "" {
 		return "", billing.Quota{}, time.Time{}, false
 	}
-	p, active := h.billing.ActivePlan(pr.Account.Sub)
+	p, active := h.billing.ActivePlan(acct)
 	if !active {
 		return "", billing.Quota{}, time.Time{}, false
 	}
 	qq, _ := billing.QuotaFor(p.Tier)
-	return pr.Account.Sub, qq, p.PeriodEnd, true
+	return acct, qq, p.PeriodEnd, true
 }
 
 func (h *Host) nowBilling() time.Time {
@@ -75,20 +83,33 @@ func (h *Host) checkStorageQuota(w http.ResponseWriter, pr *Principal, deltaByte
 	if !ok {
 		return true
 	}
-	if err := h.billing.Usage().CheckWrite(acct, q, deltaBytes, h.nowBilling(), pe); err != nil {
-		writeQuotaErr(w, err)
+	if deltaBytes < 0 {
+		deltaBytes = 0
+	}
+	// The cap is the bytes on disk for this account's databases, not a counter
+	// that only increments. A write that would pass the tier's storage limit is refused.
+	measured := h.accountStorage(acct)
+	_ = h.billing.Usage().SetStorage(acct, measured, h.nowBilling(), pe)
+	if q.StorageBytes > 0 && deltaBytes > 0 && measured+deltaBytes > q.StorageBytes {
+		writeQuotaErr(w, errStorageQuota())
 		return false
 	}
 	return true
 }
 
+func errStorageQuota() error {
+	return &billing.ErrQuota{Code: "storage_quota", HTTP: http.StatusPaymentRequired,
+		Message: "This write would go past your RedX Hosted storage limit. Upgrade your plan at /ui/billing.html."}
+}
+
 // noteStorage adds deltaBytes to the account's stored-bytes counter after a successful write.
 func (h *Host) noteStorage(pr *Principal, deltaBytes int64) {
 	acct, _, pe, ok := h.hostedAccount(pr)
-	if !ok || deltaBytes == 0 {
+	if !ok {
 		return
 	}
-	_ = h.billing.Usage().AddStorage(acct, deltaBytes, h.nowBilling(), pe)
+	_ = deltaBytes
+	_ = h.billing.Usage().SetStorage(acct, h.accountStorage(acct), h.nowBilling(), pe)
 }
 
 // checkHostSwitchQuota consumes one create/drop switch for a hosted account.

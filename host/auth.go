@@ -2,7 +2,6 @@ package host
 
 import (
 	"errors"
-	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -46,14 +45,6 @@ type Authenticator struct {
 // NewAuthenticator wires the pieces together.
 func NewAuthenticator(ks *Keystore, au *Auditor, defRPS float64, defBurst int, auditOK bool) *Authenticator {
 	return &Authenticator{ks: ks, audit: au, keyLim: NewLimiter(nil), fails: newFailTracker(20, time.Minute), defRPS: defRPS, defBurst: defBurst, auditOK: auditOK}
-}
-
-func remoteIP(r *http.Request) string {
-	h, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return h
 }
 
 // bearer extracts the presented key. The access_token query parameter is

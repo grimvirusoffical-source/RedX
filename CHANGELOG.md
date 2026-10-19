@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+* Hosted tenants: a signed-in non-owner with an active or trialing RedX Hosted plan creates and uses only its own databases and API keys. Names are namespaced. Quotas (traffic, on-disk storage, host switches) are enforced. A lapsed plan becomes read-only for 3 days after period end, then suspended; databases are kept. See [billing](docs/billing.md) and [API](docs/api.md).
+* `trusted_proxies` / `REDX_TRUSTED_PROXIES`: when the direct peer is listed, client IP for rate limits and audit comes from `X-Forwarded-For` (rightmost untrusted hop) or `X-Real-IP`. Other peers cannot spoof it.
+* `redx backup --offline` takes a consistent snapshot while redxd is running (no API key). The archive includes databases, key hashes, `tenants.json` and the update signing key. See [backup](docs/backup.md).
+* Dangerous routes return 401 or 403 before `428 confirm_required`.
+
 ## 0.4.5 (2026-10-19)
 
 * Cluster: installing a full snapshot now swaps the databases directory atomically. A read racing the install could reopen the pre-snapshot databases and keep serving them, so a write discarded by the resync stayed readable (seen on Windows CI). Reads also wait while a snapshot is being swapped in.

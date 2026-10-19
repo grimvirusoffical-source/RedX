@@ -658,6 +658,9 @@ type connectApproveIn struct {
 }
 
 func (h *Host) connectApprove(w http.ResponseWriter, r *http.Request, pr *Principal) {
+	if requireDangerConfirm(w, r) {
+		return
+	}
 	var in connectApproveIn
 	if json.Unmarshal(readBody(r), &in) != nil || in.RequestID == "" {
 		connectErr(w, 400, "invalid_request", `body must be {"request_id": "rq_..."}`)
@@ -1049,6 +1052,9 @@ func (h *Host) connectApps(w http.ResponseWriter) {
 }
 
 func (h *Host) connectAdminRevoke(w http.ResponseWriter, r *http.Request, pr *Principal, id string) {
+	if requireDangerConfirm(w, r) {
+		return
+	}
 	s := h.connect
 	s.mu.Lock()
 	defer s.mu.Unlock()
