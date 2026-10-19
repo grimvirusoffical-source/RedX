@@ -17,8 +17,8 @@ const ConfirmRequired = "confirm_required"
 // Kept in sync with api/redx-api.json by TestDangerousOpsMatchSpec.
 // DangerousOp is one API operation whose danger level is "dangerous".
 type DangerousOp struct {
-	ID          string
-	Method      string
+	ID     string
+	Method string
 	// PathPattern uses "{name}" for a single path segment.
 	PathPattern string
 	// HostConfirm, if set, is the path/query parameter whose value also counts
