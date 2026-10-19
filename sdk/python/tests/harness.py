@@ -35,29 +35,44 @@ class Host:
             if not binary:
                 binary = os.path.join(self.tmp, "redxd")
                 subprocess.run(["go", "build", "-o", binary, "./cmd/redxd"], cwd=REPO, check=True)
-            port = free_port()
-            self.url = f"http://127.0.0.1:{port}"
-            env = {"PATH": os.environ.get("PATH", ""), "HOME": self.tmp}  # no inherited REDX_* settings
-            self.proc = subprocess.Popen(
-                [binary, "run", "--no-open", "--bootstrap", "console", "--data-dir", os.path.join(self.tmp, "data"), "--listen", f"127.0.0.1:{port}"],
-                env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
-            self._out = ""
-            self._pump_t = threading.Thread(target=self._pump, daemon=True)
-            self._pump_t.start()
-            for i in range(300):
-                if self.proc.poll() is not None:
-                    raise RuntimeError("redxd exited early")
-                try:
-                    with urllib.request.urlopen(self.url + "/healthz", timeout=1) as r:
-                        if r.status == 200 and self.admin_key:
-                            return
-                except OSError:
-                    pass
-                time.sleep(0.05)
-            raise RuntimeError("redxd did not become ready")
+            self._binary = binary
+            self._port = free_port()
+            self.url = f"http://127.0.0.1:{self._port}"
+            self._spawn()
         except BaseException:
             self.stop()
             raise
+
+    def _spawn(self):
+        env = {"PATH": os.environ.get("PATH", ""), "HOME": self.tmp,  # no inherited REDX_* settings
+               "SYSTEMROOT": os.environ.get("SYSTEMROOT", "")}
+        self.proc = subprocess.Popen(
+            [self._binary, "run", "--no-open", "--bootstrap", "console", "--data-dir", os.path.join(self.tmp, "data"),
+             "--listen", f"127.0.0.1:{self._port}"],
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        self._out = ""
+        self._pump_t = threading.Thread(target=self._pump, daemon=True)
+        self._pump_t.start()
+        for i in range(300):
+            if self.proc.poll() is not None:
+                raise RuntimeError("redxd exited early")
+            try:
+                with urllib.request.urlopen(self.url + "/healthz", timeout=1) as r:
+                    if r.status == 200 and self.admin_key:
+                        return
+            except OSError:
+                pass
+            time.sleep(0.05)
+        raise RuntimeError("redxd did not become ready")
+
+    def restart(self, down: float = 0.3):
+        """Kill the host and start it again on the same port and data (to test reconnects)."""
+        self.proc.kill()
+        self.proc.wait()
+        self._pump_t.join(2)
+        self.proc.stdout.close()
+        time.sleep(down)
+        self._spawn()
 
     def _pump(self):
         for line in self.proc.stdout:
