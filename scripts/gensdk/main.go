@@ -300,8 +300,6 @@ func keys(m map[string]string) []string {
 	return out
 }
 
-func q(s string) string { b, _ := json.Marshal(s); return string(b) }
-
 // ---------------------------------------------------------------- Go
 
 func goOps(s *Spec) string {
@@ -310,14 +308,14 @@ func goOps(s *Spec) string {
 	b.WriteString("// Operations is the table of every RedX HTTP operation, keyed by id.\nvar Operations = map[string]Operation{\n")
 	for _, o := range s.Operations {
 		fmt.Fprintf(&b, "\t%s: {ID: %s, Group: %s, Method: %s, Path: %s, Shorthand: %s, Auth: %s, Danger: %s, Response: %s, Request: %s, HostConfirm: %s, Summary: %s},\n",
-			q(o.ID), q(o.ID), q(o.Group), q(o.Method), q(o.Path), q(o.Shorthand), q(o.Auth), "Danger"+pascal(o.Danger), q(o.Response), q(requestKind(o)), q(o.HostConfirm), q(o.Summary))
+			quoteGo(o.ID), quoteGo(o.ID), quoteGo(o.Group), quoteGo(o.Method), quoteGo(o.Path), quoteGo(o.Shorthand), quoteGo(o.Auth), "Danger"+pascal(o.Danger), quoteGo(o.Response), quoteGo(requestKind(o)), quoteGo(o.HostConfirm), quoteGo(o.Summary))
 	}
 	b.WriteString("}\n\n// segmentParams are pack and media paths: each slash-separated segment is escaped, the slashes stay.\nvar segmentParams = map[string]bool{")
 	for i, x := range s.ParamEncoding.Segments {
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		fmt.Fprintf(&b, "%s: true", q(x))
+		fmt.Fprintf(&b, "%s: true", quoteGo(x))
 	}
 	b.WriteString("}\n")
 	for _, o := range s.Operations {
@@ -327,14 +325,14 @@ func goOps(s *Spec) string {
 		var sig, args []string
 		for _, p := range o.pathParams() {
 			sig = append(sig, p+" string")
-			args = append(args, fmt.Sprintf("%s: %s", q(p), p))
+			args = append(args, fmt.Sprintf("%s: %s", quoteGo(p), p))
 		}
-		fmt.Fprintf(&b, "\n// %s: %s\n//\n// %s %s, auth %s, danger %s.\n", pascal(o.ID), o.Summary, o.Method, o.Path, o.Auth, o.Danger)
+		fmt.Fprintf(&b, "\n// %s: %s\n//\n// %s %s, auth %s, danger %s.\n", pascal(o.ID), oneLine(o.Summary), o.Method, o.Path, o.Auth, o.Danger)
 		fmt.Fprintf(&b, "func (c *Client) %s(ctx context.Context%s, a Args) (*Result, error) {\n", pascal(o.ID), prefixed(sig))
 		if len(args) > 0 {
 			fmt.Fprintf(&b, "\ta.Params = withParams(a.Params, map[string]string{%s})\n", strings.Join(args, ", "))
 		}
-		fmt.Fprintf(&b, "\treturn c.Call(ctx, %s, a)\n}\n", q(o.ID))
+		fmt.Fprintf(&b, "\treturn c.Call(ctx, %s, a)\n}\n", quoteGo(o.ID))
 	}
 	src, err := format.Source([]byte(b.String()))
 	if err != nil {
@@ -381,19 +379,19 @@ func jsOps(s *Spec) string {
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		b.WriteString(q(x))
+		b.WriteString(quoteJS(x))
 	}
 	b.WriteString("]);\n\nconst OPERATIONS = Object.freeze({\n")
 	for _, o := range s.Operations {
 		fmt.Fprintf(&b, "  %s: Object.freeze({ id: %s, group: %s, method: %s, path: %s, shorthand: %s, auth: %s, danger: %s, dangerLevel: %d, response: %s, request: %s, hostConfirm: %s, summary: %s }),\n",
-			o.ID, q(o.ID), q(o.Group), q(o.Method), q(o.Path), q(o.Shorthand), q(o.Auth), q(o.Danger), level(s, o.Danger), q(o.Response), q(requestKind(o)), q(o.HostConfirm), q(o.Summary))
+			o.ID, quoteJS(o.ID), quoteJS(o.Group), quoteJS(o.Method), quoteJS(o.Path), quoteJS(o.Shorthand), quoteJS(o.Auth), quoteJS(o.Danger), level(s, o.Danger), quoteJS(o.Response), quoteJS(requestKind(o)), quoteJS(o.HostConfirm), quoteJS(o.Summary))
 	}
 	b.WriteString("});\n\n// install adds one method per operation to the client class: client.<id>({ db, <path params>, query, body, confirm }).\nfunction install(proto) {\n")
 	for _, o := range s.Operations {
 		if o.Response == "websocket" {
 			continue
 		}
-		fmt.Fprintf(&b, "  if (!proto.%s) proto.%s = function (opts = {}) { return this.call(%s, opts); };\n", o.ID, o.ID, q(o.ID))
+		fmt.Fprintf(&b, "  if (!proto.%s) proto.%s = function (opts = {}) { return this.call(%s, opts); };\n", o.ID, o.ID, quoteJS(o.ID))
 	}
 	b.WriteString("}\n\nmodule.exports = { OPERATIONS, DANGER, SEGMENT_PARAMS, install };\n")
 	return b.String()
@@ -423,7 +421,7 @@ func tsOps(s *Spec) string {
 		if i > 0 {
 			b.WriteString(" | ")
 		}
-		b.WriteString(q(d.Name))
+		b.WriteString(quoteJS(d.Name))
 	}
 	b.WriteString(";\n\nexport interface Operation {\n  id: string; group: string; method: string; path: string; shorthand: string; auth: string;\n  danger: DangerName; dangerLevel: number; response: 'json' | 'text' | 'binary' | 'websocket'; request: string; hostConfirm: string; summary: string;\n}\n\n")
 	b.WriteString("export interface CallOptions {\n  /** database; defaults to the client's */\n  db?: string;\n  query?: Record<string, string | number | boolean | undefined>;\n  body?: unknown;\n  headers?: Record<string, string>;\n  /** required for operations whose danger is \"dangerous\" */\n  confirm?: boolean;\n  [pathParam: string]: unknown;\n}\n\n")
@@ -470,7 +468,7 @@ func tsOps(s *Spec) string {
 		if len(o.pathParams()) > 0 || o.Danger == "dangerous" || o.Request != "" {
 			opt = ""
 		}
-		fmt.Fprintf(&b, "  /** %s (%s %s; auth %s; danger %s) */\n  %s(opts%s: { %s }): %s;\n", o.Summary, o.Method, o.Path, o.Auth, o.Danger, o.ID, opt, strings.Join(fields, "; "), ret)
+		fmt.Fprintf(&b, "  /** %s (%s %s; auth %s; danger %s) */\n  %s(opts%s: { %s }): %s;\n", jsComment(o.Summary), o.Method, jsComment(o.Path), o.Auth, o.Danger, o.ID, opt, strings.Join(fields, "; "), ret)
 	}
 	b.WriteString("}\n\nexport declare const OPERATIONS: Readonly<Record<string, Operation>>;\nexport declare const DANGER: Readonly<Record<DangerName, number>>;\n")
 	return b.String()
@@ -486,19 +484,19 @@ func pyOps(s *Spec) string {
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		fmt.Fprintf(&b, "%s: %d", q(d.Name), d.Level)
+		fmt.Fprintf(&b, "%s: %d", quotePy(d.Name), d.Level)
 	}
 	b.WriteString("}\n\nSEGMENT_PARAMS = frozenset({")
 	for i, x := range s.ParamEncoding.Segments {
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		b.WriteString(q(x))
+		b.WriteString(quotePy(x))
 	}
 	b.WriteString("})\n\nOPERATIONS: Dict[str, Dict[str, Any]] = {\n")
 	for _, o := range s.Operations {
 		fmt.Fprintf(&b, "    %s: {\"id\": %s, \"group\": %s, \"method\": %s, \"path\": %s, \"shorthand\": %s, \"auth\": %s, \"danger\": %s, \"danger_level\": %d, \"response\": %s, \"request\": %s, \"host_confirm\": %s, \"summary\": %s},\n",
-			q(o.ID), q(o.ID), q(o.Group), q(o.Method), q(o.Path), q(o.Shorthand), q(o.Auth), q(o.Danger), level(s, o.Danger), q(o.Response), q(requestKind(o)), q(o.HostConfirm), q(o.Summary))
+			quotePy(o.ID), quotePy(o.ID), quotePy(o.Group), quotePy(o.Method), quotePy(o.Path), quotePy(o.Shorthand), quotePy(o.Auth), quotePy(o.Danger), level(s, o.Danger), quotePy(o.Response), quotePy(requestKind(o)), quotePy(o.HostConfirm), quotePy(o.Summary))
 	}
 	b.WriteString("}\n\n\nclass Operations:\n    \"\"\"One method per operation. Each returns parsed JSON (bytes for binary, str for Box text).\"\"\"\n\n    def call(self, op_id: str, **kw: Any) -> Any:  # implemented by RedX\n        raise NotImplementedError\n")
 	for _, o := range s.Operations {
@@ -525,8 +523,9 @@ func pyOps(s *Spec) string {
 		}
 		sig = append(sig, "confirm: bool = False", "headers: Optional[Dict[str, str]] = None")
 		pass = append(pass, "confirm=confirm", "headers=headers")
-		fmt.Fprintf(&b, "\n    def %s(self, %s) -> Any:\n        \"\"\"%s (%s %s; auth %s; danger %s)\"\"\"\n        return self.call(%s, %s)\n",
-			snake(o.ID), strings.Join(sig, ", "), o.Summary, o.Method, o.Path, o.Auth, o.Danger, q(o.ID), strings.Join(pass, ", "))
+		doc := pyDoc(fmt.Sprintf("%s (%s %s; auth %s; danger %s)", o.Summary, o.Method, o.Path, o.Auth, o.Danger))
+		fmt.Fprintf(&b, "\n    def %s(self, %s) -> Any:\n        \"\"\"%s\"\"\"\n        return self.call(%s, %s)\n",
+			snake(o.ID), strings.Join(sig, ", "), doc, quotePy(o.ID), strings.Join(pass, ", "))
 	}
 	return b.String()
 }
@@ -538,7 +537,7 @@ func swiftOps(s *Spec) string {
 	fmt.Fprintf(&b, "// %s\n\nimport Foundation\n\n", header)
 	b.WriteString("public enum DangerLevel: Int, Sendable, Comparable {\n")
 	for _, d := range s.Danger {
-		fmt.Fprintf(&b, "    /// %s\n    case %s = %d\n", d.Meaning, d.Name, d.Level)
+		fmt.Fprintf(&b, "    /// %s\n    case %s = %d\n", oneLine(d.Meaning), d.Name, d.Level)
 	}
 	b.WriteString("    public static func < (a: DangerLevel, b: DangerLevel) -> Bool { a.rawValue < b.rawValue }\n}\n\n")
 	b.WriteString("public struct Operation: Sendable {\n    public let id, group, method, path, shorthand, auth, response, request, hostConfirm, summary: String\n    public let danger: DangerLevel\n}\n\n")
@@ -547,12 +546,12 @@ func swiftOps(s *Spec) string {
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		b.WriteString(q(x))
+		b.WriteString(quoteSwift(x))
 	}
 	b.WriteString("]\n\npublic let operations: [String: Operation] = [\n")
 	for _, o := range s.Operations {
 		fmt.Fprintf(&b, "    %s: Operation(id: %s, group: %s, method: %s, path: %s, shorthand: %s, auth: %s, response: %s, request: %s, hostConfirm: %s, summary: %s, danger: .%s),\n",
-			q(o.ID), q(o.ID), q(o.Group), q(o.Method), q(o.Path), q(o.Shorthand), q(o.Auth), q(o.Response), q(requestKind(o)), q(o.HostConfirm), q(o.Summary), o.Danger)
+			quoteSwift(o.ID), quoteSwift(o.ID), quoteSwift(o.Group), quoteSwift(o.Method), quoteSwift(o.Path), quoteSwift(o.Shorthand), quoteSwift(o.Auth), quoteSwift(o.Response), quoteSwift(requestKind(o)), quoteSwift(o.HostConfirm), quoteSwift(o.Summary), o.Danger)
 	}
 	b.WriteString("]\n\nextension RedXClient {\n")
 	for _, o := range s.Operations {
@@ -562,7 +561,7 @@ func swiftOps(s *Spec) string {
 		var sig, params []string
 		for _, p := range o.pathParams() {
 			sig = append(sig, p+": String")
-			params = append(params, fmt.Sprintf("%s: %s", q(p), p))
+			params = append(params, fmt.Sprintf("%s: %s", quoteSwift(p), p))
 		}
 		if o.hasDB() {
 			sig = append(sig, "db: String? = nil")
@@ -578,7 +577,7 @@ func swiftOps(s *Spec) string {
 		if o.Danger == "dangerous" {
 			sig = append(sig, "confirm: Bool = false")
 		}
-		call := []string{q(o.ID)}
+		call := []string{quoteSwift(o.ID)}
 		pm := "[:]"
 		if len(params) > 0 {
 			pm = "[" + strings.Join(params, ", ") + "]"
@@ -599,7 +598,7 @@ func swiftOps(s *Spec) string {
 			call = append(call, "confirm: confirm")
 		}
 		fmt.Fprintf(&b, "    /// %s (%s %s; auth %s; danger %s)\n    @discardableResult\n    public func %s(%s) async throws -> RedXResult {\n        try await call(%s)\n    }\n\n",
-			o.Summary, o.Method, o.Path, o.Auth, o.Danger, o.ID, strings.Join(sig, ", "), strings.Join(call, ", "))
+			oneLine(o.Summary), o.Method, o.Path, o.Auth, o.Danger, o.ID, strings.Join(sig, ", "), strings.Join(call, ", "))
 	}
 	b.WriteString("}\n")
 	return b.String()
@@ -612,7 +611,7 @@ func csOps(s *Spec) string {
 	fmt.Fprintf(&b, "// <auto-generated>\n// %s\n// </auto-generated>\n#nullable enable\nusing System.Collections.Generic;\nusing System.Threading;\nusing System.Threading.Tasks;\n\nnamespace RedX\n{\n", header)
 	b.WriteString("    /// <summary>How risky an operation is. SDKs refuse Dangerous unless the call is confirmed.</summary>\n    public enum DangerLevel\n    {\n")
 	for _, d := range s.Danger {
-		fmt.Fprintf(&b, "        /// <summary>%s</summary>\n        %s = %d,\n", d.Meaning, pascal(d.Name), d.Level)
+		fmt.Fprintf(&b, "        /// <summary>%s</summary>\n        %s = %d,\n", csDoc(d.Meaning), pascal(d.Name), d.Level)
 	}
 	b.WriteString("    }\n\n    public sealed class Operation\n    {\n        public string Id = \"\", Group = \"\", Method = \"\", Path = \"\", Shorthand = \"\", Auth = \"\", Response = \"\", Request = \"\", HostConfirm = \"\", Summary = \"\";\n        public DangerLevel Danger;\n    }\n\n")
 	b.WriteString("    public static class Operations\n    {\n        internal static readonly HashSet<string> SegmentParams = new HashSet<string> {")
@@ -620,12 +619,12 @@ func csOps(s *Spec) string {
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		b.WriteString(q(x))
+		b.WriteString(quoteCS(x))
 	}
 	b.WriteString(" };\n\n        public static readonly IReadOnlyDictionary<string, Operation> All = new Dictionary<string, Operation>\n        {\n")
 	for _, o := range s.Operations {
 		fmt.Fprintf(&b, "            [%s] = new Operation { Id = %s, Group = %s, Method = %s, Path = %s, Shorthand = %s, Auth = %s, Response = %s, Request = %s, HostConfirm = %s, Summary = %s, Danger = DangerLevel.%s },\n",
-			q(o.ID), q(o.ID), q(o.Group), q(o.Method), q(o.Path), q(o.Shorthand), q(o.Auth), q(o.Response), q(requestKind(o)), q(o.HostConfirm), q(o.Summary), pascal(o.Danger))
+			quoteCS(o.ID), quoteCS(o.ID), quoteCS(o.Group), quoteCS(o.Method), quoteCS(o.Path), quoteCS(o.Shorthand), quoteCS(o.Auth), quoteCS(o.Response), quoteCS(requestKind(o)), quoteCS(o.HostConfirm), quoteCS(o.Summary), pascal(o.Danger))
 	}
 	b.WriteString("        };\n    }\n\n    public partial class RedXClient\n    {\n")
 	for _, o := range s.Operations {
@@ -635,7 +634,7 @@ func csOps(s *Spec) string {
 		var sig, params []string
 		for _, p := range o.pathParams() {
 			sig = append(sig, "string "+p)
-			params = append(params, fmt.Sprintf("[%s] = %s", q(p), p))
+			params = append(params, fmt.Sprintf("[%s] = %s", quoteCS(p), p))
 		}
 		if o.Request != "" {
 			sig = append(sig, "byte[] body")
@@ -657,14 +656,14 @@ func csOps(s *Spec) string {
 		if len(params) > 0 {
 			pm = "new Dictionary<string, string> { " + strings.Join(params, ", ") + " }"
 		}
-		args := []string{q(o.ID), pm}
+		args := []string{quoteCS(o.ID), pm}
 		args = append(args, ternary(o.hasDB(), "db", "null"))
 		args = append(args, ternary(o.Body != nil && o.Request == "", "body", "null"))
 		args = append(args, ternary(o.Request != "", "body", "null"))
 		args = append(args, ternary(o.Query != nil, "query", "null"))
 		args = append(args, ternary(o.Danger == "dangerous", "confirm", "false"), "ct")
 		fmt.Fprintf(&b, "        /// <summary>%s (%s %s; auth %s; danger %s)</summary>\n        public Task<RedXResult> %sAsync(%s) =>\n            CallAsync(%s);\n\n",
-			escXML(o.Summary), o.Method, escXML(o.Path), o.Auth, o.Danger, pascal(o.ID), strings.Join(sig, ", "), strings.Join(args, ", "))
+			csDoc(o.Summary), o.Method, csDoc(o.Path), o.Auth, o.Danger, pascal(o.ID), strings.Join(sig, ", "), strings.Join(args, ", "))
 	}
 	b.WriteString("    }\n}\n")
 	return b.String()
@@ -687,14 +686,14 @@ func cOps(s *Spec) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "/* %s */\n#ifndef REDX_OPS_H\n#define REDX_OPS_H\n\n/* Danger levels of operations (redx_danger_level). Dangerous calls need \"confirm\": true in the args. */\n", header)
 	for _, d := range s.Danger {
-		fmt.Fprintf(&b, "#define REDX_DANGER_%s %d /* %s */\n", strings.ToUpper(d.Name), d.Level, d.Meaning)
+		fmt.Fprintf(&b, "#define REDX_DANGER_%s %d /* %s */\n", strings.ToUpper(d.Name), d.Level, cComment(d.Meaning))
 	}
 	b.WriteString("\n/* Operation ids accepted by redx_call (see api/redx-api.json). */\n")
 	for _, o := range s.Operations {
 		if o.Response == "websocket" {
 			continue
 		}
-		fmt.Fprintf(&b, "#define REDX_OP_%s %s /* %s %s, %s */\n", strings.ToUpper(snake(o.ID)), q(o.ID), o.Method, strings.ReplaceAll(o.Path, "*", ""), o.Danger)
+		fmt.Fprintf(&b, "#define REDX_OP_%s %s /* %s %s, %s */\n", strings.ToUpper(snake(o.ID)), quoteC(o.ID), o.Method, cComment(strings.ReplaceAll(o.Path, "*", "")), o.Danger)
 	}
 	b.WriteString("\n#endif\n")
 	return b.String()
