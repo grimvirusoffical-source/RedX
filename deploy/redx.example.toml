@@ -34,3 +34,12 @@ default_db = "default"                # database served by /v1/path/...
 # master_key_file = "/etc/redx/master.key"   # create with `redxd keygen --out FILE`; must be mode 0600; the key is
 #                                            # never read from env or flags. Default: <data_dir>/master.key if present.
 # code_allowed_boxes = ["players.red-xai.db:Player"]   # file:Box globs scripts may touch; empty = none
+
+# --- Red-XAI Accounts sign-in for the web console (0.5) ---  see docs/accounts.md
+# accounts_issuer = "https://accounts.red-xai.example"   # empty = off; API keys always work
+# accounts_client_id = "redx"
+# accounts_redirect_url = "https://redx.example.com/v1/auth/callback"   # default <advertise>/v1/auth/callback
+# accounts_master_db = "redxai_accounts"                 # the master accounts DB: owners only
+# owner_emails = ["owner@example.com"]                   # deploy config only; or env REDXAI_OWNER_EMAILS.
+#                                                        # Owners also need a verified email and a 2FA sign-in.
+# Client secret (confidential clients only): env REDX_ACCOUNTS_CLIENT_SECRET, never in this file.

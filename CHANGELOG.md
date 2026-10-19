@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+* Red-XAI Accounts: the web console can sign in and sign up with a Red-XAI Account (OIDC, PKCE S256, ES256 ID tokens; `accounts_issuer`). API keys keep working for SDKs and machines. See [accounts.md](docs/accounts.md).
+* Sign-up in the console follows the Red-XAI Accounts rules: ToS gate (scroll to the bottom, Read ToS, Agree to ToS), live red/green hints, email and password entered twice with a copy arrow, date of birth typed or picked (age derived, never stored; under 13 refused), the false-information warning, and 2FA Phone / App / Red-XAI Auth (coming soon) / None (with a warning). redxd re-checks every field.
+* Owner role: owner logins come only from deploy config (`owner_emails` / `REDXAI_OWNER_EMAILS`) and need a verified email and a sign-in finished with 2FA. Owners see every hosted database, the master Red-XAI accounts database and every account (Owner page, `/v1/owner/*`); every owner request is audit-logged with the acting owner. Everyone else, including host-wide admin keys, cannot see the master database; online backups and cluster join tokens are owner-only while accounts are on.
+
 ## 0.4.4
 
 * The LICENSE copyright holder is now Red-XAI LLC; the Windows installer's LegalCopyright says the same.

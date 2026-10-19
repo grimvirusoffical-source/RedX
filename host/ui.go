@@ -351,6 +351,10 @@ func (h *Host) whoami(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	k := pr.Key
-	writeJSON(w, 200, map[string]interface{}{"id": k.ID, "label": k.Label, "scope": k.Scope, "db": k.DB, "prefix": k.Prefix, "roles": k.Roles,
-		"host_admin": k.IsHostAdmin(), "role": roleName(h.Cluster), "version": Version})
+	out := map[string]interface{}{"id": k.ID, "label": k.Label, "scope": k.Scope, "db": k.DB, "prefix": k.Prefix, "roles": k.Roles,
+		"host_admin": k.IsHostAdmin(), "role": roleName(h.Cluster), "version": Version, "owner": pr.IsOwner()}
+	if pr.Account != nil {
+		out["account"] = accountView(pr.Account)
+	}
+	writeJSON(w, 200, out)
 }

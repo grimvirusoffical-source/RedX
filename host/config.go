@@ -64,6 +64,19 @@ type Config struct {
 	// It is redeemed once at start-up (when this node has no cluster.json yet) and the node becomes a follower.
 	Join string `toml:"join"`
 
+	// Red-XAI Accounts sign-in for the web console (OIDC with PKCE). Empty issuer = off; API keys always work.
+	AccountsIssuer   string `toml:"accounts_issuer"`       // e.g. https://accounts.red-xai.example
+	AccountsClientID string `toml:"accounts_client_id"`    // OAuth client id registered for this host (default "redx")
+	AccountsRedirect string `toml:"accounts_redirect_url"` // default <advertise>/v1/auth/callback
+	// AccountsMasterDB is the RedX database holding the master Red-XAI accounts DB (default "redxai_accounts").
+	// While accounts are on, only owner logins (and keys scoped to exactly that database) can see it.
+	AccountsMasterDB string `toml:"accounts_master_db"`
+	// OwnerEmails lists the owner logins (deploy config or REDXAI_OWNER_EMAILS only; never commit real addresses).
+	// An owner must also have a verified email and have finished this sign-in with 2FA.
+	OwnerEmails []string `toml:"owner_emails"`
+	// AccountsClientSecret is read from REDX_ACCOUNTS_CLIENT_SECRET only (confidential clients); never from a file or flag.
+	AccountsClientSecret string `toml:"-"`
+
 	ConfigFile string `toml:"-"`
 }
 
@@ -205,6 +218,14 @@ func (c *Config) ApplyEnv(get func(string) string) error {
 	s("REDX_PRESET", &c.Preset)
 	s("REDX_BOOTSTRAP", &c.Bootstrap)
 	s("REDX_JOIN", &c.Join)
+	s("REDX_ACCOUNTS_ISSUER", &c.AccountsIssuer)
+	s("REDX_ACCOUNTS_CLIENT_ID", &c.AccountsClientID)
+	s("REDX_ACCOUNTS_REDIRECT_URL", &c.AccountsRedirect)
+	s("REDX_ACCOUNTS_MASTER_DB", &c.AccountsMasterDB)
+	s("REDX_ACCOUNTS_CLIENT_SECRET", &c.AccountsClientSecret)
+	if v := get("REDXAI_OWNER_EMAILS"); v != "" {
+		_ = (*csv)(&c.OwnerEmails).Set(v)
+	}
 	if get("REDX_NO_BOOTSTRAP") != "" {
 		c.Bootstrap = "off"
 	}
@@ -325,7 +346,7 @@ func (c *Config) Validate() error {
 	if c.ArgonTime == 0 {
 		c.ArgonTime = 2
 	}
-	return nil
+	return c.validateAccounts()
 }
 
 // LoadConfig builds a Config from defaults, preset, file, env and flags (in that order, later wins). Precedence, highest first:

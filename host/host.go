@@ -34,6 +34,9 @@ type Host struct {
 
 	pair        pairStore     // one-time sign-in pairing codes (pairing.go)
 	connect     *connectStore // app connect handshake (connect.go)
+	accts       *accountStore // Red-XAI Accounts console sessions (accounts.go)
+	acctLim     *Limiter      // per-IP limits for the sign-in and sign-up endpoints
+	oidc        *oidcClient   // Red-XAI Accounts OIDC relying party (accounts_oidc.go)
 	webSetup    bool          // an empty keystore may be set up from the browser (loopback only)
 	bootMu      sync.Mutex    // serialises the web bootstrap
 	runMu       sync.Mutex
@@ -106,6 +109,11 @@ func New(cfg Config, opener Opener, logf func(string, ...interface{})) (*Host, e
 		return fail(err)
 	}
 	h.Auth = NewAuthenticator(h.KS, h.Audit, cfg.RateRPS, cfg.RateBurst, cfg.AuditOK)
+	h.accts = newAccountStore()
+	h.acctLim = NewLimiter(nil)
+	h.oidc = newOIDCClient(cfg)
+	h.Auth.accounts = h.resolveAccount
+	h.Auth.master = h.masterDB
 	h.connect = openConnectStore(cfg.DataDir)
 	h.Tracker = NewTTLTracker(filepath.Join(cfg.DataDir, "cluster", "ttl.json"))
 	if h.Cluster, err = newCluster(h); err != nil {

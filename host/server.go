@@ -87,10 +87,14 @@ func (h *Host) routes() http.Handler {
 			h.pairExchange(w, r)
 		case strings.HasPrefix(p, "/v1/connect/"):
 			h.connectRoute(w, r)
+		case strings.HasPrefix(p, "/v1/auth/"):
+			h.authRoute(w, r)
+		case strings.HasPrefix(p, "/v1/owner/"):
+			h.ownerRoute(w, r)
 		case p == "/v1/keys" || strings.HasPrefix(p, "/v1/keys/"):
 			h.keysRoute(w, r)
 		case p == "/v1/admin/backup" && r.Method == "GET":
-			if pr, ok := h.authz(w, r, ScopeAdmin, AllDBs, "", true); ok {
+			if pr, ok := h.authz(w, r, ScopeAdmin, AllDBs, "", true); ok && h.ownerOnlyOK(w, r, pr) {
 				h.handleBackup(w, r, pr)
 			}
 		case strings.HasPrefix(p, "/v1/cluster/"):
@@ -127,7 +131,35 @@ func (h *Host) authz(w http.ResponseWriter, r *http.Request, need, db, path stri
 		writeErr(w, http.StatusForbidden, "forbidden")
 		return nil, false
 	}
+	if db != AllDBs && pr.Hides(db) {
+		// The master accounts database answers exactly like a database that does not exist.
+		h.Audit.Log(AuditEvent{Event: "auth.denied", KeyID: pr.Key.ID, DB: db, Remote: remoteIP(r), Method: r.Method, Route: routeOf(r), Reason: "protected database"})
+		writeErr(w, 404, "database not found")
+		return nil, false
+	}
 	return pr, true
+}
+
+// ownerOnlyOK guards host-wide operations whose output includes every database (online backup, cluster join
+// tokens): while the master accounts database is protected, only owners may use them.
+func (h *Host) ownerOnlyOK(w http.ResponseWriter, r *http.Request, pr *Principal) bool {
+	if pr.SeesEverything() {
+		return true
+	}
+	h.Audit.Log(AuditEvent{Event: "auth.denied", KeyID: pr.Key.ID, Remote: remoteIP(r), Method: r.Method, Route: routeOf(r), Reason: "owner-only on this host"})
+	writeErr(w, 403, "forbidden: only an owner login can do this on this host")
+	return false
+}
+
+// visibleDBs lists the databases pr may know about.
+func (h *Host) visibleDBs(pr *Principal) []string {
+	out := []string{}
+	for _, n := range h.Reg.List() {
+		if !pr.Hides(n) {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 func (h *Host) dbRoute(w http.ResponseWriter, r *http.Request, db, sub string) {
@@ -434,7 +466,7 @@ func (h *Host) statsHandler(w http.ResponseWriter, r *http.Request, db string) {
 	out := map[string]interface{}{}
 	dbs := map[string]map[string]float64{}
 	if pr.Key.DB == AllDBs && r.URL.Path == "/v1/stats" {
-		for _, n := range h.Reg.List() {
+		for _, n := range h.visibleDBs(pr) {
 			if b, err := h.Reg.Get(n); err == nil {
 				dbs[n] = b.Stats()
 			}
@@ -457,14 +489,18 @@ func (h *Host) dbsRoute(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
 		pr, ok := h.authz(w, r, ScopeRead, AllDBs, "", false)
-		_ = pr
 		if !ok {
 			// A db-scoped key may list only its own database.
 			return
 		}
-		writeJSON(w, 200, map[string]interface{}{"dbs": h.Reg.List()})
+		writeJSON(w, 200, map[string]interface{}{"dbs": h.visibleDBs(pr)})
 	case "POST":
-		if _, ok := h.authz(w, r, ScopeAdmin, AllDBs, "", true); !ok {
+		pr, ok := h.authz(w, r, ScopeAdmin, AllDBs, "", true)
+		if !ok {
+			return
+		}
+		if b, err := peekName(r); err == nil && pr.Hides(b) {
+			writeErr(w, 403, "forbidden: that database name is reserved")
 			return
 		}
 		if h.maybeForward(w, r) {
@@ -507,6 +543,9 @@ type createKeyReq struct {
 
 // canManage: may principal administer a key bound to db?
 func canManage(p *Principal, db string) bool {
+	if p.Hides(db) {
+		return false
+	}
 	return p.Key.Scope == ScopeAdmin && p.Key.Prefix == "" && (p.Key.DB == AllDBs || p.Key.DB == db)
 }
 
@@ -637,7 +676,7 @@ func (h *Host) clusterRoute(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 405, "method not allowed")
 			return
 		}
-		if pr, ok := h.authz(w, r, ScopeAdmin, AllDBs, "", true); ok {
+		if pr, ok := h.authz(w, r, ScopeAdmin, AllDBs, "", true); ok && h.ownerOnlyOK(w, r, pr) {
 			if h.maybeForward(w, r) {
 				return
 			}
@@ -688,4 +727,13 @@ func (h *Host) clusterRoute(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeErr(w, 404, "not found")
 	}
+}
+
+// peekName reads {"name": ...} from a request body without consuming it.
+func peekName(r *http.Request) (string, error) {
+	var b struct {
+		Name string `json:"name"`
+	}
+	err := json.Unmarshal(readBody(r), &b)
+	return b.Name, err
 }

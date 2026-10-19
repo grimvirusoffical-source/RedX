@@ -18,6 +18,7 @@ const NAV = [
   { id: 'policy', title: 'Security · Rules · Code', icon: 'shield', adv: true },
   { id: 'cluster', title: 'Cluster & nodes', icon: 'nodes', adv: true },
   { id: 'presets', title: 'Presets', icon: 'compare', adv: true },
+  { id: 'owner', title: 'Owner', icon: 'shield', owner: true },
 ];
 const PAGES = new Set([...NAV.map((n) => n.id), 'join', 'wizard', 'connect']);
 
@@ -47,6 +48,27 @@ async function boot() {
   // pairing link:  #/login?code=RP-XXXXX-XXXXX  (from a QR code; the code is single-use, expires in 5 minutes and is not a key.
   // The fragment is never sent to a server and is removed from the address bar before the exchange.)
   const dl = parseHash();
+  // back from Red-XAI Accounts: #/signin?handoff=<single-use code> (or ?error=<code>). The code is traded once for a
+  // console session and removed from the address bar first.
+  if (dl.page === 'signin') {
+    history.replaceState(null, '', location.pathname);
+    const { SIGNIN_ERRORS } = await import('./pages/account.js');
+    if (dl.query.error) return showLogin(SIGNIN_ERRORS[dl.query.error] || 'The sign-in did not work. Please try again.');
+    try {
+      const r = await api('POST', '/v1/auth/handoff', { key: '', noAuthRedirect: true, json: { code: dl.query.handoff || '' } });
+      session.set(r.token, false);
+      if (dl.query.return && /^[a-z0-9/-]{1,64}$/.test(dl.query.return)) history.replaceState(null, '', location.pathname + '#/' + dl.query.return);
+    } catch (e) {
+      return showLogin(e.message);
+    }
+  }
+  if (dl.page === 'signup' && !session.key) {
+    const { renderSignup } = await import('./pages/account.js');
+    clear(app);
+    app.className = 'plain';
+    app.append(renderSignup(() => { location.hash = ''; showLogin(); }));
+    return;
+  }
   if (dl.page === 'login' && dl.query.code) {
     history.replaceState(null, '', location.pathname);
     try {
@@ -148,14 +170,16 @@ function buildShell() {
   function refresh() {
     clear(nav);
     const mk = (n) => h('a', { class: 'nav-item', href: '#/' + n.id, 'data-id': n.id, onclick: () => root.classList.remove('open') }, icon(n.icon, 18), h('span', null, n.title));
-    NAV.filter((n) => !n.adv).forEach((n) => nav.append(mk(n)));
+    const isOwner = !!(state.who && state.who.owner);
+    NAV.filter((n) => !n.adv && (!n.owner || isOwner)).forEach((n) => nav.append(mk(n)));
     nav.append(h('div', { class: 'nav-sep' }, state.mode === 'advanced' ? 'Advanced' : h('a', { href: '#', onclick: (e) => { e.preventDefault(); setMode('advanced'); } }, 'Show advanced pages')));
     if (state.mode === 'advanced') NAV.filter((n) => n.adv).forEach((n) => nav.append(mk(n)));
     clear(dbSel);
     (state.dbs.length ? state.dbs : [state.db]).forEach((d) => dbSel.append(h('option', { value: d, selected: d === state.db }, d)));
     modeBtn.querySelectorAll('.seg-opt').forEach((o) => o.classList.toggle('on', o.dataset.m === state.mode));
     themeBtn.sync();
-    mount(who, state.who ? (state.who.label || state.who.id) + ' · ' + state.who.scope : '');
+    const acct = state.who && state.who.account;
+    mount(who, !state.who ? '' : acct ? (acct.username || acct.email) + (acct.owner ? ' · owner' : '') : (state.who.label || state.who.id) + ' · ' + state.who.scope);
     markActive();
   }
   function markActive() {
@@ -168,6 +192,7 @@ function buildShell() {
 }
 
 async function signOut() {
+  if (session.key.startsWith('rxs_')) { try { await api('POST', '/v1/auth/logout', { noAuthRedirect: true }); } catch { /* the session expires anyway */ } }
   session.clear();
   state.who = null;
   location.hash = '';

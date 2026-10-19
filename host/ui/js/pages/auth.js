@@ -70,7 +70,17 @@ export function renderLogin(msg, onDone) {
     h('button', { class: 'btn primary big', onclick: go }, 'Sign in'),
     h('p', { class: 'muted small' }, 'Keys stay in this browser and are only sent to this RedX host. Lost the admin key? On the host computer run ', h('code', null, 'redx key create --offline --scope admin --db \'*\''), '.'));
   setTimeout(() => input.focus(), 50);
-  return h('div', { class: 'auth' }, card);
+  const wrap = h('div', { class: 'auth' }, card);
+  // Red-XAI Accounts sign-in, when this host has it configured
+  import('./account.js').then(async ({ accountsConfig, accountButtons, renderSignup }) => {
+    const cfg = await accountsConfig();
+    if (!cfg.enabled) return;
+    card.append(accountButtons(cfg, () => {
+      const su = renderSignup(() => su.replaceWith(renderLogin(msg, onDone)));
+      wrap.replaceWith(su);
+    }));
+  }).catch(() => {});
+  return wrap;
 }
 
 /** Landing page for a join link opened in a browser. */

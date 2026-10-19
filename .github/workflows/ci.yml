@@ -99,5 +99,11 @@ jobs:
           mkdir -p /tmp/pw && (cd /tmp/pw && npm init -y >/dev/null && npm install --silent playwright-core)
           PLAYWRIGHT_CORE=/tmp/pw/node_modules/playwright-core CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser)" \
             node scripts/ui-pages-test.js "$PWD/bin/redxd" "$PWD/bin/redx"
+      - name: Red-XAI Accounts sign-in, sign-up and owner pages in headless Chrome (Linux only, fake Red-XAI Accounts)
+        if: runner.os == 'Linux'
+        run: |
+          CGO_ENABLED=0 go build -o /tmp/fake-accounts ./scripts/fake-accounts
+          PLAYWRIGHT_CORE=/tmp/pw/node_modules/playwright-core CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser)" \
+            node scripts/ui-accounts-test.js "$PWD/bin/redxd" /tmp/fake-accounts
       - name: Smoke test (start redxd, admin key, set/get, TTL expiry, BoxQL, subscribe, hard kill, restart)
         run: go run scripts/ci_smoke.go bin
