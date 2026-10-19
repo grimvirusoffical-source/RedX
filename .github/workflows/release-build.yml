@@ -40,6 +40,8 @@ jobs:
         run: scripts/package.sh windows "$VERSION"
       - name: Checksums
         run: cd dist && ls *.tar.gz *.zip *.deb *.exe 2>/dev/null | xargs sha256sum > SHA256SUMS && cat SHA256SUMS
+      - name: Asset labels (contract §5; fails on an asset with no label rule)
+        run: cd dist && ../scripts/release-labels.sh "$VERSION" SHA256SUMS *.tar.gz *.zip *.deb *-setup.exe | tee LABELS.tsv
       - uses: actions/upload-artifact@v7
         with:
           name: linux-built
@@ -49,6 +51,7 @@ jobs:
             dist/*.deb
             dist/*-setup.exe
             dist/SHA256SUMS
+            dist/LABELS.tsv
           if-no-files-found: error
 
   windows-verify:
