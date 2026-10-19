@@ -20,7 +20,17 @@ func writeJSON(w http.ResponseWriter, code int, v interface{}) {
 }
 
 func writeErr(w http.ResponseWriter, code int, msg string) {
+	noteReason(w, msg)
 	writeJSON(w, code, map[string]string{"error": msg})
+}
+
+// noteReason remembers why a request was refused, for the caller's own activity log.
+func noteReason(w http.ResponseWriter, msg string) {
+	sc, ok := w.(*statusCapture)
+	if !ok || sc == nil {
+		return
+	}
+	sc.setReason(msg)
 }
 
 // KeyView is the API representation of a key record (no hash/salt).
@@ -63,6 +73,7 @@ func (h *Host) routes() http.Handler {
 			if meter.pr != nil {
 				h.meterTraffic(meter.pr, meter.req+capw.written)
 			}
+			h.recordActivity(r, meter.seen, capw)
 		}()
 		h.reqs.Add(1)
 		lim := int64(h.Cfg.MaxBodyMB) << 20
@@ -114,6 +125,8 @@ func (h *Host) routes() http.Handler {
 			h.authRoute(w, r)
 		case strings.HasPrefix(p, "/v1/billing/"):
 			h.billingRoute(w, r)
+		case p == "/v1/hosting/activity":
+			h.hostingActivity(w, r)
 		case strings.HasPrefix(p, "/v1/owner/"):
 			h.ownerRoute(w, r)
 		case p == "/v1/keys" || strings.HasPrefix(p, "/v1/keys/"):
@@ -153,6 +166,7 @@ func (h *Host) authz(w http.ResponseWriter, r *http.Request, need, db, path stri
 		writeErr(w, http.StatusUnauthorized, "unauthorized")
 		return nil, false
 	}
+	h.noteSeen(r, pr)
 	if handled, ok := h.allowTenant(w, r, pr, need, db, path, hostLevel); handled {
 		if !ok {
 			return nil, false

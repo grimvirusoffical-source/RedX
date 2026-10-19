@@ -65,7 +65,7 @@ func (u *updater) apply(in applyInput) (roID, snapID string, err error) {
 		return "", "", errNotHosted
 	}
 	pref := u.sourcePref(a)
-	if pref == "github" && in.Source == "host" {
+	if !sourceAccepted(pref, in.Source) {
 		u.mu.Unlock()
 		return "", "", errNotHosted
 	}
@@ -198,7 +198,7 @@ func (u *updater) prepareApply(in applyInput) (*Manifest, error) {
 	if in.Source == "host" && !hosted {
 		return nil, errNotHosted
 	}
-	if pref == "github" && in.Source == "host" {
+	if !sourceAccepted(pref, in.Source) {
 		return nil, errNotHosted
 	}
 	if conflict {
