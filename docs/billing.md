@@ -34,7 +34,7 @@ Bytes are GiB/TiB (1024-based). Traffic and host switches reset each month on th
 | Platinum | 1 TB | 100 GB | 40 |
 | Emerald | 5 TB | 500 GB | unlimited |
 
-Enforcement applies to a signed-in non-owner with a plan, and to API keys that account created (the key stores the account id). Owner sessions and self-hosted keys are not capped. Storage is the bytes on disk for that account's databases, not a counter that only goes up.
+Enforcement applies to a signed-in non-owner and to API keys that account created (the key stores the account id). A lapsed or suspended plan is still that account: reads and writes are refused with the plan-state codes below, and quota checks keep using the stored tier instead of treating the key as self-hosted. Owner sessions, host-admin keys and self-hosted keys (no account on the key) are not capped. Storage is the bytes on disk for that account's databases, not a counter that only goes up.
 
 - **Storage**: a write that would pass the cap is refused with **402**, `code: "quota_exceeded"`, `limit: "storage_quota"`.
 - **Traffic**: request body + response bytes are metered. When the monthly total is already spent, further requests get **429**, `code: "quota_exceeded"`, `limit: "traffic_quota"`.

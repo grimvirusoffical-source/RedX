@@ -732,8 +732,14 @@ func (h *Host) keysRoute(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, 200, map[string]interface{}{"keys": out})
 	case rest == "pairing" && r.Method == "POST":
+		if !h.tenantKeyMutateOK(w, pr) {
+			return
+		}
 		h.pairingIssue(w, r, pr)
 	case rest == "" && r.Method == "POST":
+		if !h.tenantKeyMutateOK(w, pr) {
+			return
+		}
 		var req createKeyReq
 		if json.Unmarshal(readBody(r), &req) != nil {
 			writeErr(w, 400, "invalid JSON")
@@ -777,6 +783,9 @@ func (h *Host) keysRoute(w http.ResponseWriter, r *http.Request) {
 		case len(parts) == 1 && r.Method == "GET":
 			writeJSON(w, 200, viewOf(target, now))
 		case len(parts) == 1 && r.Method == "DELETE":
+			if !h.tenantKeyMutateOK(w, pr) {
+				return
+			}
 			if requireDangerConfirm(w, r) {
 				return
 			}
@@ -791,6 +800,9 @@ func (h *Host) keysRoute(w http.ResponseWriter, r *http.Request) {
 			h.Audit.Log(AuditEvent{Event: "key.revoke", KeyID: pr.Key.ID, DB: rec.DB, Remote: remoteIP(r), Detail: "revoked " + id})
 			writeJSON(w, 200, viewOf(rec, now))
 		case len(parts) == 2 && parts[1] == "rotate" && r.Method == "POST":
+			if !h.tenantKeyMutateOK(w, pr) {
+				return
+			}
 			if requireDangerConfirm(w, r) {
 				return
 			}

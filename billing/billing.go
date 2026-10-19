@@ -163,6 +163,16 @@ func (s *Service) ActivePlan(account string) (Plan, bool) {
 	return p, true
 }
 
+// StoredPlan returns the plan row whether or not it currently entitles the
+// account. Quota enforcement uses this so a lapsed row is still a plan, not
+// "no account".
+func (s *Service) StoredPlan(account string) (Plan, bool) {
+	if s == nil || s.store == nil || account == "" {
+		return Plan{}, false
+	}
+	return s.store.Get(account)
+}
+
 // Usage returns the usage store (never nil after New).
 func (s *Service) Usage() *UsageStore { return s.usage }
 

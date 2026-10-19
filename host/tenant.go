@@ -59,8 +59,23 @@ func (h *Host) reservedName(logical string) bool {
 }
 
 // isTenant is a signed-in Red-XAI Account that is not an owner of this host.
+// Console sessions only. API keys carry the account on Key.Owner; use tenantSub.
 func (p *Principal) isTenant() bool {
 	return p != nil && p.Account != nil && p.Account.Sub != "" && !p.IsOwner()
+}
+
+// tenantSub is the hosted account this caller belongs to.
+// A console session uses Account.Sub. An API key minted for that account uses
+// Key.Owner. Owners and host-admin keys are not tenants: an empty result means
+// the ordinary key ACL applies and hosted quotas are not enforced.
+func (p *Principal) tenantSub() string {
+	if p == nil || p.IsOwner() || p.Key.IsHostAdmin() {
+		return ""
+	}
+	if p.Account != nil && p.Account.Sub != "" {
+		return p.Account.Sub
+	}
+	return p.Key.Owner
 }
 
 type tenantRec struct {
@@ -220,16 +235,21 @@ func (h *Host) tenantAccess(account string) (mode string, known bool) {
 	return "none", h.billing.KnownAccount(account)
 }
 
-// allowTenant authorises a database call made by a signed-in non-owner.
-// handled is false when this caller is not a hosted customer (the normal key
-// checks apply, which refuse a session that has no plan). When handled, ok
-// means the call may proceed; otherwise the response is already written.
-func (h *Host) allowTenant(w http.ResponseWriter, r *http.Request, pr *Principal, need, db, _ string, hostLevel bool) (handled, ok bool) {
-	if !pr.isTenant() {
+// allowTenant authorises a database call made by a hosted tenant.
+// A console session with no plan row is not handled (the normal key checks
+// then refuse it). An API key whose Owner is a tenant is always handled: a
+// lapsed or missing plan is enforced, never skipped. When handled, ok means
+// the call may proceed; otherwise the response is already written.
+// An API key still has to pass its own scope, database and prefix. The plan
+// gate does not widen it to every database the account owns.
+func (h *Host) allowTenant(w http.ResponseWriter, r *http.Request, pr *Principal, need, db, path string, hostLevel bool) (handled, ok bool) {
+	sub := pr.tenantSub()
+	if sub == "" {
 		return false, false
 	}
-	mode, known := h.tenantAccess(pr.Account.Sub)
-	if !known && mode == "none" {
+	session := pr.isTenant()
+	mode, known := h.tenantAccess(sub)
+	if session && !known && mode == "none" {
 		return false, false
 	}
 	if hostLevel || db == AllDBs {
@@ -237,55 +257,115 @@ func (h *Host) allowTenant(w http.ResponseWriter, r *http.Request, pr *Principal
 		writeErr(w, http.StatusForbidden, "forbidden")
 		return true, false
 	}
-	if db == "" || !h.tenants.owns(pr.Account.Sub, db) {
+	if !session && !tenantKeyAllows(pr, need, db, path) {
+		h.Audit.Log(AuditEvent{Event: "auth.denied", KeyID: pr.Key.ID, DB: db, Remote: remoteIP(r), Method: r.Method, Route: routeOf(r), Reason: "scope/db/prefix"})
+		writeErr(w, http.StatusForbidden, "forbidden")
+		return true, false
+	}
+	if db == "" || !h.tenants.owns(sub, db) {
 		// Same body as a missing database: do not confirm another tenant's name.
 		writeErr(w, http.StatusNotFound, "database not found")
 		return true, false
 	}
+	write := need != ScopeRead && need != ""
+	if refusePlan(w, mode, write) {
+		return true, false
+	}
+	if write && !h.checkStorageQuota(w, pr, requestBytes(r, h.Cfg.MaxBodyMB)) {
+		return true, false
+	}
+	return true, true
+}
+
+// tenantKeyAllows is the key ACL for a hosted API key. An empty path skips the
+// prefix check so authzScope can keep filtering results itself.
+func tenantKeyAllows(pr *Principal, need, db, path string) bool {
+	if pr == nil {
+		return false
+	}
+	if scopeRank[pr.Key.Scope] < scopeRank[need] {
+		return false
+	}
+	if pr.Key.DB != AllDBs && pr.Key.DB != db {
+		return false
+	}
+	if path != "" && pr.Key.Prefix != "" && !PathHasPrefix(path, pr.Key.Prefix) {
+		return false
+	}
+	return true
+}
+
+// refusePlan writes 402 when a hosted account may not perform this call.
+// A missing or suspended plan is a refusal, not a reason to skip the gate.
+// Returns true when the response was written.
+func refusePlan(w http.ResponseWriter, mode string, write bool) bool {
 	switch mode {
 	case "full":
-		if need != ScopeRead && need != "" {
-			if !h.checkStorageQuota(w, pr, requestBytes(r, h.Cfg.MaxBodyMB)) {
-				return true, false
-			}
-		}
-		return true, true
+		return false
 	case "readonly":
-		if need == ScopeRead || need == "" {
-			return true, true
+		if !write {
+			return false
 		}
 		writeErrCode(w, http.StatusPaymentRequired, "plan_readonly",
 			"This RedX Hosted plan is read-only until billing is current. Databases are kept.")
-		return true, false
+		return true
 	default:
 		writeErrCode(w, http.StatusPaymentRequired, "plan_required",
 			"This RedX Hosted plan is suspended. Databases are kept and work again when the plan is active.")
-		return true, false
+		return true
 	}
 }
 
 func (h *Host) tenantMayMutate(w http.ResponseWriter, r *http.Request, pr *Principal, db string, delta int64) bool {
-	if !pr.isTenant() {
+	sub := pr.tenantSub()
+	if sub == "" {
 		return true
 	}
-	mode, known := h.tenantAccess(pr.Account.Sub)
-	if !h.tenants.owns(pr.Account.Sub, db) {
+	mode, _ := h.tenantAccess(sub)
+	if !h.tenants.owns(sub, db) {
 		writeErr(w, http.StatusNotFound, "database not found")
 		return false
 	}
-	if mode != "full" {
-		if mode == "readonly" {
-			writeErrCode(w, http.StatusPaymentRequired, "plan_readonly",
-				"This RedX Hosted plan is read-only until billing is current. Databases are kept.")
-		} else if known {
-			writeErrCode(w, http.StatusPaymentRequired, "plan_required",
-				"This RedX Hosted plan is suspended. Databases are kept and work again when the plan is active.")
-		} else {
-			writeErr(w, http.StatusForbidden, "forbidden")
-		}
+	if refusePlan(w, mode, true) {
 		return false
 	}
 	return h.checkStorageQuota(w, pr, delta)
+}
+
+// refuseTenantKeyChange is the plan gate for console key create, revoke and
+// rotate. Readonly and suspended plans use the same codes as data-plane writes.
+func refuseTenantKeyChange(w http.ResponseWriter, mode string, known, creating bool) bool {
+	if mode == "full" {
+		return false
+	}
+	if mode == "readonly" {
+		writeErrCode(w, http.StatusPaymentRequired, "plan_readonly",
+			"This RedX Hosted plan is read-only until billing is current. Databases are kept.")
+		return true
+	}
+	if known {
+		writeErrCode(w, http.StatusPaymentRequired, "plan_required",
+			"This RedX Hosted plan is suspended. Databases are kept and work again when the plan is active.")
+		return true
+	}
+	msg := "Choose a RedX Hosted plan to change API keys. Existing databases are kept."
+	if creating {
+		msg = "Choose a RedX Hosted plan to create an API key. Existing databases are kept."
+	}
+	writeErrCode(w, http.StatusPaymentRequired, "plan_required", msg)
+	return true
+}
+
+// tenantKeyMutateOK is the plan gate for key create, revoke, rotate and pairing
+// done with a tenant API key. Console sessions use tenantKeys. Host-admin keys
+// (no Owner) are unchanged.
+func (h *Host) tenantKeyMutateOK(w http.ResponseWriter, pr *Principal) bool {
+	sub := pr.tenantSub()
+	if sub == "" || pr.isTenant() {
+		return true
+	}
+	mode, _ := h.tenantAccess(sub)
+	return !refusePlan(w, mode, true)
 }
 
 func (h *Host) accountStorage(account string) int64 {
@@ -481,9 +561,7 @@ func (h *Host) tenantKeys(w http.ResponseWriter, r *http.Request, pr *Principal)
 		}
 		writeJSON(w, 200, map[string]interface{}{"keys": out})
 	case rest == "" && r.Method == "POST":
-		if mode != "full" {
-			writeErrCode(w, http.StatusPaymentRequired, "plan_required",
-				"Choose a RedX Hosted plan to create an API key. Existing databases are kept.")
+		if refuseTenantKeyChange(w, mode, known, true) {
 			return
 		}
 		var req createKeyReq
@@ -537,9 +615,7 @@ func (h *Host) tenantKeys(w http.ResponseWriter, r *http.Request, pr *Principal)
 			writeJSON(w, 200, viewOf(target, now))
 			return
 		}
-		if mode != "full" {
-			writeErrCode(w, http.StatusPaymentRequired, "plan_required",
-				"Choose a RedX Hosted plan to change API keys. Existing databases are kept.")
+		if refuseTenantKeyChange(w, mode, known, false) {
 			return
 		}
 		if requireDangerConfirm(w, r) {

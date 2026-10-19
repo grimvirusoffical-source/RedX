@@ -248,6 +248,135 @@ func TestHostedTenantGate(t *testing.T) {
 	}
 }
 
+func TestLapsedPlanKeys(t *testing.T) {
+	f, iss := startFake(t)
+	n := startAcctNode(t, iss)
+	end := time.Now().Add(30 * 24 * time.Hour)
+	tok, _ := signIn(t, n, f, regular)
+	if err := host.SetPlanForTest(n.H, hostedPlan(regular.Sub, "basic", "month", "active", end)); err != nil {
+		t.Fatal(err)
+	}
+	st, b, _ := do(t, "POST", n.URL+"/v1/dbs", tok, `{"name":"game"}`, "Content-Type", "application/json")
+	if st != 201 {
+		t.Fatalf("create: %d %s", st, b)
+	}
+	phys, _ := jsonOf(t, b)["name"].(string)
+	path := n.URL + "/v1/db/" + phys + "/path/b:B.K"
+	if st, b, _ = do(t, "PUT", path, tok, `"keep"`); st != 200 && st != 201 {
+		t.Fatalf("seed: %d %s", st, b)
+	}
+	mint := func(scope string) (key, id string) {
+		t.Helper()
+		st, b, _ := do(t, "POST", n.URL+"/v1/keys", tok, `{"db":"`+phys+`","scope":"`+scope+`","label":"`+scope+`"}`, "Content-Type", "application/json")
+		if st != 201 {
+			t.Fatalf("mint %s: %d %s", scope, st, b)
+		}
+		m := jsonOf(t, b)
+		key, _ = m["key"].(string)
+		id, _ = m["id"].(string)
+		return key, id
+	}
+	readKey, _ := mint("read")
+	writeKey, _ := mint("write")
+	adminKey, adminID := mint("admin")
+	plain, _ := mkKey(t, n, map[string]interface{}{"scope": "read", "db": "default"})
+
+	if err := host.SetPlanForTest(n.H, hostedPlan(regular.Sub, "basic", "month", "past_due", end)); err != nil {
+		t.Fatal(err)
+	}
+	if st, b, _ = do(t, "PUT", path, tok, `"no"`); st != 402 || codeOf(t, b) != "plan_readonly" {
+		t.Fatalf("session write while past_due: %d %s", st, b)
+	}
+	if st, b, _ = do(t, "PUT", path, writeKey, `"no"`); st != 402 || codeOf(t, b) != "plan_readonly" {
+		t.Fatalf("write key while past_due: %d %s", st, b)
+	}
+	if st, b, _ = do(t, "GET", path, readKey, ""); st != 200 || !strings.Contains(b, "keep") {
+		t.Fatalf("read key while past_due: %d %s", st, b)
+	}
+	if st, b, _ = do(t, "GET", path, writeKey, ""); st != 200 || !strings.Contains(b, "keep") {
+		t.Fatalf("write key read while past_due: %d %s", st, b)
+	}
+	if st, b, _ = do(t, "POST", n.URL+"/v1/keys", adminKey, `{"db":"`+phys+`","scope":"read"}`, "Content-Type", "application/json"); st != 402 || codeOf(t, b) != "plan_readonly" {
+		t.Fatalf("admin key mint while past_due: %d %s", st, b)
+	}
+	if st, b, _ = do(t, "DELETE", n.URL+"/v1/keys/"+adminID, tok, ""); st != 402 || codeOf(t, b) != "plan_readonly" {
+		t.Fatalf("session revoke while past_due: %d %s", st, b)
+	}
+	if st, _, _ = do(t, "GET", n.URL+"/v1/dbs", n.Key, ""); st != 200 {
+		t.Fatalf("host admin during past_due: %d", st)
+	}
+	if st, b, _ = do(t, "GET", n.URL+"/v1/db/default/path/missing:X.K", plain, ""); st == 402 {
+		t.Fatalf("self-hosted key was plan-gated: %d %s", st, b)
+	}
+
+	if err := host.SetPlanForTest(n.H, hostedPlan(regular.Sub, "basic", "month", "canceled", time.Now().Add(-10*24*time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ name, key, method string }{
+		{"session read", tok, "GET"},
+		{"read key", readKey, "GET"},
+		{"write key read", writeKey, "GET"},
+		{"write key write", writeKey, "PUT"},
+	} {
+		body := ""
+		if c.method == "PUT" {
+			body = `"no"`
+		}
+		st, b, _ = do(t, c.method, path, c.key, body)
+		if st != 402 || codeOf(t, b) != "plan_required" {
+			t.Fatalf("suspended %s: %d %s", c.name, st, b)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(n.Dir, "dbs", phys)); err != nil {
+		t.Fatal("suspended plan must keep the database:", err)
+	}
+	if st, b, _ = do(t, "GET", n.URL+"/v1/dbs", n.Key, ""); st != 200 || !strings.Contains(b, phys) {
+		t.Fatalf("host admin list while suspended: %d %s", st, b)
+	}
+
+	// Quotas apply to the key itself while the plan is active, not only to the session.
+	qtok, _ := signIn(t, n, f, accountsfake.Identity{Sub: "rxa_KEYQUOTA000000000000000001", Email: "quota@example.com", EmailVerified: true, Username: "quota_user", AMR: []string{"pwd"}})
+	if err := host.SetPlanForTest(n.H, hostedPlan("rxa_KEYQUOTA000000000000000001", "basic", "month", "active", end)); err != nil {
+		t.Fatal(err)
+	}
+	st, b, _ = do(t, "POST", n.URL+"/v1/dbs", qtok, `{"name":"pad"}`, "Content-Type", "application/json")
+	if st != 201 {
+		t.Fatalf("quota db: %d %s", st, b)
+	}
+	qphys, _ := jsonOf(t, b)["name"].(string)
+	st, b, _ = do(t, "POST", n.URL+"/v1/keys", qtok, `{"db":"`+qphys+`","scope":"write","label":"w"}`, "Content-Type", "application/json")
+	if st != 201 {
+		t.Fatalf("quota write key: %d %s", st, b)
+	}
+	qWrite, _ := jsonOf(t, b)["key"].(string)
+	st, b, _ = do(t, "POST", n.URL+"/v1/keys", qtok, `{"db":"`+qphys+`","scope":"read","label":"r"}`, "Content-Type", "application/json")
+	if st != 201 {
+		t.Fatalf("quota read key: %d %s", st, b)
+	}
+	qRead, _ := jsonOf(t, b)["key"].(string)
+	pad := filepath.Join(n.Dir, "dbs", qphys, "pad")
+	pf, err := os.Create(pad)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pf.Truncate(1 << 30); err != nil {
+		pf.Close()
+		t.Fatal(err)
+	}
+	pf.Close()
+	qpath := n.URL + "/v1/db/" + qphys + "/path/b:B.K"
+	if st, b, _ = do(t, "PUT", qpath, qWrite, `"x"`); st != 402 || codeOf(t, b) != "quota_exceeded" || jsonOf(t, b)["limit"] != "storage_quota" {
+		t.Fatalf("write key storage: %d %s", st, b)
+	}
+	qq, _ := billing.QuotaFor("basic")
+	if err := host.AddTrafficForTest(n.H, "rxa_KEYQUOTA000000000000000001", qq.TrafficBytes); err != nil {
+		t.Fatal(err)
+	}
+	if st, b, _ = do(t, "GET", qpath, qRead, ""); st != 429 || codeOf(t, b) != "quota_exceeded" || jsonOf(t, b)["limit"] != "traffic_quota" {
+		t.Fatalf("read key traffic: %d %s", st, b)
+	}
+}
+
 func TestTrustedProxyClientIP(t *testing.T) {
 	// Untrusted peer: a spoofed X-Forwarded-For is the socket address, so one
 	// visitor's failures still share the bucket — and a second header does not split it.

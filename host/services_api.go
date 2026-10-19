@@ -223,7 +223,7 @@ func (h *Host) bxHandler(w http.ResponseWriter, r *http.Request, db string) {
 		return
 	}
 	write := !req.Explain && info.Writes
-	if write && pr.isTenant() {
+	if write && pr.tenantSub() != "" {
 		if !h.tenantMayMutate(w, r, pr, db, int64(len(body))) {
 			return
 		}

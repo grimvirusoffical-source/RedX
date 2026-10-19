@@ -33,7 +33,7 @@ On a host with Red-XAI Accounts enabled, a signed-in account that is **not** an 
 
 `POST /v1/dbs` with `{"name":"<logical>"}` requires an **active or trialing** plan. The stored name is namespaced (`t` + 10 hex of the account + `_` + logical) so two tenants can both ask for `game` and neither learns that the other did. The response is `{"ok":true,"name":"<physical>","logical":"<logical>","seq":N}`. Use `name` in `/v1/db/{name}/…`. `GET /v1/dbs` returns `dbs` (physical names), `logical` (physical → logical), and `readonly: true` or `suspended: true` when the plan is not fully open. Reserved logical names (`default`, `admin`, `redxai_accounts`, …) and a name this account cannot take answer `409` `name_unavailable` with the same text, which does not say whether some other database exists.
 
-API keys created by a tenant are bound to one database that tenant owns (`db: "*"` and anyone else's name are `404`). The key carries the account, so the same quotas apply when the key is used. BoxQL (`POST /v1/db/{name}/bx`) is unchanged.
+API keys created by a tenant are bound to one database that tenant owns (`db: "*"` and anyone else's name are `404`). The key carries the account. The plan gate and the quotas apply to that key the same way they apply to the console session: a key minted while the plan was active becomes read-only with the plan and stops working after the grace, instead of keeping the access it had on the day it was minted. The key's own scope, database and prefix still apply; the plan gate does not let it see the account's other databases. Host-admin keys and owner sessions are not tenant keys. BoxQL (`POST /v1/db/{name}/bx`) is unchanged.
 
 Plan gate (see [billing](billing.md)):
 

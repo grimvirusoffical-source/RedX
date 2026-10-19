@@ -20,29 +20,27 @@ func writeQuotaErr(w http.ResponseWriter, err error) bool {
 	return true
 }
 
-// hostedAccount returns the Red-XAI Account sub when the principal is signed in
-// with a paid Hosted plan. API-key-only callers get ok=false (self-hosted: no caps).
+// hostedAccount returns the Red-XAI Account sub for quota enforcement.
+// Owners and host-admin keys are not capped. A self-hosted key (no Owner) is
+// not capped. A tenant session or a tenant API key is capped from the stored
+// plan row even when that plan is past_due, canceled or past grace: an inactive
+// plan is enforced, never treated as "no account" (which would skip the cap).
 func (h *Host) hostedAccount(pr *Principal) (account string, q billing.Quota, periodEnd time.Time, ok bool) {
-	if h == nil || h.billing == nil || pr == nil || pr.IsOwner() {
+	if h == nil || h.billing == nil || pr == nil || pr.IsOwner() || pr.Key.IsHostAdmin() {
 		return "", billing.Quota{}, time.Time{}, false
 	}
-	// Owners administer the host; quotas apply to paying customers, not to owner sessions.
-	// A tenant API key carries the account on Key.Owner so the cap cannot be skipped
-	// by minting a key.
-	acct := ""
-	if pr.Account != nil {
-		acct = pr.Account.Sub
-	} else {
-		acct = pr.Key.Owner
-	}
+	acct := pr.tenantSub()
 	if acct == "" {
 		return "", billing.Quota{}, time.Time{}, false
 	}
-	p, active := h.billing.ActivePlan(acct)
-	if !active {
+	p, found := h.billing.StoredPlan(acct)
+	if !found || p.Tier == "" {
 		return "", billing.Quota{}, time.Time{}, false
 	}
-	qq, _ := billing.QuotaFor(p.Tier)
+	qq, qok := billing.QuotaFor(p.Tier)
+	if !qok {
+		return "", billing.Quota{}, time.Time{}, false
+	}
 	return acct, qq, p.PeriodEnd, true
 }
 
