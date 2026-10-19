@@ -1,0 +1,12 @@
+dist/
+bin/
+node_modules/
+*.key
+*.pem
+.env
+.env.*
+*wallet*
+data/
+*.log
+__pycache__/
+*.pyc
