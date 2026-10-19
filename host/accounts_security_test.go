@@ -1,6 +1,8 @@
 package host_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -81,6 +83,87 @@ func TestClusterRepointOwnerOnlyWhenAccountsOn(t *testing.T) {
 	}
 	if st != 403 {
 		t.Fatalf("promote: want 403, got %d %s", st, b)
+	}
+}
+
+// H3b: a non-owner host-admin must not persist a join link, or change role or advertise, by applying
+// a preset. The next ordinary start redeems join (cmd/redxd) and can replace the master accounts DB.
+// The owner still can. The audit records the join leader URL and never the one-time secret.
+func TestPresetApplyJoinOwnerOnlyWhenAccountsOn(t *testing.T) {
+	f, iss := startFake(t)
+	n := startAcctNode(t, iss)
+	admin := n.Key
+	const (
+		secret = "rxj_ATTACKERTOKEN"
+		leader = "http://127.0.0.1:9"
+	)
+	joinBody := `{"join":"` + leader + " " + secret + `"}`
+	cfgPath := filepath.Join(n.Dir, "redx.toml")
+	apply := func(key, name, body string) (int, string) {
+		t.Helper()
+		st, b, _ := do(t, "POST", n.URL+"/v1/admin/presets/"+name+"/apply", key, body, "Content-Type", "application/json")
+		return st, b
+	}
+	assertNoPersist := func() {
+		t.Helper()
+		b, err := os.ReadFile(cfgPath)
+		if err == nil && (strings.Contains(string(b), secret) || strings.Contains(string(b), "attacker.example")) {
+			t.Fatalf("preset apply persisted a cluster change:\n%s", b)
+		}
+	}
+	denied := func(name, body string) {
+		t.Helper()
+		st, b := apply(admin, name, body)
+		if st != 403 {
+			t.Fatalf("POST presets/%s/apply as host-admin: want 403, got %d %s", name, st, b)
+		}
+		if !strings.Contains(b, "only an owner login can do this on this host") {
+			t.Fatalf("owner-denied body: %s", b)
+		}
+		if strings.Contains(b, secret) {
+			t.Fatalf("denial echoed the join secret: %s", b)
+		}
+		assertNoPersist()
+	}
+
+	denied("cluster", joinBody)
+	denied("cluster", `{"join":"`+leader+" "+secret+`","dry_run":true}`)
+	// join override on a leader preset: Validate would force role=follower on the next start
+	denied("website", `{"overrides":{"join":"`+leader+" "+secret+`"}}`)
+	denied("website", `{"overrides":{"role":"follower"},"join":"`+leader+" "+secret+`"}`)
+	denied("website", `{"overrides":{"advertise":"http://attacker.example:7777"}}`)
+
+	// unchanged role / advertise, no join: still host-admin (the preset's other settings)
+	if st, b := apply(admin, "website", `{"overrides":{"role":"leader"}}`); st != 200 {
+		t.Fatalf("host-admin applying a leader preset that does not change cluster settings: want 200, got %d %s", st, b)
+	}
+	assertNoPersist()
+
+	tok, acct := signIn(t, n, f, ownerOK)
+	if acct["owner"] != true {
+		t.Fatalf("owner sign-in: %v", acct)
+	}
+	st, b := apply(tok, "cluster", joinBody)
+	if st != 200 {
+		t.Fatalf("owner applying cluster with join: want 200, got %d %s", st, b)
+	}
+	written, err := os.ReadFile(cfgPath)
+	if err != nil || !strings.Contains(string(written), secret) || !strings.Contains(string(written), `preset = "cluster"`) {
+		t.Fatalf("owner apply must persist the join link: %v\n%s", err, written)
+	}
+	raw, err := os.ReadFile(n.H.Cfg.AuditLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := string(raw)
+	if !strings.Contains(log, `"reason":"owner-only on this host"`) || !strings.Contains(log, `"/v1/admin/presets/cluster/apply"`) {
+		t.Fatalf("denial audit missing owner-only reason:\n%s", log)
+	}
+	if !strings.Contains(log, `"event":"preset.apply"`) || !strings.Contains(log, `"detail":"cluster join=`+leader+`"`) {
+		t.Fatalf("apply audit must record the preset and the join leader URL:\n%s", log)
+	}
+	if strings.Contains(log, secret) || strings.Contains(log, "ATTACKER") {
+		t.Fatalf("audit log contains the join secret:\n%s", log)
 	}
 }
 

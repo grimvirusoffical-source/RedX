@@ -7,6 +7,28 @@ import (
 	"testing"
 )
 
+func TestPresetApplyDetailOmitsJoinSecret(t *testing.T) {
+	const secret = "rxj_ATTACKERTOKEN"
+	cases := []struct{ join, want string }{
+		{"", "cluster"},
+		{"  ", "cluster"},
+		{"http://127.0.0.1:9 " + secret, "cluster join=http://127.0.0.1:9"},
+		{"http://127.0.0.1:9/#/join?c=" + secret + "&pin=abc123", "cluster join=http://127.0.0.1:9"},
+		{"https://user:" + secret + "@leader.example:7777/#/join?c=RX-ABCDE-FGHJK&pin=ab", "cluster join=https://leader.example:7777"},
+		{"http://127.0.0.1:9/" + secret + " RX-ABCDE-FGHJK", "cluster join=http://127.0.0.1:9"},
+		{"not a link", "cluster"},
+	}
+	for _, c := range cases {
+		got := presetApplyDetail("cluster", c.join)
+		if got != c.want {
+			t.Errorf("presetApplyDetail(%q) = %q, want %q", c.join, got, c.want)
+		}
+		if strings.Contains(got, secret) || strings.Contains(got, "RX-ABCDE") || strings.Contains(got, "abc123") {
+			t.Errorf("detail leaked a join secret: %q (from %q)", got, c.join)
+		}
+	}
+}
+
 func TestPresetsAllTenParseAndValidate(t *testing.T) {
 	want := []string{"server", "vps", "website", "app", "game", "edge", "dev", "cluster", "backup", "all"}
 	got := map[string]bool{}
