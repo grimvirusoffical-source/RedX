@@ -14,6 +14,8 @@ type AuditEvent struct {
 	Time   time.Time `json:"time"`
 	Event  string    `json:"event"`
 	KeyID  string    `json:"key_id,omitempty"`
+	Actor  string    `json:"actor,omitempty"`  // acting owner (Red-XAI Account email) for owner.* events
+	Target string    `json:"target,omitempty"` // what an owner request touched (database, account id, route)
 	DB     string    `json:"db,omitempty"`
 	Remote string    `json:"remote,omitempty"`
 	Method string    `json:"method,omitempty"`

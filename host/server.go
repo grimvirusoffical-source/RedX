@@ -57,6 +57,14 @@ func (h *Host) routes() http.Handler {
 			lim = int64(h.Cfg.MaxUploadMB) << 20
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, lim)
+		if t := bearer(r); h.accts != nil && strings.HasPrefix(t, acctTokenPrefix) {
+			// requests made with a console session end when the session ends (WebSockets included)
+			ctx, cancel := context.WithCancel(r.Context())
+			untrack := h.accts.trackStream(t, cancel)
+			defer untrack()
+			defer cancel()
+			r = r.WithContext(ctx)
+		}
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
@@ -92,10 +100,16 @@ func (h *Host) routes() http.Handler {
 			h.pairExchange(w, r)
 		case strings.HasPrefix(p, "/v1/connect/"):
 			h.connectRoute(w, r)
+		case strings.HasPrefix(p, "/v1/auth/"):
+			h.authRoute(w, r)
+		case strings.HasPrefix(p, "/v1/billing/"):
+			h.billingRoute(w, r)
+		case strings.HasPrefix(p, "/v1/owner/"):
+			h.ownerRoute(w, r)
 		case p == "/v1/keys" || strings.HasPrefix(p, "/v1/keys/"):
 			h.keysRoute(w, r)
 		case p == "/v1/admin/backup" && r.Method == "GET":
-			if pr, ok := h.authz(w, r, ScopeAdmin, AllDBs, "", true); ok {
+			if pr, ok := h.authz(w, r, ScopeAdmin, AllDBs, "", true); ok && h.ownerOnlyOK(w, r, pr) {
 				h.handleBackup(w, r, pr)
 			}
 		case strings.HasPrefix(p, "/v1/cluster/"):
@@ -132,7 +146,71 @@ func (h *Host) authz(w http.ResponseWriter, r *http.Request, need, db, path stri
 		writeErr(w, http.StatusForbidden, "forbidden")
 		return nil, false
 	}
+	if !h.refuseHiddenDB(w, r, pr, db) {
+		return nil, false
+	}
+	// Hosted-plan traffic cap: refuse when already exhausted, then meter this request's body size.
+	if !h.checkTrafficQuota(w, pr) {
+		return nil, false
+	}
+	n := r.ContentLength
+	if n < 0 {
+		n = 0
+	}
+	h.meterTraffic(pr, n+256) // request body + a small floor for the response
 	return pr, true
+}
+
+// refuseHiddenDB is the single gate for the master accounts database on every read/write path that
+// names a database. New endpoints must call this (via authz / authzScope) so they cannot forget it.
+func (h *Host) refuseHiddenDB(w http.ResponseWriter, r *http.Request, pr *Principal, db string) bool {
+	if db == "" || db == AllDBs || !pr.Hides(db) {
+		return true
+	}
+	h.Audit.Log(AuditEvent{Event: "auth.denied", KeyID: pr.Key.ID, DB: db, Remote: remoteIP(r), Method: r.Method, Route: routeOf(r), Reason: "protected database"})
+	writeErr(w, 404, "database not found")
+	return false
+}
+
+// refuseMasterMutation refuses drop/recreate of the master accounts DB for anyone who is not an owner.
+func (h *Host) refuseMasterMutation(w http.ResponseWriter, r *http.Request, pr *Principal, db string) bool {
+	if !h.IsMasterDB(db) || pr.IsOwner() {
+		return true
+	}
+	h.Audit.Log(AuditEvent{Event: "auth.denied", KeyID: pr.Key.ID, DB: db, Remote: remoteIP(r), Method: r.Method, Route: routeOf(r), Reason: "master database mutation"})
+	writeErr(w, 403, "forbidden: only an owner login can delete or recreate the master accounts database")
+	return false
+}
+
+// ownerOnlyOK guards host-wide operations whose output includes every database (online backup, cluster join
+// tokens): while the master accounts database is protected, only owners may use them.
+func (h *Host) ownerOnlyOK(w http.ResponseWriter, r *http.Request, pr *Principal) bool {
+	if pr.SeesEverything() {
+		return true
+	}
+	h.Audit.Log(AuditEvent{Event: "auth.denied", KeyID: pr.Key.ID, Remote: remoteIP(r), Method: r.Method, Route: routeOf(r), Reason: "owner-only on this host"})
+	writeErr(w, 403, "forbidden: only an owner login can do this on this host")
+	return false
+}
+
+// visibleDBs lists the databases pr may know about: never one Hides() (master accounts DB for
+// non-owners), never the reserved master name unless the key is bound to it or this is an owner /
+// host-admin, and for a db-scoped key only its bound database.
+func (h *Host) visibleDBs(pr *Principal) []string {
+	out := []string{}
+	for _, n := range h.Reg.List() {
+		if pr.Hides(n) {
+			continue
+		}
+		if n == DefaultAccountsMasterDB && !pr.IsOwner() && !pr.Key.IsHostAdmin() && pr.Key.DB != n {
+			continue
+		}
+		if pr.Key.DB != AllDBs && pr.Key.DB != n {
+			continue
+		}
+		out = append(out, n)
+	}
+	return out
 }
 
 func (h *Host) dbRoute(w http.ResponseWriter, r *http.Request, db, sub string) {
@@ -266,6 +344,9 @@ func (h *Host) pathHandler(w http.ResponseWriter, r *http.Request, db, path stri
 			h.mapErr(w, err)
 			return
 		}
+		if !h.checkStorageQuota(w, pr, int64(len(val))) {
+			return
+		}
 		if ex, ok := h.backendExtras(db); ok && ex.SecActive() {
 			if err := ex.SecWrite(secPrincipal(&pr.Key), path, val, false); err != nil {
 				h.auditPolicy(r, pr, db, err)
@@ -278,6 +359,7 @@ func (h *Host) pathHandler(w http.ResponseWriter, r *http.Request, db, path stri
 			h.mapErr(w, err)
 			return
 		}
+		h.noteStorage(pr, int64(len(val)))
 		h.writeAck(w, r, seq)
 	case "DELETE":
 		pr, ok := h.authz(w, r, ScopeWrite, db, path, false)
@@ -439,7 +521,7 @@ func (h *Host) statsHandler(w http.ResponseWriter, r *http.Request, db string) {
 	out := map[string]interface{}{}
 	dbs := map[string]map[string]float64{}
 	if pr.Key.DB == AllDBs && r.URL.Path == "/v1/stats" {
-		for _, n := range h.Reg.List() {
+		for _, n := range h.visibleDBs(pr) {
 			if b, err := h.Reg.Get(n); err == nil {
 				dbs[n] = b.Stats()
 			}
@@ -461,6 +543,8 @@ func (h *Host) statsHandler(w http.ResponseWriter, r *http.Request, db string) {
 func (h *Host) dbsRoute(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
+		// Authenticate first: authz(ScopeRead, AllDBs) would 403 every db-scoped key.
+		// Then list only databases in the key's scope, never one Hides() (master accounts DB).
 		pr, wait, err := h.Auth.Authenticate(r)
 		switch {
 		case errors.Is(err, ErrThrottled):
@@ -478,9 +562,14 @@ func (h *Host) dbsRoute(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusForbidden, "forbidden")
 			return
 		}
-		writeJSON(w, 200, map[string]interface{}{"dbs": visibleDBs(&pr.Key, h.Reg.List())})
+		writeJSON(w, 200, map[string]interface{}{"dbs": h.visibleDBs(pr)})
 	case "POST":
-		if _, ok := h.authz(w, r, ScopeAdmin, AllDBs, "", true); !ok {
+		pr, ok := h.authz(w, r, ScopeAdmin, AllDBs, "", true)
+		if !ok {
+			return
+		}
+		if b, err := peekName(r); err == nil && pr.Hides(b) {
+			writeErr(w, 403, "forbidden: that database name is reserved")
 			return
 		}
 		if h.maybeForward(w, r) {
@@ -491,6 +580,9 @@ func (h *Host) dbsRoute(w http.ResponseWriter, r *http.Request) {
 		}
 		if json.Unmarshal(readBody(r), &b) != nil || b.Name == "" {
 			writeErr(w, 400, `body must be {"name": "..."}`)
+			return
+		}
+		if !h.checkHostSwitchQuota(w, pr) {
 			return
 		}
 		seq, err := h.WriteCreateDB(b.Name)
@@ -508,28 +600,8 @@ func (h *Host) dbsRoute(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// MasterAccountsDB is the Red-XAI accounts master database. Only host-admin keys
-// (the owner role) ever see it in a listing.
-const MasterAccountsDB = "redxai_accounts"
-
-// visibleDBs: the databases a key may see in GET /v1/dbs. Host admins see every
-// database; any other key sees only databases inside its own scope (its bound
-// database, or all for a "*" key) and never the master accounts database.
-func visibleDBs(k *KeyRecord, all []string) []string {
-	if k.IsHostAdmin() {
-		return all
-	}
-	out := []string{}
-	for _, n := range all {
-		if n == MasterAccountsDB {
-			continue
-		}
-		if k.DB == AllDBs || k.DB == n {
-			out = append(out, n)
-		}
-	}
-	return out
-}
+// MasterAccountsDB is the default name of the Red-XAI accounts master database.
+const MasterAccountsDB = DefaultAccountsMasterDB
 
 // ---- keys API ----
 
@@ -546,6 +618,9 @@ type createKeyReq struct {
 
 // canManage: may principal administer a key bound to db?
 func canManage(p *Principal, db string) bool {
+	if p.Hides(db) {
+		return false
+	}
 	return p.Key.Scope == ScopeAdmin && p.Key.Prefix == "" && (p.Key.DB == AllDBs || p.Key.DB == db)
 }
 
@@ -676,7 +751,7 @@ func (h *Host) clusterRoute(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 405, "method not allowed")
 			return
 		}
-		if pr, ok := h.authz(w, r, ScopeAdmin, AllDBs, "", true); ok {
+		if pr, ok := h.authz(w, r, ScopeAdmin, AllDBs, "", true); ok && h.ownerOnlyOK(w, r, pr) {
 			if h.maybeForward(w, r) {
 				return
 			}
@@ -691,7 +766,8 @@ func (h *Host) clusterRoute(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 405, "method not allowed")
 			return
 		}
-		if pr, ok := h.authz(w, r, ScopeAdmin, AllDBs, "", true); ok {
+		if pr, ok := h.authz(w, r, ScopeAdmin, AllDBs, "", true); ok && h.ownerOnlyOK(w, r, pr) {
+			h.Audit.Log(AuditEvent{Event: "node.promote", KeyID: pr.Key.ID, Actor: auditActor(pr), Remote: remoteIP(r)})
 			c.handlePromote(w, r, pr)
 		}
 	case "superseded":
@@ -706,7 +782,7 @@ func (h *Host) clusterRoute(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		pr, ok := h.authz(w, r, ScopeAdmin, AllDBs, "", true)
-		if !ok {
+		if !ok || !h.ownerOnlyOK(w, r, pr) {
 			return
 		}
 		var b struct {
@@ -722,9 +798,18 @@ func (h *Host) clusterRoute(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 400, err.Error())
 			return
 		}
-		h.Audit.Log(AuditEvent{Event: "node.repoint", KeyID: pr.Key.ID, Remote: remoteIP(r), Detail: b.URL})
+		h.Audit.Log(AuditEvent{Event: "node.repoint", KeyID: pr.Key.ID, Actor: auditActor(pr), Remote: remoteIP(r), Detail: b.URL})
 		writeJSON(w, 200, map[string]interface{}{"ok": true, "role": "follower", "leader": b.URL})
 	default:
 		writeErr(w, 404, "not found")
 	}
+}
+
+// peekName reads {"name": ...} from a request body without consuming it.
+func peekName(r *http.Request) (string, error) {
+	var b struct {
+		Name string `json:"name"`
+	}
+	err := json.Unmarshal(readBody(r), &b)
+	return b.Name, err
 }

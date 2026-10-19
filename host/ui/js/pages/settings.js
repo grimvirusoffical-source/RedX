@@ -32,6 +32,7 @@ export default async function render() {
       h('div', { class: 'card' }, h('h3', null, 'Documentation'),
         ['box-grammar:Box file grammar', 'boxql:BoxQL guide', 'hosting:Hosting guide', 'clustering:Clustering', 'connect:Connecting apps', 'console:This console'].map((x) => { const [id, t] = x.split(':'); return h('div', null, h('a', { href: '#/help/' + id }, icon('book', 14), ' ', t)); }),
         h('p', { class: 'muted small' }, 'Everything is built into the host, so it works offline.'))),
+    hostedPlanCard(),
     cfgBox,
     terminalPanel([{ label: 'Check the configuration', cmd: 'redxd doctor' }, { label: 'Same, with the client', cmd: 'redx doctor' }, { label: 'Config file', cmd: 'redxd run --config /etc/redx/redx.toml' }, { label: 'Show a preset', cmd: 'redx preset show server' }], 'Configuration lives in a TOML file; environment variables and flags override it.'));
 
@@ -62,3 +63,43 @@ export default async function render() {
   return root;
 }
 function row(k, v, hint) { return h('div', { class: 'srow' }, h('div', null, h('b', null, k), hint ? h('div', { class: 'muted small' }, hint) : null), h('div', null, v)); }
+
+// RedX Hosted plan (Stripe Billing): only shown when this host sells plans. Buying opens the themed
+// checkout page (/ui/billing.html); changing or cancelling opens Stripe's customer portal.
+function hostedPlanCard() {
+  const box = h('div');
+  (async () => {
+    let plans, me = null;
+    try { plans = await api('GET', '/v1/billing/plans', { noAuthRedirect: true }); } catch { return; }
+    if (!plans || !plans.enabled) return;
+    try { me = await api('GET', '/v1/billing/me', { noAuthRedirect: true }); } catch { me = null; }
+    const card = h('div', { class: 'card', style: { marginTop: '12px' } }, h('h3', null, icon('db', 18), ' RedX Hosted plan'));
+    if (!me) {
+      card.append(h('p', { class: 'muted' }, 'Sign in with your Red-XAI Account to choose a RedX Hosted plan.'));
+    } else if (me.active) {
+      const tier = (plans.plans || []).find((p) => p.key === me.plan && (p.interval || 'month') === (me.interval || 'month'));
+      const iv = me.interval === 'year' ? 'annual' : 'monthly';
+      const bits = [chip(tier ? tier.name : me.plan, 'ok'), ' · ', iv, ' · ', me.cancelAtPeriodEnd ? 'ends ' : 'renews ', me.periodEnd ? new Date(me.periodEnd).toLocaleDateString() : ''];
+      card.append(h('p', null, ...bits));
+      if (me.usage && me.quota) {
+        const u = me.usage, q = me.quota;
+        const gb = (n) => n >= (1 << 40) ? ((n / (1 << 40)).toFixed(1) + ' TB') : ((n / (1 << 30)).toFixed(2) + ' GB');
+        const sw = q.hostSwitches < 0 ? (u.hostSwitches + ' switches (unlimited)') : (u.hostSwitches + ' / ' + q.hostSwitches + ' switches');
+        card.append(h('p', { class: 'muted small' },
+          'This month: ', gb(u.trafficBytes), ' / ', gb(q.trafficBytes), ' traffic · ',
+          gb(u.storageBytes), ' / ', gb(q.storageBytes), ' storage · ', sw));
+      }
+      card.append(h('button', { class: 'btn', onclick: () => portal() }, 'Manage billing'));
+    } else {
+      card.append(h('p', { class: 'muted' }, 'No RedX Hosted plan on this account yet.'),
+        h('div', { class: 'row gap wrap' }, h('a', { class: 'btn primary', href: '/ui/billing.html' }, 'Choose a plan'),
+          me.portal ? h('button', { class: 'btn', onclick: () => portal() }, 'Billing history') : null));
+    }
+    box.append(card);
+  })();
+  return box;
+}
+
+async function portal() {
+  try { const r = await api('POST', '/v1/billing/portal', { json: {} }); if (r && r.url) location.href = r.url; } catch (e) { toast(e.message || String(e), 'err'); }
+}

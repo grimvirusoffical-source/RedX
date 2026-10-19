@@ -39,7 +39,7 @@ func (h *Host) adminRoute(w http.ResponseWriter, r *http.Request) {
 	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/admin/"), "/")
 	switch {
 	case rest == "status" && r.Method == "GET":
-		h.adminStatus(w, r)
+		h.adminStatus(w, r, pr)
 	case rest == "audit" && r.Method == "GET":
 		h.adminAudit(w, r)
 	case rest == "config" && r.Method == "GET":
@@ -123,14 +123,14 @@ func (h *Host) dataSize() int64 {
 	return n
 }
 
-func (h *Host) adminStatus(w http.ResponseWriter, r *http.Request) {
+func (h *Host) adminStatus(w http.ResponseWriter, r *http.Request, pr *Principal) {
 	h.runMu.Lock()
 	listen, scheme, fp := h.listenAt, h.scheme, h.tlsFP
 	h.runMu.Unlock()
 	if listen == "" {
 		listen, scheme = h.Cfg.Listen, "http"
 	}
-	dbs := h.Reg.List()
+	dbs := h.visibleDBs(pr)
 	ci := h.certInfo()
 	writeJSON(w, 200, map[string]interface{}{
 		"tls_cert": ci, "tls_warning": ci.Message,
@@ -199,6 +199,12 @@ func (h *Host) effectiveConfig() map[string]interface{} {
 	if h.Cfg.Join != "" {
 		vals["join"] = "(set, hidden)"
 	}
+	if h.Cfg.AccountsClientSecretFile != "" {
+		vals["accounts_client_secret_file"] = "(set, hidden)"
+	}
+	if n := len(h.Cfg.OwnerEmails); n > 0 {
+		vals["owner_emails"] = fmt.Sprintf("(%d set, hidden)", n)
+	}
 	_, mkErr := os.Stat(filepath.Join(h.Cfg.DataDir, "master.key"))
 	return map[string]interface{}{
 		"config": vals, "config_file": h.configPath(), "config_file_exists": fileExists(h.configPath()),
@@ -214,6 +220,8 @@ var envKeys = map[string]string{
 	"REDX_LISTEN": "listen", "REDX_TLS": "tls", "REDX_ROLE": "role", "REDX_LOG_LEVEL": "log_level", "REDX_ENGINE_DURABILITY": "engine_durability",
 	"REDX_KEYSTORE_ENCRYPT": "keystore_encrypt", "REDX_RATE_LIMIT_RPS": "rate_limit_rps", "REDX_PRESET": "preset", "REDX_DATA_DIR": "data_dir",
 	"REDX_ADVERTISE": "advertise", "REDX_AUDIT_LOG": "audit_log", "REDX_PEERS": "peers", "REDX_BOOTSTRAP": "bootstrap",
+	"REDX_ACCOUNTS_ISSUER": "accounts_issuer", "REDX_ACCOUNTS_CLIENT_ID": "accounts_client_id", "REDX_ACCOUNTS_REDIRECT_URL": "accounts_redirect_url",
+	"REDX_ACCOUNTS_MASTER_DB": "accounts_master_db", "REDXAI_OWNER_EMAILS": "owner_emails",
 }
 
 // envOverrides lists settings currently pinned by environment variables (they beat the config file).
@@ -512,7 +520,11 @@ func (h *Host) filesRoute(w http.ResponseWriter, r *http.Request, db, rest strin
 }
 
 func (h *Host) dropDBHandler(w http.ResponseWriter, r *http.Request, db string) {
-	if _, ok := h.authz(w, r, ScopeAdmin, AllDBs, "", true); !ok {
+	pr, ok := h.authz(w, r, ScopeAdmin, AllDBs, "", true)
+	if !ok {
+		return
+	}
+	if !h.refuseMasterMutation(w, r, pr, db) {
 		return
 	}
 	if h.maybeForward(w, r) {
@@ -520,6 +532,9 @@ func (h *Host) dropDBHandler(w http.ResponseWriter, r *http.Request, db string) 
 	}
 	if r.URL.Query().Get("confirm") != db {
 		writeErr(w, 400, "deleting a database is permanent: repeat its name as ?confirm="+db)
+		return
+	}
+	if !h.checkHostSwitchQuota(w, pr) {
 		return
 	}
 	seq, err := h.WriteDropDB(db)

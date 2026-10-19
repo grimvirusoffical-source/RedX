@@ -6,6 +6,17 @@ import { navigate } from '../main.js';
 
 export default async function render() {
   const root = page();
+  if (!isHostAdmin() && state.who.account) {
+    const a = state.who.account;
+    root.append(pageHead('Dashboard', 'Signed in with your Red-XAI Account.'),
+      a.owner_blocked ? h('div', { class: 'callout warn', id: 'owner-blocked' }, icon('alert'), h('div', null, h('b', null, 'Owner access is not active. '),
+        a.owner_blocked === 'owner_2fa_required' ? 'Owner logins must finish signing in with two-factor authentication. Turn on 2FA for this account, then sign out and sign in again.'
+          : a.owner_blocked === 'owner_scope_missing' ? 'Red-XAI Accounts did not grant the owner scope on this sign-in (the account must be verified, use 2FA, and be listed as an owner). Sign out and sign in again.'
+          : 'Verify this account\'s email address, then sign out and sign in again.')) : null,
+      h('div', { class: 'card', id: 'account-card' }, h('h3', null, a.username || a.email), h('p', { class: 'muted' }, a.email),
+        h('p', null, 'This account has no databases on this host yet. API keys still work for apps and SDKs.')));
+    return root;
+  }
   if (!isHostAdmin()) {
     root.append(pageHead('Dashboard', 'You are signed in with a limited key.'),
       h('div', { class: 'callout info' }, icon('info'), h('div', null, h('b', null, 'This key is not a host admin key. '), 'You can use the Data Explorer and BoxQL Studio on the databases it allows. Ask an admin for an admin key to see host status, keys, nodes and backups.')),

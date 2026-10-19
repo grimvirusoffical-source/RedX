@@ -40,6 +40,11 @@ $REDX_KEY)" and `--join` "(currently set from $REDX_JOIN or redx.toml)".
 | `preset` | `REDX_PRESET` | none (flag `--preset NAME`) |
 | `bootstrap` (`auto`/`web`/`console`/`off`) | flag `--bootstrap` | `auto` |
 | `join` | `REDX_JOIN`, flag `--join LINK` | none (makes the node a follower) |
+| `accounts_issuer` | `REDX_ACCOUNTS_ISSUER` | empty = Red-XAI Accounts sign-in off ([accounts.md](accounts.md)) |
+| `accounts_client_id`, `accounts_redirect_url` | `REDX_ACCOUNTS_CLIENT_ID`, `REDX_ACCOUNTS_REDIRECT_URL` | `redx`, `<advertise>/v1/auth/callback` |
+| — | `REDX_ACCOUNTS_CLIENT_SECRET` (env only) | none (public client with PKCE) |
+| `accounts_master_db` | `REDX_ACCOUNTS_MASTER_DB` | `redxai_accounts` (owners only while accounts are on) |
+| `owner_emails` (deploy config only) | `REDXAI_OWNER_EMAILS` (comma separated) | none |
 | — | `REDX_NO_BOOTSTRAP=1` | disable first-run admin key (web and terminal) |
 | — | `REDX_NO_OPEN=1` | never open a browser automatically |
 

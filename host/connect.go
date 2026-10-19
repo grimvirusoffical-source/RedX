@@ -519,7 +519,7 @@ func (h *Host) connectStart(w http.ResponseWriter, r *http.Request, pr *Principa
 	if ws == "" {
 		ws = in.Provider
 	}
-	if !ValidDBName(ws) {
+	if !ValidDBName(ws) || h.IsMasterDB(ws) {
 		connectErr(w, 400, "invalid_request", "workspace must match ^[a-z0-9][a-z0-9_-]{0,62}$")
 		return
 	}
@@ -690,7 +690,7 @@ func (h *Host) connectApprove(w http.ResponseWriter, r *http.Request, pr *Princi
 			connectErr(w, 400, "invalid_request", "an app's workspace name is fixed")
 			return
 		}
-		if !ValidDBName(in.Workspace) {
+		if !ValidDBName(in.Workspace) || h.IsMasterDB(in.Workspace) {
 			connectErr(w, 400, "invalid_request", "workspace must match ^[a-z0-9][a-z0-9_-]{0,62}$")
 			return
 		}

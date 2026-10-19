@@ -51,6 +51,7 @@ const ICONS = {
   compare: 'M4 6h7M4 12h7M4 18h7M15 6h5M15 12h5M15 18h5',
   copy: 'M9 9h11v11H9zM5 15V4h11',
   check: 'M5 12l5 5 9-10',
+  user: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21c0-4 4-6 8-6s8 2 8 6',
   plus: 'M12 5v14M5 12h14',
   trash: 'M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13',
   play: 'M7 4l13 8-13 8z',

@@ -56,6 +56,14 @@ func TestConsoleStaticServingAndHeaders(t *testing.T) {
 	if _, _, h := do(t, "GET", n.URL+"/sw.js", "", ""); h.Get("Service-Worker-Allowed") != "/" {
 		t.Fatal("sw.js must be allowed to control /")
 	}
+	// only the checkout page may load Stripe.js and frame Stripe's payment fields
+	if _, _, h := do(t, "GET", n.URL+"/ui/billing.html", "", ""); !strings.Contains(h.Get("Content-Security-Policy"), "script-src 'self' https://js.stripe.com https://*.js.stripe.com;") ||
+		!strings.Contains(h.Get("Content-Security-Policy"), "frame-ancestors 'none'") || strings.Contains(h.Get("Content-Security-Policy"), "unsafe-eval") {
+		t.Fatalf("billing.html CSP: %s", h.Get("Content-Security-Policy"))
+	}
+	if _, _, h := do(t, "GET", n.URL+"/ui/js/billing.js", "", ""); strings.Contains(h.Get("Content-Security-Policy"), "stripe") {
+		t.Fatal("Stripe allowed outside the checkout page")
+	}
 	// conditional requests
 	_, _, h = do(t, "GET", n.URL+"/ui/css/app.css", "", "")
 	if st, b, _ := do(t, "GET", n.URL+"/ui/css/app.css", "", "", "If-None-Match", h.Get("ETag")); st != 304 || b != "" {
@@ -119,7 +127,12 @@ func TestConsoleAssetsComplete(t *testing.T) {
 		if regexp.MustCompile(`\.innerHTML|\.outerHTML|insertAdjacentHTML|document\.write|\beval\(|new Function`).Match(b) {
 			t.Errorf("%s uses innerHTML/eval: the console builds DOM nodes only", name)
 		}
-		if regexp.MustCompile(`https?://[a-z0-9.-]+\.[a-z]{2,}`).MatchString(strings.ReplaceAll(strings.ReplaceAll(string(b), "http://www.w3.org", ""), "https://127", "")) {
+		src := string(b)
+		if name == "js/checkout-engine.js" {
+			// the checkout page (and only it, see billingCSP) loads Stripe.js
+			src = strings.ReplaceAll(src, "https://js.stripe.com/", "")
+		}
+		if regexp.MustCompile(`https?://[a-z0-9.-]+\.[a-z]{2,}`).MatchString(strings.ReplaceAll(strings.ReplaceAll(src, "http://www.w3.org", ""), "https://127", "")) {
 			if !strings.HasSuffix(name, "help.js") && !strings.HasSuffix(name, "devices.js") {
 				// examples such as "https://leader:7777" have no TLD dot; a real public host would match here
 				t.Errorf("%s mentions an off-site URL", name)

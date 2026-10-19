@@ -1,0 +1,23 @@
+/* RedX Hosted checkout: the console's crimson-on-black, with a faint hex lattice and a red edge glow. */
+:root {
+  --co-bg: #0f0809; --co-card: #1a1114; --co-panel: #1a1114; --co-input: #150d0f; --co-line: #33232a;
+  --co-summary-bg: linear-gradient(155deg, rgba(242, 73, 90, .22), transparent 60%), linear-gradient(330deg, rgba(201, 28, 52, .16), transparent 55%), #150d0f;
+  --co-text: #f5ecec; --co-muted: #b0a0a3; --co-placeholder: #7a6a6d;
+  --co-accent: #f2495a; --co-accent-grad: linear-gradient(135deg, #e0283f 0%, #c91c34 55%, #a8132a 100%); --co-on-accent: #fff; --co-glow: rgba(242, 73, 90, .45);
+  --co-danger: #ff5d6c; --co-link: #ff7684; --co-radius: 12px; --co-radius-lg: 18px; --co-shadow: 0 30px 80px rgba(0, 0, 0, .6), 0 0 0 1px rgba(242, 73, 90, .10);
+  --co-font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; --co-display: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --co-case: none; --co-tracking: -.01em;
+}
+body {
+  background-color: var(--co-bg);
+  background-image:
+    radial-gradient(70% 55% at 50% -10%, rgba(242, 73, 90, .20), transparent 70%),
+    radial-gradient(40% 40% at 100% 100%, rgba(201, 28, 52, .14), transparent 70%),
+    linear-gradient(30deg, rgba(255, 255, 255, .022) 12%, transparent 12.5%, transparent 87%, rgba(255, 255, 255, .022) 87.5%),
+    linear-gradient(150deg, rgba(255, 255, 255, .022) 12%, transparent 12.5%, transparent 87%, rgba(255, 255, 255, .022) 87.5%);
+  background-size: auto, auto, 40px 70px, 40px 70px;
+}
+.co-appname { color: var(--co-text); }
+.co-appname::after { content: " Hosted"; color: var(--co-accent); }
+.co-summary { border-top: 2px solid var(--co-accent); }
+.co-tick { border-radius: 50%; }

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"redx/billing"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -32,10 +33,15 @@ type Host struct {
 	// BootstrapKey is set only when this start created the first admin key.
 	BootstrapKey string
 
-	pair        pairStore     // one-time sign-in pairing codes (pairing.go)
-	connect     *connectStore // app connect handshake (connect.go)
-	webSetup    bool          // an empty keystore may be set up from the browser (loopback only)
-	bootMu      sync.Mutex    // serialises the web bootstrap
+	pair        pairStore        // one-time sign-in pairing codes (pairing.go)
+	connect     *connectStore    // app connect handshake (connect.go)
+	accts       *accountStore    // Red-XAI Accounts console sessions (accounts.go)
+	acctLim     *Limiter         // per-IP limits for the sign-in and sign-up endpoints
+	evCursor    *eventCursor     // Red-XAI Accounts event feed cursor (accounts_events.go)
+	oidc        *oidcClient      // Red-XAI Accounts OIDC relying party (accounts_oidc.go)
+	billing     *billing.Service // RedX Hosted plans on Stripe (billing_api.go)
+	webSetup    bool             // an empty keystore may be set up from the browser (loopback only)
+	bootMu      sync.Mutex       // serialises the web bootstrap
 	runMu       sync.Mutex
 	listenAt    string // actual listen address, set by Serve
 	scheme      string // http | https, set by Serve
@@ -106,7 +112,15 @@ func New(cfg Config, opener Opener, logf func(string, ...interface{})) (*Host, e
 		return fail(err)
 	}
 	h.Auth = NewAuthenticator(h.KS, h.Audit, cfg.RateRPS, cfg.RateBurst, cfg.AuditOK)
+	h.accts = newAccountStore()
+	h.acctLim = NewLimiter(nil)
+	h.oidc = newOIDCClient(cfg)
+	h.Auth.accounts = h.resolveAccount
+	h.Auth.master = h.masterDB
 	h.connect = openConnectStore(cfg.DataDir)
+	if h.billing, err = newBilling(cfg, logf); err != nil {
+		return fail(err)
+	}
 	h.Tracker = NewTTLTracker(filepath.Join(cfg.DataDir, "cluster", "ttl.json"))
 	if h.Cluster, err = newCluster(h); err != nil {
 		return fail(err)
@@ -155,6 +169,11 @@ func New(cfg Config, opener Opener, logf func(string, ...interface{})) (*Host, e
 	h.Cluster.start(ctx)
 	h.wg.Add(1)
 	go h.maintenance(ctx)
+	if h.AccountsEnabled() {
+		h.evCursor = loadEventCursor(cfg.DataDir)
+		h.wg.Add(1)
+		go h.accountEventsLoop(ctx)
+	}
 	return h, nil
 }
 
