@@ -2895,6 +2895,1157 @@
     "x-rottenapple-level": "developer-tool"
    }
   },
+  "/v1/hosted/apps": {
+   "get": {
+    "operationId": "listHostedApps",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Hosted apps the caller may see. Tenants see their own. Owners and host-admin keys see every app.",
+    "tags": [
+     "hosted"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "safe",
+    "x-redx-danger-level": 0,
+    "x-rottenapple-level": "L1"
+   },
+   "post": {
+    "operationId": "createHostedApp",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "db": {
+          "type": "string"
+         },
+         "kind": {
+          "type": "string"
+         },
+         "name": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Create a tenant app. kind is static, container or process. db is the tenant's logical database name.",
+    "tags": [
+     "hosted"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "write",
+    "x-redx-danger-level": 1,
+    "x-rottenapple-level": "L1"
+   }
+  },
+  "/v1/hosted/apps/{id}": {
+   "delete": {
+    "description": "Server requires header X-RedX-Confirm: deleteHostedApp (or ?confirm=deleteHostedApp); HTTP 428 + code confirm_required otherwise.",
+    "operationId": "deleteHostedApp",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Delete a hosted app, its releases and its scoped database key.",
+    "tags": [
+     "hosted"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "dangerous",
+    "x-redx-danger-level": 3,
+    "x-rottenapple-level": "developer-tool"
+   },
+   "get": {
+    "operationId": "getHostedApp",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "One hosted app: deploys, domains, masked secrets, limits and the sandbox runtime spec.",
+    "tags": [
+     "hosted"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "safe",
+    "x-redx-danger-level": 0,
+    "x-rottenapple-level": "L1"
+   }
+  },
+  "/v1/hosted/apps/{id}/archive": {
+   "post": {
+    "operationId": "uploadHostedArchive",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "canaryPct",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "strategy",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/octet-stream": {
+       "schema": {
+        "format": "binary",
+        "type": "string"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Deploy a static site or build context from a zip, tar or tar.gz body.",
+    "tags": [
+     "hosted"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "write",
+    "x-redx-danger-level": 1,
+    "x-rottenapple-level": "L1"
+   }
+  },
+  "/v1/hosted/apps/{id}/deploy": {
+   "post": {
+    "operationId": "deployHostedApp",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "canaryPct": {
+          "type": "integer"
+         },
+         "command": {
+          "type": "array"
+         },
+         "dockerfile": {
+          "type": "string"
+         },
+         "image": {
+          "type": "string"
+         },
+         "ref": {
+          "type": "string"
+         },
+         "repo": {
+          "type": "string"
+         },
+         "source": {
+          "type": "string"
+         },
+         "strategy": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Deploy from github, image or dockerfile. strategy is direct, canary or blue_green.",
+    "tags": [
+     "hosted"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "write",
+    "x-redx-danger-level": 1,
+    "x-rottenapple-level": "L1"
+   }
+  },
+  "/v1/hosted/apps/{id}/deploys": {
+   "get": {
+    "operationId": "listHostedDeploys",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Deploy history for one app.",
+    "tags": [
+     "hosted"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "safe",
+    "x-redx-danger-level": 0,
+    "x-rottenapple-level": "L1"
+   }
+  },
+  "/v1/hosted/apps/{id}/deploys/{deploy}/manifest": {
+   "get": {
+    "operationId": "getHostedManifest",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "deploy",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Signed redx.update-manifest/v1 bytes for a deploy. X-RedX-Signature is ed25519 over those exact bytes.",
+    "tags": [
+     "hosted"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "safe",
+    "x-redx-danger-level": 0,
+    "x-rottenapple-level": "L1"
+   }
+  },
+  "/v1/hosted/apps/{id}/domains": {
+   "get": {
+    "operationId": "listHostedDomains",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Default hostname and custom domains, with the DNS records for unverified names.",
+    "tags": [
+     "hosted"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "safe",
+    "x-redx-danger-level": 0,
+    "x-rottenapple-level": "L1"
+   },
+   "post": {
+    "operationId": "addHostedDomain",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "domain": {
+          "type": "string"
+         },
+         "method": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Claim a custom domain. method is txt or http. A name another tenant holds is refused.",
+    "tags": [
+     "hosted"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "write",
+    "x-redx-danger-level": 1,
+    "x-rottenapple-level": "L1"
+   }
+  },
+  "/v1/hosted/apps/{id}/domains/{domain}": {
+   "delete": {
+    "operationId": "deleteHostedDomain",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "domain",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Drop a custom domain. The default hostname cannot be dropped.",
+    "tags": [
+     "hosted"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "write",
+    "x-redx-danger-level": 1,
+    "x-rottenapple-level": "L1"
+   }
+  },
+  "/v1/hosted/apps/{id}/domains/{domain}/verify": {
+   "post": {
+    "operationId": "verifyHostedDomain",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "domain",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Check the TXT or HTTP challenge and mark the domain verified so it can be routed.",
+    "tags": [
+     "hosted"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "write",
+    "x-redx-danger-level": 1,
+    "x-rottenapple-level": "L1"
+   }
+  },
+  "/v1/hosted/apps/{id}/env": {
+   "get": {
+    "operationId": "getHostedEnv",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Non-secret environment variables. Secrets are not included.",
+    "tags": [
+     "hosted"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "safe",
+    "x-redx-danger-level": 0,
+    "x-rottenapple-level": "L1"
+   },
+   "put": {
+    "operationId": "putHostedEnv",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "vars": {
+          "type": "object"
+         }
+        },
+        "type": "object"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Replace non-secret environment variables. REDX_KEY cannot be set here.",
+    "tags": [
+     "hosted"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "write",
+    "x-redx-danger-level": 1,
+    "x-rottenapple-level": "L1"
+   }
+  },
+  "/v1/hosted/apps/{id}/logs": {
+   "get": {
+    "operationId": "getHostedLogs",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "kind",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "stream",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Runtime or access logs. stream=1 is server-sent events, capped at 15 seconds.",
+    "tags": [
+     "hosted"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "safe",
+    "x-redx-danger-level": 0,
+    "x-rottenapple-level": "L1"
+   }
+  },
+  "/v1/hosted/apps/{id}/logs/download": {
+   "get": {
+    "operationId": "downloadHostedLogs",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "kind",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "text/x-redx-box": {
+        "schema": {
+         "type": "string"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Download runtime or access logs as text. Retention follows the plan.",
+    "tags": [
+     "hosted"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "safe",
+    "x-redx-danger-level": 0,
+    "x-rottenapple-level": "L1"
+   }
+  },
+  "/v1/hosted/apps/{id}/promote": {
+   "post": {
+    "operationId": "promoteHostedApp",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Promote the canary or blue-green standby to current.",
+    "tags": [
+     "hosted"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "admin",
+    "x-redx-danger-level": 2,
+    "x-rottenapple-level": "developer-tool"
+   }
+  },
+  "/v1/hosted/apps/{id}/rollback": {
+   "post": {
+    "operationId": "rollbackHostedApp",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "deploy": {
+          "type": "string"
+         },
+         "snapshot": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Make a previous deploy current. Pass deploy or snapshot.",
+    "tags": [
+     "hosted"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "admin",
+    "x-redx-danger-level": 2,
+    "x-rottenapple-level": "developer-tool"
+   }
+  },
+  "/v1/hosted/apps/{id}/secrets": {
+   "get": {
+    "operationId": "listHostedSecrets",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Secret names. Values are always masked and never returned.",
+    "tags": [
+     "hosted"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "safe",
+    "x-redx-danger-level": 0,
+    "x-rottenapple-level": "L1"
+   }
+  },
+  "/v1/hosted/apps/{id}/secrets/{name}": {
+   "delete": {
+    "operationId": "deleteHostedSecret",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Delete a secret.",
+    "tags": [
+     "hosted"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "write",
+    "x-redx-danger-level": 1,
+    "x-rottenapple-level": "L1"
+   },
+   "put": {
+    "operationId": "putHostedSecret",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "value": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Set a secret. The value is encrypted at rest and the response shows only a mask.",
+    "tags": [
+     "hosted"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "write",
+    "x-redx-danger-level": 1,
+    "x-rottenapple-level": "L1"
+   }
+  },
+  "/v1/hosted/apps/{id}/start": {
+   "post": {
+    "operationId": "startHostedApp",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Start an app. A state change counts as one host_switch_quota switch.",
+    "tags": [
+     "hosted"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "write",
+    "x-redx-danger-level": 1,
+    "x-rottenapple-level": "L1"
+   }
+  },
+  "/v1/hosted/apps/{id}/stop": {
+   "post": {
+    "operationId": "stopHostedApp",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Stop an app. A state change counts as one host_switch_quota switch.",
+    "tags": [
+     "hosted"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "write",
+    "x-redx-danger-level": 1,
+    "x-rottenapple-level": "L1"
+   }
+  },
+  "/v1/hosted/apps/{id}/usage": {
+   "get": {
+    "operationId": "getHostedUsage",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Disk used by one app and the tier limits that apply.",
+    "tags": [
+     "hosted"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "safe",
+    "x-redx-danger-level": 0,
+    "x-rottenapple-level": "L1"
+   }
+  },
+  "/v1/hosted/caddy": {
+   "get": {
+    "operationId": "hostedCaddy",
+    "responses": {
+     "200": {
+      "content": {
+       "text/x-redx-box": {
+        "schema": {
+         "type": "string"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Caddyfile fragment for on-demand TLS. Owner or host-admin only.",
+    "tags": [
+     "hosted"
+    ],
+    "x-redx-auth": "key",
+    "x-redx-danger": "safe",
+    "x-redx-danger-level": 0,
+    "x-rottenapple-level": "L1"
+   }
+  },
+  "/v1/hosted/tls/ask": {
+   "get": {
+    "operationId": "hostedTLSAsk",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "domain",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "security": [],
+    "summary": "Caddy on-demand TLS ask. 200 only for a verified app domain, and only from loopback or with X-RedX-Caddy-Ask.",
+    "tags": [
+     "hosted"
+    ],
+    "x-redx-auth": "none",
+    "x-redx-danger": "safe",
+    "x-redx-danger-level": 0,
+    "x-rottenapple-level": "L1"
+   }
+  },
   "/v1/keys": {
    "get": {
     "operationId": "listKeys",

@@ -106,6 +106,20 @@ type Config struct {
 	// socket peer is the client (so a spoofed header cannot pick the rate-limit key).
 	TrustedProxies []string `toml:"trusted_proxies"`
 
+	// Hosted app runtime (sites and containers). See docs/hosting-apps.md.
+	AppsHost          string              `toml:"apps_host"`
+	AppsRuntime       string              `toml:"apps_runtime"` // podman | none
+	AppsNetwork       string              `toml:"apps_network"` // pasta | slirp4netns
+	AppsPublicIP      string              `toml:"apps_public_ip"`
+	AppsBasePort      int                 `toml:"apps_base_port"`
+	AppsSeccomp       string              `toml:"apps_seccomp"`
+	AppsPodmanBin     string              `toml:"apps_podman_bin"`
+	AppsSecretKeyFile string              `toml:"apps_secret_key_file"`
+	AppsRedXURL       string              `toml:"apps_redx_url"`
+	AppsLimits        map[string]AppLimit `toml:"apps_limits"`
+	// AppsTLSAskSecret is the Caddy on-demand ask shared secret. Env only.
+	AppsTLSAskSecret string `toml:"-"`
+
 	ConfigFile string `toml:"-"`
 }
 
@@ -192,6 +206,15 @@ func (c *Config) RegisterFlags(fs *flag.FlagSet) {
 	fs.Var((*csv)(&c.HostedApps), "hosted-apps", "comma separated app ids hosted on this Red-XAI host")
 	fs.Var((*csv)(&c.GithubRepos), "github-repos", "comma separated owner/repo=app allowlist for update publish and webhooks")
 	fs.Var((*csv)(&c.TrustedProxies), "trusted-proxies", "comma separated IPs or CIDRs allowed to set X-Forwarded-For / X-Real-IP")
+	fs.StringVar(&c.AppsHost, "apps-host", c.AppsHost, "public suffix for hosted app hostnames")
+	fs.StringVar(&c.AppsRuntime, "apps-runtime", c.AppsRuntime, "hosted app runtime: podman|none")
+	fs.StringVar(&c.AppsNetwork, "apps-network", c.AppsNetwork, "hosted app network: pasta|slirp4netns")
+	fs.StringVar(&c.AppsPublicIP, "apps-public-ip", c.AppsPublicIP, "public IPv4 published as an A record for custom domains")
+	fs.IntVar(&c.AppsBasePort, "apps-base-port", c.AppsBasePort, "first loopback port assigned to a hosted app")
+	fs.StringVar(&c.AppsSeccomp, "apps-seccomp", c.AppsSeccomp, "seccomp profile passed to podman")
+	fs.StringVar(&c.AppsPodmanBin, "apps-podman-bin", c.AppsPodmanBin, "podman binary (default podman)")
+	fs.StringVar(&c.AppsSecretKeyFile, "apps-secret-key-file", c.AppsSecretKeyFile, "path to the hosted-app secret key (mode 0600); the key is never a flag")
+	fs.StringVar(&c.AppsRedXURL, "apps-redx-url", c.AppsRedXURL, "REDX_URL injected into hosted apps")
 }
 
 type csv []string
@@ -294,6 +317,27 @@ func (c *Config) ApplyEnv(get func(string) string) error {
 	}
 	if v := get("REDX_TRUSTED_PROXIES"); v != "" {
 		_ = (*csv)(&c.TrustedProxies).Set(v)
+	}
+	s("REDX_APPS_HOST", &c.AppsHost)
+	s("REDX_APPS_RUNTIME", &c.AppsRuntime)
+	s("REDX_APPS_NETWORK", &c.AppsNetwork)
+	s("REDX_APPS_PUBLIC_IP", &c.AppsPublicIP)
+	s("REDX_APPS_SECCOMP", &c.AppsSeccomp)
+	s("REDX_APPS_PODMAN_BIN", &c.AppsPodmanBin)
+	s("REDX_APPS_SECRET_KEY_FILE", &c.AppsSecretKeyFile)
+	s("REDX_APPS_REDX_URL", &c.AppsRedXURL)
+	s("REDX_APPS_TLS_ASK_SECRET", &c.AppsTLSAskSecret)
+	if v := get("REDX_APPS_BASE_PORT"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("REDX_APPS_BASE_PORT: %w", err)
+		}
+		c.AppsBasePort = n
+	}
+	if v := get("REDX_APPS_LIMITS"); v != "" {
+		if err := c.applyAppLimits(v); err != nil {
+			return err
+		}
 	}
 	if v := get("REDX_KEYSTORE_ENCRYPT"); v != "" {
 		b, err := strconv.ParseBool(v)
@@ -411,7 +455,58 @@ func (c *Config) Validate() error {
 	if err := c.validateProxies(); err != nil {
 		return err
 	}
+	if err := c.validateApps(); err != nil {
+		return err
+	}
 	return c.validateAccounts()
+}
+
+func (c *Config) validateApps() error {
+	c.AppsHost = strings.ToLower(strings.TrimSpace(c.AppsHost))
+	if c.AppsHost == "" {
+		c.AppsHost = appsZoneDefault
+	}
+	if strings.ContainsAny(c.AppsHost, " /\\") || strings.Contains(c.AppsHost, "..") || net.ParseIP(c.AppsHost) != nil {
+		return fmt.Errorf("apps_host must be a domain name, got %q", c.AppsHost)
+	}
+	switch c.AppsRuntime {
+	case "", "podman":
+		c.AppsRuntime = "podman"
+	case "none":
+	default:
+		return fmt.Errorf("apps_runtime must be podman or none, got %q", c.AppsRuntime)
+	}
+	switch c.AppsNetwork {
+	case "", "pasta":
+		c.AppsNetwork = "pasta"
+	case "slirp4netns":
+	default:
+		return fmt.Errorf("apps_network must be pasta or slirp4netns, got %q", c.AppsNetwork)
+	}
+	if c.AppsBasePort == 0 {
+		c.AppsBasePort = 20000
+	}
+	if c.AppsBasePort < 1024 || c.AppsBasePort > 60000 {
+		return fmt.Errorf("apps_base_port must be 1024..60000")
+	}
+	if c.AppsSeccomp == "" {
+		c.AppsSeccomp = appsSeccompDefault
+	}
+	if strings.ContainsAny(c.AppsSeccomp, " \t,") {
+		return fmt.Errorf("apps_seccomp must be a file path")
+	}
+	if c.AppsRedXURL == "" {
+		c.AppsRedXURL = appsRedXURLDefault
+	}
+	if c.AppsPublicIP != "" && net.ParseIP(c.AppsPublicIP) == nil {
+		return fmt.Errorf("apps_public_ip must be an IP address")
+	}
+	for tier := range c.AppsLimits {
+		if _, ok := builtinAppLimit(tier); !ok {
+			return fmt.Errorf("apps_limits: unknown tier %q", tier)
+		}
+	}
+	return nil
 }
 
 func (c *Config) validateProxies() error {
@@ -453,7 +548,7 @@ func LoadConfig(args []string, getenv func(string) string, fs *flag.FlagSet) (Co
 	cf := pre.String("config", "", "")
 	pf := pre.String("preset", "", "")
 	ddFlag := pre.String("data-dir", "", "")
-	for _, n := range []string{"listen", "node-id", "role", "peers", "advertise", "tls", "tls-cert", "tls-key", "default-db", "master-key-file", "code-allowed-boxes", "log-level", "bootstrap", "join", "update-signing-key-file", "github-webhook-secret-file", "github-repo", "github-repos", "hosted-apps", "trusted-proxies"} {
+	for _, n := range []string{"listen", "node-id", "role", "peers", "advertise", "tls", "tls-cert", "tls-key", "default-db", "master-key-file", "code-allowed-boxes", "log-level", "bootstrap", "join", "update-signing-key-file", "github-webhook-secret-file", "github-repo", "github-repos", "hosted-apps", "trusted-proxies", "apps-host", "apps-runtime", "apps-network", "apps-public-ip", "apps-base-port", "apps-seccomp", "apps-podman-bin", "apps-secret-key-file", "apps-redx-url"} {
 		pre.String(n, "", "")
 	}
 	pre.Bool("keystore-encrypt", false, "")
