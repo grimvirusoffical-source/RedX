@@ -30,10 +30,10 @@ app                                  console (host admin)                 redxd
 | Parameter | Required | Meaning |
 |---|---|---|
 | `v` | yes | protocol version, `1`. Missing or lower: `client_too_old` |
-| `provider` | yes | `rottenapple` (the store's own database), `rottenapple-launcher` (one installed app), `gendragoon`; anything else is shown as *Unverified app* and needs a typed confirmation |
+| `provider` | yes | `rottenapple` (the store's own database), `rottenapple-launcher` (one installed app), `gendragoon`, `quicklaunch` (the QuickLaunch developer tool, workspace `quicklaunch`); anything else is shown as *Unverified app* and needs a typed confirmation |
 | `state` | yes | 22-128 characters `[A-Za-z0-9_-]`, at least 128 random bits |
 | `pkce_challenge` | yes | `base64url(SHA-256(verifier))` without padding (43 characters). Only `S256` (`pkce_method`, optional) |
-| `callback` | no | exact match with RedX's list (`rottenapple://redx-callback`, `gendragoon://redx-callback`) or a loopback `http://127.0.0.1:<port>/redx-callback`. Anything else is ignored and the code is shown for copy and paste |
+| `callback` | no | exact match with RedX's list (`rottenapple://redx-callback`, `gendragoon://redx-callback`) or a loopback redirect (see below). Anything else is ignored and the code is shown for copy and paste |
 | `app` | `rottenapple-launcher` | the app id; the workspace is then fixed to `ra-<app id, lower case, dots as dashes, ≤40 chars>-<8 hex of sha256(app id)>` |
 | `workspace` | no | the database name (`^[a-z0-9][a-z0-9_-]{0,62}$`). Defaults: `ra` (rottenapple), `gendragoon`, the provider id |
 | `scope` | no | `read` or `write` (default `write`). `admin` is never granted |
@@ -43,6 +43,14 @@ app                                  console (host admin)                 redxd
 | `name` | no | a label shown as "the link calls itself …" (never used as the app's name) |
 
 The provider's name and wording come from RedX's own list, never from the link.
+
+**Loopback callbacks** (RFC 8252 section 7.3, used by desktop tools such as QuickLaunch that receive the code on
+their own short-lived local HTTP service): `http://127.0.0.1:<port><path>`, `http://[::1]:<port><path>` or
+`http://localhost:<port><path>`, any port 1-65535, where `<path>` is the provider's registered path
+(`/redx-callback` for every provider today). Refused: any other scheme (also `https`), user info (`user@`), any other host
+name or address (RedX resolves no names, so a name that points at 127.0.0.1 elsewhere is refused too, as are
+`127.0.0.2`, `0.0.0.0`, `[::ffff:127.0.0.1]` and decimal forms), a missing or zero-padded port, a query or fragment,
+percent-encoding, and any other path (also a trailing `/`). PKCE (`S256`) is required as for every provider.
 
 ## 3. Endpoints
 

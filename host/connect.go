@@ -56,7 +56,6 @@ var (
 	reAppID     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,154}$`)
 	rePrefix    = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
 	rePin       = regexp.MustCompile(`^[0-9a-f]{64}$`)
-	reLoopCB    = regexp.MustCompile(`^http://(127\.0\.0\.1|\[::1\]|localhost):[0-9]{1,5}/redx-callback$`)
 )
 
 // ConnectProvider is an entry of RedX's own registry. Display names come from here, never from the link.
@@ -64,10 +63,14 @@ type ConnectProvider struct {
 	ID        string
 	Display   string
 	Callbacks []string // exact-match allow-list
-	Workspace string   // default workspace (database)
-	PerApp    bool     // rottenapple-launcher: one workspace per installed app, name derived from the app id
-	SingleKey bool     // rottenapple: one active key per workspace unless the admin replaces it
-	Wording   string   // consent text
+	// LoopbackCallbackPath: the app receives the callback on its own loopback HTTP service on a port chosen at
+	// start (RFC 8252 section 7.3): http://127.0.0.1:<port><path>, http://[::1]:<port><path> or
+	// http://localhost:<port><path>, with exactly this path. Empty: the default path /redx-callback.
+	LoopbackCallbackPath string
+	Workspace            string // default workspace (database)
+	PerApp               bool   // rottenapple-launcher: one workspace per installed app, name derived from the app id
+	SingleKey            bool   // rottenapple: one active key per workspace unless the admin replaces it
+	Wording              string // consent text
 }
 
 var connectProviders = map[string]ConnectProvider{
@@ -77,6 +80,9 @@ var connectProviders = map[string]ConnectProvider{
 		Wording: "Give one installed app its own workspace on this RedX host. The launcher keeps the key; the app never sees it. The app cannot see other databases or manage keys."},
 	"gendragoon": {ID: "gendragoon", Display: "Gendragoon", Callbacks: []string{"gendragoon://redx-callback"}, Workspace: "gendragoon",
 		Wording: "Let Gendragoon keep data in its own workspace on this RedX host. It cannot see other databases or manage keys."},
+	"quicklaunch": {ID: "quicklaunch", Display: "QuickLaunch (developer tool)", Workspace: "quicklaunch",
+		LoopbackCallbackPath: "/redx-callback",
+		Wording:              "Let QuickLaunch, the developer tool on this computer, keep its project data in its own workspace on this RedX host. It cannot see other databases or manage keys."},
 }
 
 // AppWorkspaceName is Rotten Apple's per-app workspace name (connect.WorkspaceName): "ra-" + the app id in
@@ -383,7 +389,61 @@ func callbackOK(p ConnectProvider, verified bool, cb string) bool {
 			return true
 		}
 	}
-	return reLoopCB.MatchString(cb) // RFC 8252 loopback redirect, any port, fixed path
+	path := p.LoopbackCallbackPath
+	if path == "" {
+		path = "/redx-callback"
+	}
+	return LoopbackCallbackOK(cb, path) // RFC 8252 loopback redirect, any port, fixed path
+}
+
+// LoopbackCallbackOK reports whether cb is a loopback redirect URI with exactly the given path:
+// http://127.0.0.1:<port><path>, http://[::1]:<port><path> or http://localhost:<port><path>.
+// Refused: other schemes (also https), user info, any other host (no DNS lookups are made, so a name that
+// resolves to loopback elsewhere is refused too), a missing, zero-padded or out-of-range port, a query or
+// fragment, percent-encoding, and any path other than the registered one.
+func LoopbackCallbackOK(cb, path string) bool {
+	if len(cb) > 200 || strings.ContainsAny(cb, "%\\ \x00\r\n\t#?@") {
+		return false
+	}
+	var rest string
+	switch {
+	case strings.HasPrefix(cb, "http://127.0.0.1:"):
+		rest = strings.TrimPrefix(cb, "http://127.0.0.1:")
+	case strings.HasPrefix(cb, "http://[::1]:"):
+		rest = strings.TrimPrefix(cb, "http://[::1]:")
+	case strings.HasPrefix(cb, "http://localhost:"):
+		rest = strings.TrimPrefix(cb, "http://localhost:")
+	default:
+		return false
+	}
+	i := strings.IndexByte(rest, '/')
+	if i < 1 || i > 5 {
+		return false
+	}
+	port, pth := rest[:i], rest[i:]
+	if port[0] == '0' {
+		return false
+	}
+	n := 0
+	for _, ch := range port {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+		n = n*10 + int(ch-'0')
+	}
+	if n < 1 || n > 65535 || pth != path {
+		return false
+	}
+	// cross-check with the standard parser: it must agree on scheme, host, port and path
+	u, err := url.Parse(cb)
+	if err != nil || u.Scheme != "http" || u.User != nil || u.Port() != port || u.Path != path || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" {
+		return false
+	}
+	switch u.Hostname() {
+	case "127.0.0.1", "::1", "localhost":
+		return true
+	}
+	return false
 }
 
 func (h *Host) connectStart(w http.ResponseWriter, r *http.Request, pr *Principal) {
