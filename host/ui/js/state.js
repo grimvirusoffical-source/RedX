@@ -58,6 +58,27 @@ function writeModeQuery(mode) {
   } catch { /* ignore */ }
 }
 
+/** Drop only ?mode=, leaving the path, any other query, and the hash. */
+export function stripModeQuery() {
+  try {
+    const u = new URL(location.href);
+    if (!u.searchParams.has('mode')) return;
+    u.searchParams.delete('mode');
+    const qs = u.searchParams.toString();
+    history.replaceState(null, '', u.pathname + (qs ? '?' + qs : '') + u.hash);
+  } catch { /* ignore */ }
+}
+
+// ?mode= is read once, on the first apply in this document. A later sign-in in the
+// same tab must not inherit the previous user's address.
+let deepLinkMode;
+function takeDeepLinkMode() {
+  if (deepLinkMode === undefined) deepLinkMode = modeQuery();
+  const q = deepLinkMode;
+  deepLinkMode = '';
+  return q;
+}
+
 export function setConsoleMode(m) {
   const mode = m === 'host' ? 'host' : 'database';
   state.consoleMode = mode;
@@ -69,10 +90,11 @@ export function setConsoleMode(m) {
 
 /**
  * forced is 'host' or 'database' when the open page belongs to that mode.
- * Otherwise ?mode= wins, then this user's stored choice, then Database. The choice is saved.
+ * Otherwise the one-shot ?mode= from the initial page load wins, then this user's
+ * stored choice, then Database. The choice is saved for this user only.
  */
 export function applyConsoleModeForRoute(forced) {
-  const q = modeQuery();
+  const q = takeDeepLinkMode();
   let mode;
   if (forced === 'host' || forced === 'database') mode = forced;
   else if (q) mode = q;

@@ -1,6 +1,6 @@
 // Headless-Chrome test of Red-XAI Accounts in the console, against the in-memory fake (scripts/fake-accounts):
 //   sign-up (ToS scroll -> Read ToS -> Agree to ToS, red/green hints, copy arrows, DOB typed + calendar, under-13 block,
-//   2FA options with Red-XAI Auth disabled, "None" warning, TOTP confirm), sign-in as a regular account (no Owner page),
+//   2FA options that are available (Red-XAI Auth omitted until it is), "None" warning, TOTP confirm), sign-in as a regular account (no Owner page),
 //   then sign-in as an owner with 2FA (Owner page, master DB, audit trail). Dark theme by default.
 //   PLAYWRIGHT_CORE=/path/to/node_modules/playwright-core CHROME=/usr/bin/google-chrome \
 //   node scripts/ui-accounts-test.js <redxd binary> <fake-accounts binary>
@@ -116,7 +116,7 @@ const OWNER = 'owner@example.com'; // placeholder; real owner addresses live in 
     expect(await p.inputValue('#su-dob') === '07/04/2001' && !(await p.isVisible('#su-age-block')), 'the calendar picker fills MM/DD/YYYY');
     expect((await hints('hints-dob')).every((x) => x.cls.includes('good')), 'date of birth hints green');
 
-    expect(await p.$eval('#su-2fa-redxai_auth', (e) => e.disabled) && /Coming soon/.test(await p.textContent('label[for="su-2fa-redxai_auth"]')), 'Red-XAI Auth is disabled and marked Coming soon');
+    expect(await p.$('#su-2fa-redxai_auth') === null && !/Coming soon/.test(await p.textContent('.tfa')), 'Red-XAI Auth is omitted until it is available');
     await p.check('#su-2fa-none');
     expect(await p.isVisible('#su-no2fa-warning'), 'choosing None shows the risk warning');
     await p.check('#su-2fa-phone');
@@ -270,26 +270,59 @@ const OWNER = 'owner@example.com'; // placeholder; real owner addresses live in 
     const hasKick = await p.$('button:has-text("Kick")');
     ok(hasKick ? 'Owner accounts table exposes Kick/Ban/Terminate' : 'no Kick button (master empty or Accounts tab) — OK');
     where = 'role-gate-key';
+    await p.click('#console-mode [data-surface="host"]');
+    await p.waitForSelector('.nav-item[data-id="hosting"]');
+    expect(/[?&]mode=host(?:&|$)/.test(await p.evaluate(() => location.search)), 'Host mode writes ?mode=host');
     const created = await p.evaluate(async () => {
-      const r = await fetch('/v1/keys', { method: 'POST', headers: { Authorization: 'Bearer ' + sessionStorage.getItem('redx.key'), 'Content-Type': 'application/json', 'X-RedX-Confirm': 'createKey' }, body: JSON.stringify({ db: 'default', scope: 'read', label: 'limited' }) });
-      const b = await r.json().catch(() => ({}));
-      return { status: r.status, key: b.key || '' };
+      const headers = { Authorization: 'Bearer ' + sessionStorage.getItem('redx.key'), 'Content-Type': 'application/json', 'X-RedX-Confirm': 'createKey' };
+      const mint = async (label) => {
+        const r = await fetch('/v1/keys', { method: 'POST', headers, body: JSON.stringify({ db: 'default', scope: 'read', label }) });
+        const b = await r.json().catch(() => ({}));
+        return { status: r.status, key: b.key || '' };
+      };
+      return { a: await mint('limited-a'), b: await mint('limited-b') };
     });
-    expect(created.status === 201 && created.key.length > 8, 'owner created a db-scoped read key');
+    expect(created.a.status === 201 && created.a.key.length > 8 && created.b.status === 201 && created.b.key.length > 8, 'owner created two db-scoped read keys');
+    const signKey = async (k) => {
+      await p.evaluate((key) => {
+        sessionStorage.setItem('redx.key', key);
+        localStorage.setItem('redx.mode', 'advanced');
+        localStorage.setItem('redx.wizard', 'done');
+        location.hash = '#/dashboard';
+        location.reload();
+      }, k);
+      await p.waitForSelector('.shell', { timeout: 15000 });
+    };
+    const modeOf = async () => {
+      const who = await p.evaluate(async () => (await fetch('/v1/ui/whoami', { headers: { Authorization: 'Bearer ' + sessionStorage.getItem('redx.key') } })).json());
+      const stored = await p.evaluate((id) => localStorage.getItem('redx.consoleMode.' + id), who.id);
+      return { id: who.id, stored, search: await p.evaluate(() => location.search) };
+    };
     await p.click('.who');
     await p.waitForSelector('#acct-signin');
-    await p.evaluate((k) => {
-      sessionStorage.setItem('redx.key', k);
-      localStorage.setItem('redx.mode', 'advanced');
-      localStorage.setItem('redx.wizard', 'done');
-      location.hash = '#/dashboard';
-      location.reload();
-    }, created.key);
-    await p.waitForSelector('.shell', { timeout: 15000 });
+    expect(!/(?:^|[?&])mode=/.test(await p.evaluate(() => location.search)), 'account sign-out strips ?mode=');
+    where = 'mode-leak-account-key';
+    await signKey(created.a.key);
+    const keyA = await modeOf();
+    expect(await p.getAttribute('#console-mode [data-surface="database"]', 'aria-pressed') === 'true', 'a read key that never chose a mode stays in Database after an account Host URL');
+    expect(keyA.stored !== 'host', 'account Host mode is not saved onto the next key');
     const hiddenKey = ['owner', 'updates', 'keys', 'devices', 'apps', 'backups', 'cluster', 'presets', 'raw', 'policy'];
     for (const id of hiddenKey) expect(await p.$(`.nav-item[data-id="${id}"]`) === null, 'read key hides ' + id);
     expect(await p.$('.nav-item[data-id="watch"]') !== null, 'a read key can open Live Watch');
     expect(await p.$('.nav-item[data-id="hosting"]') === null, 'a read key starts in Database mode');
+    await p.click('#console-mode [data-surface="host"]');
+    await p.waitForSelector('.nav-item[data-id="hosting"]');
+    expect(await p.evaluate((id) => localStorage.getItem('redx.consoleMode.' + id), keyA.id) === 'host', 'the first read key can choose Host for itself');
+    await p.click('.who');
+    await p.waitForSelector('#acct-signin');
+    expect(!/(?:^|[?&])mode=/.test(await p.evaluate(() => location.search)), 'key sign-out strips ?mode=');
+    where = 'mode-leak-key-key';
+    await signKey(created.b.key);
+    const keyB = await modeOf();
+    expect(keyB.id !== keyA.id, 'the second key is a different user');
+    expect(await p.getAttribute('#console-mode [data-surface="database"]', 'aria-pressed') === 'true', 'a second read key stays in Database after the previous key Host URL');
+    expect(keyB.stored !== 'host', 'the previous key Host mode is not saved onto the next key');
+    expect(await p.evaluate((id) => localStorage.getItem('redx.consoleMode.' + id), keyA.id) === 'host', 'the first key keeps its own Host choice');
     await p.goto(url + '/#/hosting', { waitUntil: 'networkidle' });
     await p.waitForSelector('.nav-item[data-id="hosting"]');
     expect(await p.getAttribute('#console-mode [data-surface="host"]', 'aria-pressed') === 'true', 'opening Hosting selects Host mode');

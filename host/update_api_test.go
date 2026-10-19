@@ -687,3 +687,73 @@ func TestUpdateGitHubWebhookAndEvents(t *testing.T) {
 }
 
 func zeroCommit() string { return strings.Repeat("0", 40) }
+
+func TestWebhookReplayAfterHostPref(t *testing.T) {
+	dir := t.TempDir()
+	secretPath := filepath.Join(dir, "hook.secret")
+	const secret = "hook-secret-value"
+	if err := os.WriteFile(secretPath, []byte(secret+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	n := startNode(t, dir, func(c *host.Config, _ string) {
+		hostUpdate(c)
+		c.GithubWebhookSecretFile = secretPath
+	})
+	host.SetUpdateAllowLoopback(n.H, true)
+	st, body, _ := do(t, "PUT", n.URL+"/v1/updates/apps/widget/source", n.Key, `{"source":"host"}`, "Content-Type", "application/json")
+	if st != 200 {
+		t.Fatalf("set host %d %s", st, body)
+	}
+
+	blob := []byte("artifact-bytes")
+	sum := sha256.Sum256(blob)
+	sums := hex.EncodeToString(sum[:]) + "  widget-1.4.0-linux-amd64.tar.gz\n"
+	const rel = "/acme/widget/releases/download/v1.4.3/"
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		switch r.URL.Path {
+		case rel + "SHA256SUMS":
+			_, _ = w.Write([]byte(sums))
+		case rel + "widget-1.4.0-linux-amd64.tar.gz":
+			_, _ = w.Write(blob)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	commit := strings.Repeat("cd", 20)
+	payload := []byte(`{"action":"published","repository":{"full_name":"acme/widget"},"release":{"id":11,"tag_name":"v1.4.3","body":"while host","target_commitish":"` + commit + `","assets":[{"name":"SHA256SUMS","browser_download_url":"` + srv.URL + rel + `SHA256SUMS"},{"name":"widget-1.4.0-linux-amd64.tar.gz","browser_download_url":"` + srv.URL + rel + `widget-1.4.0-linux-amd64.tar.gz"}]}}`)
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(payload)
+	sig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+	post := func() (int, string) {
+		st, body, _ := do(t, "POST", n.URL+"/v1/updates/github/webhook", "", string(payload),
+			"Content-Type", "application/json", "X-Hub-Signature-256", sig, "X-GitHub-Event", "release", "X-GitHub-Delivery", "delivery-host-pref")
+		return st, body
+	}
+	st, body = post()
+	if st != 409 || errCode(t, body) != "not_hosted" {
+		t.Fatalf("pref host %d %s", st, body)
+	}
+	if hits != 0 {
+		t.Fatalf("pref host downloaded artifacts (%d hits)", hits)
+	}
+	st, body, _ = do(t, "GET", n.URL+"/v1/updates/apps/widget/manifests/1.4.3?source=github", n.Key, "")
+	if st != 404 {
+		t.Fatalf("manifest stored while pref host %d %s", st, body)
+	}
+
+	st, body, _ = do(t, "PUT", n.URL+"/v1/updates/apps/widget/source", n.Key, `{"source":"github"}`, "Content-Type", "application/json")
+	if st != 200 {
+		t.Fatalf("set github %d %s", st, body)
+	}
+	st, body = post()
+	if st != 202 {
+		t.Fatalf("replay after switch %d %s", st, body)
+	}
+	st, man, _ := do(t, "GET", n.URL+"/v1/updates/apps/widget/manifests/1.4.3?source=github", n.Key, "")
+	if st != 200 || !strings.Contains(man, `"kind":"github"`) {
+		t.Fatalf("github manifest %d %s", st, man)
+	}
+}

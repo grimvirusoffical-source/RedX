@@ -2,7 +2,11 @@
 
 ## Unreleased
 
-* Console: the header centre switches **Database** and **Host**. Database is the default and lists the database pages and Help. Host lists Plans & billing, Usage & quotas, Updates, and Logs (this account's activity). The owner audit log stays on the Owner page. The choice is remembered per signed-in user; `?mode=host` or `?mode=database` overrides it, and opening a host page selects Host.
+* Console: the header centre switches **Database** and **Host**. Database is the default and lists the database pages and Help. Host lists Plans & billing, Usage & quotas, Updates, and Logs (this account's activity). The owner audit log stays on the Owner page. The choice is remembered per signed-in user. `?mode=host` or `?mode=database` applies once, on the page load that opened it, and opening a host page selects Host. Signing out, or a rejected key, removes `?mode=` so the next sign-in in the same tab uses that person's own choice.
+* Console: when plan prices fail to load, Plans & billing says "Couldn't load plans, try again". "Hosting plans aren't on sale yet" stays the message when billing is turned off. Sign-up lists a two-factor option only when it is available, so Red-XAI Auth is not shown while it is still coming soon.
+* `GET /v1/owner/audit` returns 50 events by default and never more than 200.
+* `GET` of an update manifest with no `?source=` follows the app's source preference. When that preference is `github`, a host-only manifest is not used.
+* A GitHub release webhook while the source preference is `host` returns `409 not_hosted`. The delivery id is released, so the same `X-GitHub-Delivery` can be replayed after the source is switched.
 * Console: the sidebar and the router follow `pages` from `GET /v1/ui/whoami`. A page the server would refuse is not shown, and its address is Page not found. Hosting (`#/hosting`) is there for every signed-in session. Updates (`#/updates`) is there for host admins and owners. The owner audit log on the Owner page filters and pages through `GET /v1/owner/audit`. Hosting shows this account's own database activity (`GET /v1/hosting/activity`).
 * Updates: source `both` accepts a Host or GitHub manifest. Sequence stays one counter for the app across both sources, and the signature rules are unchanged. Choosing the source is still owner-only while Accounts is on.
 * An owner email that is signed in but not verified (or missing 2FA or the owner scope) is told, on that session only: "Owner access needs a verified email and 2FA. Verify your email, then sign in again."

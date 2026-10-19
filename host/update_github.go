@@ -768,6 +768,12 @@ func (u *updater) ingestRelease(ctx context.Context, base string, p gitHook) err
 	if already {
 		return errSkip
 	}
+	u.mu.Lock()
+	pref := u.sourcePref(u.appLocked(app))
+	u.mu.Unlock()
+	if !sourceAccepted(pref, "github") {
+		return errNotHosted
+	}
 	commit := p.Release.TargetCommitish
 	if !validCommit(commit) {
 		return errBadSig
