@@ -246,12 +246,29 @@ func (h *Host) ownerAccount(w http.ResponseWriter, r *http.Request, pr *Principa
 	writeErr(w, 404, "account not found")
 }
 
-// ownerAudit lists the owner trail (owner.* events) from this host's audit log, newest first.
+// ownerAudit lists this host's audit log, newest first.
+// GET /v1/owner/audit?event=&q=&limit=&offset=  — owner only. The read itself is audit-logged as owner.read.
 func (h *Host) ownerAudit(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 || limit > 1000 {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
 		limit = 200
 	}
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	if offset < 0 {
+		offset = 0
+	}
+	eventF := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("event")))
+	if len(eventF) > 80 {
+		eventF = eventF[:80]
+	}
+	q := r.URL.Query().Get("q")
+	if len(q) > 200 {
+		q = q[:200]
+	}
+	ql := strings.ToLower(q)
 	var events []map[string]interface{}
 	for _, p := range []string{h.Cfg.AuditLog + ".1", h.Cfg.AuditLog} {
 		b, err := os.ReadFile(p)
@@ -262,21 +279,41 @@ func (h *Host) ownerAudit(w http.ResponseWriter, r *http.Request) {
 		sc.Buffer(make([]byte, 64<<10), 1<<20)
 		for sc.Scan() {
 			var m map[string]interface{}
-			if json.Unmarshal(sc.Bytes(), &m) == nil && strings.HasPrefix(str(m["event"]), "owner.") {
-				events = append(events, m)
+			if json.Unmarshal(sc.Bytes(), &m) != nil || !auditMatch(m, eventF, ql) {
+				continue
 			}
+			events = append(events, m)
 		}
-	}
-	if len(events) > limit {
-		events = events[len(events)-limit:]
 	}
 	for i, j := 0, len(events)-1; i < j; i, j = i+1, j-1 {
 		events[i], events[j] = events[j], events[i]
 	}
+	total := len(events)
+	if offset > total {
+		offset = total
+	}
+	events = events[offset:]
+	if len(events) > limit {
+		events = events[:limit]
+	}
 	if events == nil {
 		events = []map[string]interface{}{}
 	}
-	writeJSON(w, 200, map[string]interface{}{"events": events})
+	writeJSON(w, 200, map[string]interface{}{"events": events, "total": total, "limit": limit, "offset": offset})
+}
+
+func auditMatch(m map[string]interface{}, eventF, q string) bool {
+	ev := strings.ToLower(str(m["event"]))
+	if eventF != "" && !strings.Contains(ev, eventF) {
+		return false
+	}
+	if q == "" {
+		return true
+	}
+	blob := strings.ToLower(strings.Join([]string{
+		ev, str(m["actor"]), str(m["target"]), str(m["route"]), str(m["reason"]), str(m["detail"]), str(m["key_id"]), str(m["db"]),
+	}, "\n"))
+	return strings.Contains(blob, q)
 }
 
 func str(v interface{}) string { s, _ := v.(string); return s }

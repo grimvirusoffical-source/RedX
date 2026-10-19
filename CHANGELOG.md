@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+* Console: the sidebar and the router follow `pages` from `GET /v1/ui/whoami`. A page the server would refuse is not shown, and its address is Page not found. Hosting (`#/hosting`) is there for every signed-in session. Updates (`#/updates`) is there for host admins and owners. The owner audit log on the Owner page filters and pages through `GET /v1/owner/audit`. Hosting shows this account's own database activity (`GET /v1/hosting/activity`).
+* Updates: source `both` accepts a Host or GitHub manifest. Sequence stays one counter for the app across both sources, and the signature rules are unchanged. Choosing the source is still owner-only while Accounts is on.
+* An owner email that is signed in but not verified (or missing 2FA or the owner scope) is told, on that session only: "Owner access needs a verified email and 2FA. Verify your email, then sign in again."
 * Hosted tenants: an API key minted for an account follows the plan gate. After the plan is read-only or suspended, that key gets the same `402` as the console session, and quota checks still apply. Host-admin keys and owner sessions are unchanged.
 * Hosted tenants: a signed-in non-owner with an active or trialing RedX Hosted plan creates and uses only its own databases and API keys. Names are namespaced. Quotas (traffic, on-disk storage, host switches) are enforced. A lapsed plan becomes read-only for 3 days after period end, then suspended; databases are kept. See [billing](docs/billing.md) and [API](docs/api.md).
 * `trusted_proxies` / `REDX_TRUSTED_PROXIES`: when the direct peer is listed, client IP for rate limits and audit comes from `X-Forwarded-For` (rightmost untrusted hop) or `X-Real-IP`. Other peers cannot spoof it.

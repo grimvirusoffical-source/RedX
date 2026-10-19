@@ -362,9 +362,59 @@ func (h *Host) whoami(w http.ResponseWriter, r *http.Request) {
 	}
 	k := pr.Key
 	out := map[string]interface{}{"id": k.ID, "label": k.Label, "scope": k.Scope, "db": k.DB, "prefix": k.Prefix, "roles": k.Roles,
-		"host_admin": k.IsHostAdmin(), "role": roleName(h.Cluster), "version": Version, "owner": pr.IsOwner()}
+		"host_admin": k.IsHostAdmin(), "role": roleName(h.Cluster), "version": Version, "owner": pr.IsOwner(),
+		"accounts": h.AccountsEnabled(), "pages": h.consolePages(pr)}
 	if pr.Account != nil {
 		out["account"] = accountView(pr.Account)
 	}
 	writeJSON(w, 200, out)
+}
+
+// consolePages is the only list the console may use to show or open a page.
+// It mirrors the server gates. owner is true only for IsOwner (verified email, 2FA, owner scope).
+// Key.Owner is an account id and is never treated as the owner role.
+func (h *Host) consolePages(pr *Principal) map[string]bool {
+	hostAdmin := pr != nil && pr.Key.IsHostAdmin()
+	owner := pr != nil && pr.IsOwner()
+	adminScope := pr != nil && pr.Key.Scope == ScopeAdmin
+	readScope := pr != nil && scopeRank[pr.Key.Scope] >= scopeRank[ScopeRead]
+	mode, known := "none", false
+	if pr != nil && pr.isTenant() {
+		mode, known = h.tenantAccess(pr.Account.Sub)
+	}
+	keys := adminScope
+	if pr != nil && pr.isTenant() && (known || mode != "none") {
+		keys = true
+	}
+	watch := readScope || hostAdmin
+	raw := adminScope
+	if mode == "full" || mode == "readonly" {
+		watch = true
+	}
+	if mode == "full" {
+		raw = true
+	}
+	backups := hostAdmin && pr.SeesEverything()
+	return map[string]bool{
+		"dashboard": true,
+		"databases": true,
+		"data":      true,
+		"studio":    true,
+		"hosting":   true,
+		"settings":  true,
+		"help":      true,
+		"keys":      keys,
+		"devices":   hostAdmin,
+		"apps":      hostAdmin,
+		"backups":   backups,
+		"watch":     watch,
+		"raw":       raw,
+		"policy":    raw,
+		"cluster":   hostAdmin,
+		"presets":   hostAdmin,
+		"wizard":    hostAdmin,
+		"connect":   hostAdmin,
+		"updates":   hostAdmin || owner,
+		"owner":     owner,
+	}
 }

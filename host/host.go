@@ -41,6 +41,7 @@ type Host struct {
 	oidc        *oidcClient      // Red-XAI Accounts OIDC relying party (accounts_oidc.go)
 	billing     *billing.Service // RedX Hosted plans on Stripe (billing_api.go)
 	tenants     *tenantStore     // which hosted account owns which database (tenant.go)
+	activity    *activityLog     // per-tenant request counts (activity.go); never crosses accounts
 	webSetup    bool             // an empty keystore may be set up from the browser (loopback only)
 	bootMu      sync.Mutex       // serialises the web bootstrap
 	runMu       sync.Mutex
@@ -129,6 +130,7 @@ func New(cfg Config, opener Opener, logf func(string, ...interface{})) (*Host, e
 	if h.tenants, err = openTenants(filepath.Join(cfg.DataDir, "tenants.json")); err != nil {
 		return fail(err)
 	}
+	h.activity = newActivityLog()
 	h.Tracker = NewTTLTracker(filepath.Join(cfg.DataDir, "cluster", "ttl.json"))
 	if h.Cluster, err = newCluster(h); err != nil {
 		return fail(err)

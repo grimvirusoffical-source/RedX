@@ -64,7 +64,7 @@ with `python3 assets/icons/make.py`; it needs Node, playwright-core, Chrome and 
 ## 2. Pages
 
 *Simple mode* (default) shows the everyday pages; *Advanced* (toggle in the sidebar and Settings) adds the
-rest. Keyboard: `Tab`/`Shift+Tab` everywhere, `Ctrl+Enter` runs a BoxQL query, `Ctrl+S` saves a record or file,
+rest. The sidebar lists only the pages `GET /v1/ui/whoami` marks with `pages.<id>: true`. Opening any other address shows **Page not found**. The server still answers 403 on the API. Keyboard: `Tab`/`Shift+Tab` everywhere, `Ctrl+Enter` runs a BoxQL query, `Ctrl+S` saves a record or file,
 `Esc` closes dialogs. The theme switcher (moon / monitor / sun) is in the top bar; layout is responsive down to phone width.
 See *Appearance* below.
 
@@ -72,6 +72,8 @@ See *Appearance* below.
 |---|---|---|
 | **Dashboard** | live requests/s and latency sparklines, databases, keys, uptime, cluster role, recent audit events, *Get started* checklist | `redx stats`, `redx doctor`, `curl .../v1/admin/status` |
 | **Databases** | create (name validated), list files per database, delete with typed-name confirmation (`DELETE /v1/db/{name}?confirm=name`) | `redx db create`, `redx db list` (dropping is `curl -X DELETE ...?confirm=NAME`) |
+| **Hosting** | plans and prices from the host, monthly or annual, current plan and access (`full`, `readonly`, `suspended`, `none`), usage against the tier quotas, create a hosted database (logical name and physical name), and this account's own database activity | `GET /v1/billing/plans`, `GET /v1/billing/me`, `GET /v1/hosting/activity` |
+| **Updates** *(host admin and owner)* | installed version and sequence, manifest signature, update source (Host, GitHub, or Both), plan then apply, canary and blue-green health, snapshots and restore, public signing keys, live status | `redx update` |
 | **Data Explorer** | file/box tree with counts, paginated table, filter builder that **writes the BoxQL for you**, record editor (Box text or JSON), TTL and sliding TTL, new record (next free ID), delete, *Open in Studio* | `redx get/set/del`, `redx bx` |
 | **BoxQL Studio** | own editor with syntax highlighting, context-aware autocomplete (verbs, files, boxes, fields, options), `$param` inputs, `Ctrl+Enter`, **Explain**, Table / JSON / Box-text results, history, saved queries, cheat-sheet, snippets, errors with `line:col` squiggles | `redx bx '...' --param/--sparam` |
 | **Live Watch** *(Advanced)* | WebSocket to `bx/watch` or a topic, pause, clear, download, 500-event cap, auto-reconnect | `redx bx '{Watch[]} = ...'` / `websocat` |

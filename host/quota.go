@@ -14,6 +14,7 @@ func writeQuotaErr(w http.ResponseWriter, err error) bool {
 	if !errors.As(err, &qe) {
 		return false
 	}
+	noteReason(w, "quota_exceeded")
 	writeJSON(w, qe.HTTP, map[string]string{
 		"error": qe.Code, "code": "quota_exceeded", "limit": qe.Code, "message": qe.Message, "upgrade": "/ui/billing.html",
 	})

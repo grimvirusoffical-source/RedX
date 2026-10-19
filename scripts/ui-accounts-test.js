@@ -147,6 +147,20 @@ const OWNER = 'owner@example.com'; // placeholder; real owner addresses live in 
     expect(/grim_player1/.test(await p.textContent('.who')), 'signed in: the account name is shown');
     expect(await p.$('.nav-item[data-id="owner"]') === null, 'a regular account has no Owner page');
     expect(await p.isVisible('#account-card'), 'regular dashboard explains the account has no databases yet');
+    where = 'role-gate-account';
+    await p.evaluate(() => localStorage.setItem('redx.mode', 'advanced'));
+    await p.reload({ waitUntil: 'networkidle' });
+    await p.waitForSelector('.shell');
+    const hiddenAccount = ['owner', 'updates', 'keys', 'devices', 'apps', 'backups', 'cluster', 'presets', 'raw', 'policy', 'watch'];
+    for (const id of hiddenAccount) expect(await p.$(`.nav-item[data-id="${id}"]`) === null, 'regular account hides ' + id);
+    expect(await p.$('.nav-item[data-id="hosting"]') !== null, 'hosting is in the nav for a signed-in account');
+    await p.goto(url + '/#/owner', { waitUntil: 'networkidle' });
+    await p.waitForSelector('#page-missing');
+    const missing = await p.textContent('#page-missing');
+    expect(/Page not found/.test(missing) && !missing.includes(OWNER), 'direct #/owner is not-found and does not name an owner');
+    await p.goto(url + '/#/hosting', { waitUntil: 'networkidle' });
+    await p.waitForSelector('#hosting-off');
+    expect(/Hosting plans aren't on sale yet/.test(await p.textContent('#hosting-page')), 'billing off says plans are not on sale');
     const regStatus = await p.evaluate(async () => (await fetch('/v1/owner/accounts', { headers: { Authorization: 'Bearer ' + sessionStorage.getItem('redx.key') } })).status);
     expect(regStatus === 403, 'owner API refuses a regular account (403)');
     await p.click('.who');
@@ -189,6 +203,30 @@ const OWNER = 'owner@example.com'; // placeholder; real owner addresses live in 
     where = 'owner-moderation';
     const hasKick = await p.$('button:has-text("Kick")');
     ok(hasKick ? 'Owner accounts table exposes Kick/Ban/Terminate' : 'no Kick button (master empty or Accounts tab) — OK');
+    where = 'role-gate-key';
+    const created = await p.evaluate(async () => {
+      const r = await fetch('/v1/keys', { method: 'POST', headers: { Authorization: 'Bearer ' + sessionStorage.getItem('redx.key'), 'Content-Type': 'application/json', 'X-RedX-Confirm': 'createKey' }, body: JSON.stringify({ db: 'default', scope: 'read', label: 'limited' }) });
+      const b = await r.json().catch(() => ({}));
+      return { status: r.status, key: b.key || '' };
+    });
+    expect(created.status === 201 && created.key.length > 8, 'owner created a db-scoped read key');
+    await p.click('.who');
+    await p.waitForSelector('#acct-signin');
+    await p.evaluate((k) => {
+      sessionStorage.setItem('redx.key', k);
+      localStorage.setItem('redx.mode', 'advanced');
+      localStorage.setItem('redx.wizard', 'done');
+      location.hash = '#/dashboard';
+      location.reload();
+    }, created.key);
+    await p.waitForSelector('.shell', { timeout: 15000 });
+    const hiddenKey = ['owner', 'updates', 'keys', 'devices', 'apps', 'backups', 'cluster', 'presets', 'raw', 'policy'];
+    for (const id of hiddenKey) expect(await p.$(`.nav-item[data-id="${id}"]`) === null, 'read key hides ' + id);
+    expect(await p.$('.nav-item[data-id="watch"]') !== null, 'a read key can open Live Watch');
+    expect(await p.$('.nav-item[data-id="hosting"]') !== null, 'a read key sees Hosting');
+    await p.goto(url + '/#/owner', { waitUntil: 'networkidle' });
+    await p.waitForSelector('#page-missing');
+    expect(/Page not found/.test(await p.textContent('#page-missing')), 'direct #/owner is not-found for a read key');
     await ctx.close();
   } catch (e) {
     fail('exception: ' + (e && e.stack || e));

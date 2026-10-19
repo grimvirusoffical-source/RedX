@@ -2,14 +2,14 @@
 // trail. Only owner logins (owner email + verified + signed in with 2FA) can open it; every read is audit-logged.
 import { h, icon, chip, table, errorBox, spinner, mount, debounce, fmtTime, dialog, confirmTyped, toast, field } from '../util.js';
 import { api } from '../api.js';
-import { state, setDb } from '../state.js';
+import { state, setDb, isOwner } from '../state.js';
 import { pageHead, page } from './shared.js';
 
 const when = (ms) => (ms ? fmtTime(new Date(ms)) : '–');
 
 export default async function render({ navigate }) {
   const root = page();
-  if (!state.who || !state.who.owner) {
+  if (!isOwner()) {
     root.append(pageHead('Owner', ''), errorBox('This page is only for owner logins.'));
     return root;
   }
@@ -22,7 +22,7 @@ export default async function render({ navigate }) {
       stat('Master DB', ov.master_db, ov.master_exists ? 'protected: owners only' : 'not created yet'),
       stat('Signed in as', state.who.account.username || state.who.account.email, 'owner · 2FA')));
 
-  const tabs = [['accounts', 'Accounts'], ['dbs', 'Databases'], ['audit', 'Owner audit trail']];
+  const tabs = [['accounts', 'Accounts'], ['dbs', 'Databases'], ['audit', 'Audit log']];
   const body = h('div', { id: 'owner-body' });
   const bar = h('div', { class: 'tabs', role: 'tablist' }, tabs.map(([id, label]) => h('button', { class: 'tab', role: 'tab', id: 'owner-tab-' + id, 'data-tab': id, onclick: () => show(id) }, label)));
   root.append(bar, body);
@@ -64,9 +64,32 @@ export default async function render({ navigate }) {
   }
 
   async function audit() {
-    const r = await api('GET', '/v1/owner/audit?limit=300');
-    return table(['Time', 'Event', 'Owner', 'Target', 'Method'], r.events.map((e) => h('tr', null,
-      h('td', null, e.time ? fmtTime(new Date(e.time)) : ''), h('td', null, e.event), h('td', null, e.actor || ''), h('td', null, h('code', null, e.target || e.route || '')), h('td', null, e.method || ''))));
+    const event = h('input', { class: 'input', id: 'audit-event', 'aria-label': 'Filter by event', placeholder: 'Event contains' });
+    const q = h('input', { class: 'input', id: 'audit-q', 'aria-label': 'Search the audit log', placeholder: 'Search actor, route, reason' });
+    const out = h('div', { id: 'audit-log' });
+    const info = h('p', { class: 'muted small', id: 'audit-count' });
+    let offset = 0;
+    const limit = 50;
+    async function load() {
+      const qs = new URLSearchParams({ limit: String(limit), offset: String(offset), event: event.value.trim(), q: q.value.trim() });
+      const r = await api('GET', '/v1/owner/audit?' + qs.toString());
+      const events = r.events || [];
+      const total = r.total || 0;
+      info.textContent = total + ' event(s)';
+      prev.disabled = offset <= 0;
+      next.disabled = offset + events.length >= total;
+      mount(out, events.length ? table(['Time', 'Event', 'Owner', 'Target', 'Method'], events.map((e) => h('tr', null,
+        h('td', null, e.time ? fmtTime(new Date(e.time)) : ''), h('td', null, e.event || ''), h('td', null, e.actor || ''),
+        h('td', null, h('code', null, e.target || e.route || '')), h('td', null, e.method || ''))))
+        : h('p', { class: 'muted' }, 'No matching audit events.'));
+    }
+    const prev = h('button', { class: 'btn small', type: 'button', 'aria-label': 'Previous page', onclick: () => { offset = Math.max(0, offset - limit); load().catch((e) => mount(out, errorBox(e.message))); } }, 'Previous');
+    const next = h('button', { class: 'btn small', type: 'button', 'aria-label': 'Next page', onclick: () => { offset += limit; load().catch((e) => mount(out, errorBox(e.message))); } }, 'Next');
+    const apply = h('button', { class: 'btn small', type: 'button', 'aria-label': 'Apply audit filters', onclick: () => { offset = 0; load().catch((e) => mount(out, errorBox(e.message))); } }, 'Apply');
+    await load();
+    return h('div', null,
+      h('p', { class: 'muted small' }, 'Every owner view is in this log, with the acting owner. Filters match this host only.'),
+      h('div', { class: 'row gap wrap' }, event, q, apply, prev, next), info, out);
   }
   async function moderate(a, action) {
     const reason = h('input', { class: 'input', id: 'mod-reason', placeholder: 'Reason the person will see', maxlength: '500' });

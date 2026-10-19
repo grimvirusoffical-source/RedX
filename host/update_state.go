@@ -424,6 +424,19 @@ func (u *updater) sourcePref(a *appState) string {
 	return "github"
 }
 
+// sourceAccepted reports whether pref (host, github, or both) allows a manifest of kind.
+// both takes either source. Sequence stays one counter for the app; signatures are unchanged.
+func sourceAccepted(pref, kind string) bool {
+	switch pref {
+	case "host":
+		return kind == "host"
+	case "both":
+		return kind == "host" || kind == "github"
+	default:
+		return kind == "github"
+	}
+}
+
 func (u *updater) emit(ev UpdateEvent) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -485,6 +498,9 @@ func (u *updater) putManifest(m *Manifest) (body []byte, sig string, created boo
 	key := manifestKey(m.App, m.Version, m.Source.Kind)
 	if sm := u.st.Manifests[key]; sm != nil {
 		return sm.Body, sm.Sig, false, nil
+	}
+	if !sourceAccepted(u.sourcePref(a), m.Source.Kind) {
+		return nil, "", false, errNotHosted
 	}
 	if seq, ok := u.seqForVersionLocked(m.App, m.Version); ok {
 		m.Sequence = seq
@@ -707,24 +723,25 @@ func (u *updater) chooseSource(app, version, want string) (string, error) {
 		}
 		return want, nil
 	case "":
-		h, g := has("host"), has("github")
-		switch {
-		case h && g:
-			pref := u.sourcePref(u.appLocked(app))
-			if pref == "github" {
+		pref := u.sourcePref(u.appLocked(app))
+		switch pref {
+		case "host":
+			if has("host") {
+				return "host", nil
+			}
+			return "", os.ErrNotExist
+		case "both":
+			if has("host") {
+				return "host", nil
+			}
+			if has("github") {
 				return "github", nil
 			}
-			if pref == "host" || pref == "both" {
-				if h {
-					return "host", nil
-				}
-			}
-			return "host", nil
-		case h:
-			return "host", nil
-		case g:
-			return "github", nil
+			return "", os.ErrNotExist
 		default:
+			if has("github") {
+				return "github", nil
+			}
 			return "", os.ErrNotExist
 		}
 	default:
