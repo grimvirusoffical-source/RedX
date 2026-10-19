@@ -379,23 +379,22 @@ class RedX(Operations):
                    roles: Optional[list] = None, confirm: bool = False) -> dict:
         """Create an API key (needs an admin key). The returned ``key`` is shown once; store it.
 
-        This is a dangerous operation: pass confirm=True (without it a DeprecationWarning is issued;
-        a later release will refuse)."""
-        if not confirm:
-            _unconfirmed("create_key")
+        This is a dangerous operation: pass confirm=True."""
+        if confirm is not True:
+            raise RedXError(0, "create_key is a dangerous operation and needs confirm=True", code="confirm_required")
         body: Dict[str, Any] = {"db": db or self.db or "default", "scope": scope}
         for k, v in (("prefix", prefix), ("label", label), ("ttl", ttl), ("rate_rps", rate_rps), ("rate_burst", rate_burst)):
             if v is not None:
                 body[k] = v
         if roles is not None:
             body["roles"] = roles
-        return self._json("POST", "/v1/keys", body=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
+        return self.call("createKey", body=body, confirm=True)
 
     def revoke_key(self, key_id: str, *, confirm: bool = False) -> dict:
-        """Revoke a key (dangerous: pass confirm=True; see create_key)."""
-        if not confirm:
-            _unconfirmed("revoke_key")
-        return self._json("DELETE", f"/v1/keys/{quote(key_id, safe='')}")
+        """Revoke a key (dangerous: pass confirm=True)."""
+        if confirm is not True:
+            raise RedXError(0, "revoke_key is a dangerous operation and needs confirm=True", code="confirm_required")
+        return self.call("revokeKey", id=key_id, confirm=True)
 
     def subscribe(self, path: str, handler: Optional[Callable[[dict], None]] = None, *,
                   on_error: Optional[Callable[[BaseException], None]] = None,
@@ -451,6 +450,8 @@ class RedX(Operations):
             raise TypeError(f"{op['id']} is a stream: use stream()")
         _check_danger(op, confirm)
         h = dict(headers or {})
+        if confirm is True:
+            h["X-RedX-Confirm"] = op["id"]
         data: Optional[bytes] = None
         if op["request"] == "json":
             data = json.dumps({} if body is None else body).encode()

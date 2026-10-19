@@ -68,7 +68,7 @@ Each operation carries a machine-readable danger level (spec field `danger`; Ope
 | `admin` | 2 | host or key administration | developer tool |
 | `dangerous` | 3 | can lose data or hand out access: delete database, create/revoke/rotate key, pairing codes, policy changes, join tokens, promote, repoint, approve a connect request, revoke an app | developer tool |
 
-`dangerous` calls are refused by the SDK, without sending anything, unless you pass `confirm: true` (error code `confirm_required`, status 0). `deleteDatabase` with `confirm` also sends the host's own `?confirm=<db>`.
+`dangerous` calls are refused by the SDK, without sending anything, unless you pass `confirm: true` (error code `confirm_required`, status 0). When confirmed, every SDK sends the header `X-RedX-Confirm: <operation-id>`; the host refuses the same call with HTTP **428** and `code: "confirm_required"` if that header (or `?confirm=<operation-id>`) is missing. `deleteDatabase` with `confirm` also still sends the host's own `?confirm=<db>`, which by itself remains enough for that one operation.
 
 ## Streams
 
@@ -88,7 +88,7 @@ TLS pinning (`pin`: SHA-256 hex of the server certificate) is available in Go, t
 
 The existing `sdk/js` and `sdk/python` APIs keep working. Changes:
 
-* `createKey`/`create_key` and `revokeKey`/`revoke_key` are `dangerous`. They still run without `confirm` for now but emit a deprecation warning once; pass `confirm: true` (`confirm=True`). Generated dangerous calls require it.
+* `createKey`/`create_key` and `revokeKey`/`revoke_key` are `dangerous` and need `confirm: true` (`confirm=True`), like every other dangerous operation. Without it the SDK refuses locally; without the `X-RedX-Confirm` header the host refuses with 428.
 * `health`, `stats`, `bx`, `createKey` and `revokeKey` keep their hand-written signatures; the generated methods for the other operations are added beside them.
 * Streams can reconnect (`reconnect`, `onReconnect`/`on_reconnect`); the default is still no reconnect.
 * `RedXError` gained `code`. JS ships TypeScript types (`redx.d.ts`).

@@ -157,6 +157,7 @@ public final class RedXClient: CustomStringConvertible, @unchecked Sendable {
         default: break
         }
         if op.response == "text" { req.setValue("text/x-redx-box", forHTTPHeaderField: "Accept") }
+        if confirm { req.setValue(id, forHTTPHeaderField: "X-RedX-Confirm") }
         for (k, v) in headers { req.setValue(v, forHTTPHeaderField: k) }
         let (data, resp): (Data, URLResponse)
         do { (data, resp) = try await session.data(for: req) } catch {

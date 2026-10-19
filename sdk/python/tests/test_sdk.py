@@ -19,7 +19,7 @@ def setUpModule():
     admin = RedX(host.url, host.admin_key)
 
     def mk(**kw):
-        return RedX(host.url, admin.create_key(db="default", **kw)["key"])
+        return RedX(host.url, admin.create_key(db="default", confirm=True, **kw)["key"])
 
     rw = mk(scope="write", label="sdk-rw", rate_rps=1000, rate_burst=1000)
     ro = mk(scope="read", label="sdk-ro", rate_rps=1000, rate_burst=1000)
@@ -186,7 +186,7 @@ class ClientTests(unittest.TestCase):
             ro.delete(P1)
         self.assertEqual(cm.exception.status, 403)
         with self.assertRaises(RedXError) as cm:
-            rw.create_key(scope="read")
+            rw.create_key(scope="read", confirm=True)
         self.assertEqual(cm.exception.status, 403)
         rw.set(P1, {"Name": "ro-can-read"})
         self.assertEqual(ro.get(P1 + ".Name"), "ro-can-read")
@@ -204,7 +204,7 @@ class ClientTests(unittest.TestCase):
         self.assertNotIn(host.admin_key, str(cm.exception))
 
     def test_rate_limit(self):
-        slow = RedX(host.url, admin.create_key(db="default", scope="read", rate_rps=1, rate_burst=1)["key"])
+        slow = RedX(host.url, admin.create_key(db="default", scope="read", rate_rps=1, rate_burst=1, confirm=True)["key"])
         hit = None
         for _ in range(10):
             try:

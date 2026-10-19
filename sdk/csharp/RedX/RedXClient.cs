@@ -221,6 +221,7 @@ namespace RedX
             }
             req.Content = content;
             if (op.Response == "text") req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/x-redx-box"));
+            if (confirm) req.Headers.TryAddWithoutValidation("X-RedX-Confirm", opId);
             if (headers != null) foreach (var kv in headers) req.Headers.TryAddWithoutValidation(kv.Key, kv.Value);
             HttpResponseMessage res;
             try { res = await http.SendAsync(req, ct).ConfigureAwait(false); }

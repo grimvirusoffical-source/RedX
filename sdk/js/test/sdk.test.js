@@ -23,7 +23,7 @@ let host, admin, rw, ro, scoped;
 test.before(async () => {
   host = await startHost();
   admin = new RedX({ url: host.url, key: host.adminKey });
-  const mk = async (o) => new RedX({ url: host.url, key: (await admin.createKey({ db: 'default', ...o })).key });
+  const mk = async (o) => new RedX({ url: host.url, key: (await admin.createKey({ db: 'default', ...o, confirm: true })).key });
   rw = await mk({ scope: 'write', label: 'sdk-rw', rateRps: 1000, rateBurst: 1000 });
   ro = await mk({ scope: 'read', label: 'sdk-ro', rateRps: 1000, rateBurst: 1000 });
   scoped = await mk({ scope: 'write', prefix: 'sess.', label: 'sdk-prefix' });
@@ -161,7 +161,7 @@ test('auth: invalid key, read-only key, prefix key', async () => {
   assert.ok(errs.every((m) => !m.includes('A'.repeat(20))));
   await assert.rejects(ro.set(P1, { Name: 'x' }), (e) => e.status === 403 && e.forbidden);
   await assert.rejects(ro.delete(P1), (e) => e.status === 403);
-  await assert.rejects(rw.createKey({ scope: 'read' }), (e) => e.status === 403);
+  await assert.rejects(rw.createKey({ scope: 'read', confirm: true }), (e) => e.status === 403);
   await rw.set(P1, { Name: 'ro-can-read' });
   assert.equal(await ro.get(P1 + '.Name'), 'ro-can-read');
   // prefix-restricted key: inside prefix ok, outside refused, no /v1/query
@@ -174,7 +174,7 @@ test('auth: invalid key, read-only key, prefix key', async () => {
 });
 
 test('rate limit: 429 with retryAfter', async () => {
-  const slow = new RedX({ url: host.url, key: (await admin.createKey({ db: 'default', scope: 'read', rateRps: 1, rateBurst: 1 })).key });
+  const slow = new RedX({ url: host.url, key: (await admin.createKey({ db: 'default', scope: 'read', rateRps: 1, rateBurst: 1, confirm: true })).key });
   let hit = null;
   for (let i = 0; i < 10 && !hit; i++) {
     try { await slow.stats(); } catch (e) { hit = e; }

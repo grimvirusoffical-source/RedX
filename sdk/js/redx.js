@@ -214,7 +214,7 @@ class RedX {
 
   /** Create an API key (needs an admin key). The returned `key` is shown once; store it. */
   createKey({ db, scope, prefix, label, ttl, rateRps, rateBurst, roles, confirm } = {}) {
-    if (confirm !== true) unconfirmed('createKey');
+    if (confirm !== true) throw new RedXError(0, 'createKey is a dangerous operation and needs confirm: true', { code: 'confirm_required' });
     const body = { db: db ?? this.db ?? 'default', scope };
     if (prefix !== undefined) body.prefix = prefix;
     if (label !== undefined) body.label = label;
@@ -222,13 +222,13 @@ class RedX {
     if (rateRps !== undefined) body.rate_rps = rateRps;
     if (rateBurst !== undefined) body.rate_burst = rateBurst;
     if (roles !== undefined) body.roles = roles;
-    return this.#json('POST', '/v1/keys', { body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } });
+    return this.#json('POST', '/v1/keys', { body: JSON.stringify(body), headers: { 'Content-Type': 'application/json', 'X-RedX-Confirm': 'createKey' } });
   }
 
   /** Revoke a key by id (admin). */
   revokeKey(id, { confirm } = {}) {
-    if (confirm !== true) unconfirmed('revokeKey');
-    return this.#json('DELETE', `/v1/keys/${encodeURIComponent(id)}`);
+    if (confirm !== true) throw new RedXError(0, 'revokeKey is a dangerous operation and needs confirm: true', { code: 'confirm_required' });
+    return this.#json('DELETE', `/v1/keys/${encodeURIComponent(id)}`, { headers: { 'X-RedX-Confirm': 'revokeKey' } });
   }
 
   /**
@@ -256,6 +256,7 @@ class RedX {
     if (op.response === 'websocket') throw new TypeError(`${opId} is a WebSocket stream: use stream('${opId}', opts, handler)`);
     checkDanger(op, opts);
     const headers = { ...(opts.headers || {}) };
+    if (opts.confirm === true) headers['X-RedX-Confirm'] = op.id;
     let body;
     if (op.request === 'json') {
       body = JSON.stringify(opts.body === undefined ? {} : opts.body);

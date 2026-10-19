@@ -14,6 +14,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"redx/host"
 	"time"
 )
 
@@ -21,6 +23,9 @@ func httpDo(t *testing.T, method, url, key string, body []byte) (int, []byte, ht
 	t.Helper()
 	r, _ := http.NewRequest(method, url, bytes.NewReader(body))
 	r.Header.Set("Authorization", "Bearer "+key)
+	if op := host.MatchDangerous(method, r.URL.Path); op != nil {
+		r.Header.Set(host.ConfirmHeader, op.ID)
+	}
 	resp, err := http.DefaultClient.Do(r)
 	if err != nil {
 		t.Fatal(err)

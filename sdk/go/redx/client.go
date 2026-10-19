@@ -354,6 +354,9 @@ func (c *Client) Call(ctx context.Context, id string, a Args) (*Result, error) {
 	for k, vs := range a.Header {
 		h[k] = vs
 	}
+	if a.Confirm {
+		h.Set("X-RedX-Confirm", id)
+	}
 	var body io.Reader
 	switch op.Request {
 	case "json":

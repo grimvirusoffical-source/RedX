@@ -8,7 +8,7 @@
 * `GET /v1/dbs` (SDK `listDatabases`) works with database-scoped keys: a key lists only the databases in its scope, never the master accounts database (`redxai_accounts`); host-admin keys still see every database. It used to answer 403 for every key except host admin.
 * Windows: the `.exe` version resources (Properties > Details) are generated at build time from the release version and say "Copyright (c) 2026 Red-XAI LLC". 0.4.4's executables still said 0.4.3.0 and "RedX" (stale committed `.syso` files, which are no longer committed).
 * Every release asset ships the LICENSE: each archive, the Windows install folder (`LICENSE.txt`), `RedX.app/Contents/Resources/LICENSE` (and the .dmg), `/usr/local/share/doc/redx/LICENSE` from the .pkg, and `/usr/share/doc/redx/copyright` in the .debs.
-* Note: an SDK's `dangerous` confirm is a client-side safety prompt, not a server-enforced security boundary; a raw admin key can call those endpoints directly. The server enforces key scope.
+* **Breaking (raw HTTP admin clients):** every operation whose danger level is `dangerous` is refused by the **server** with HTTP 428 and `code: "confirm_required"` unless the request carries `X-RedX-Confirm: <operation-id>` (or `?confirm=<operation-id>`). `deleteDatabase`'s existing `?confirm=<db>` still works on its own. All SDKs, the CLI and the web console send the header after their existing prompts. The previous "client-side only" caveat is gone.
 
 ## 0.4.4
 
