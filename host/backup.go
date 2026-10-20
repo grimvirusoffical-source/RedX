@@ -287,11 +287,12 @@ func (c *Cluster) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 }
 
 // installSnapshot downloads and installs a full snapshot from the leader.
-func (c *Cluster) installSnapshot(ctx context.Context, leader string) error {
+// client is the connection pullOnce snapshotted under c.mu, so a concurrent Repoint cannot swap it mid-download.
+func (c *Cluster) installSnapshot(ctx context.Context, leader string, client *http.Client) error {
 	h := c.h
 	req, _ := http.NewRequestWithContext(ctx, "GET", leader+"/v1/cluster/snapshot", nil)
 	c.nodeHeaders(req)
-	cl := &http.Client{Transport: c.client.Transport} // no overall timeout: large transfers
+	cl := &http.Client{Transport: client.Transport} // no overall timeout: large transfers
 	resp, err := cl.Do(req)
 	if err != nil {
 		return err
