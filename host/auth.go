@@ -2,6 +2,7 @@ package host
 
 import (
 	"errors"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -183,6 +184,8 @@ func routeOf(r *http.Request) string {
 	return p
 }
 
+const failTrackerCap = 20000
+
 type failTracker struct {
 	mu     sync.Mutex
 	max    int
@@ -199,7 +202,18 @@ func newFailTracker(max int, w time.Duration) *failTracker {
 	return &failTracker{max: max, window: w, m: map[string]*failEnt{}}
 }
 
+// failBucket groups an address for failure counting: IPv4 per address, IPv6 per /64 (one
+// host usually controls a whole /64, so per-address counting would be trivially bypassed).
+func failBucket(addr string) string {
+	ip := net.ParseIP(addr)
+	if ip == nil || ip.To4() != nil {
+		return addr
+	}
+	return ip.Mask(net.CIDRMask(64, 128)).String() + "/64"
+}
+
 func (f *failTracker) blocked(ip string) time.Duration {
+	ip = failBucket(ip)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	e := f.m[ip]
@@ -217,12 +231,23 @@ func (f *failTracker) blocked(ip string) time.Duration {
 }
 
 func (f *failTracker) record(ip string) {
+	ip = failBucket(ip)
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if len(f.m) > 20000 {
-		f.m = map[string]*failEnt{}
-	}
 	e := f.m[ip]
+	if e == nil && len(f.m) >= failTrackerCap {
+		// Never wipe the table (that used to let an attacker flush every block by failing from
+		// 20k addresses). Drop only expired entries; if it is still full, the newcomer is not
+		// tracked but every existing block stays in force.
+		for k, v := range f.m {
+			if time.Since(v.start) >= f.window {
+				delete(f.m, k)
+			}
+		}
+		if len(f.m) >= failTrackerCap {
+			return
+		}
+	}
 	if e == nil || time.Since(e.start) >= f.window {
 		e = &failEnt{start: time.Now()}
 		f.m[ip] = e
