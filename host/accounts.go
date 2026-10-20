@@ -35,13 +35,15 @@ const DefaultAccountsMasterDB = "redxai_accounts"
 
 // Console session lifetimes.
 const (
-	acctSessionTTL  = 12 * time.Hour
-	acctSessionIdle = 2 * time.Hour
-	acctLoginTTL    = 10 * time.Minute
-	acctHandoffTTL  = 2 * time.Minute
-	acctSignupTTL   = 30 * time.Minute
-	acctMaxPending  = 10000
-	acctTokenPrefix = "rxs_"
+	acctSessionTTL      = 12 * time.Hour
+	acctSessionIdle     = 2 * time.Hour
+	acctLoginTTL        = 30 * time.Minute // PKCE sign-in and its cookie
+	acctLoginGrace      = time.Hour        // after the TTL, keep the record so a late callback is expired rather than a forged state
+	acctHandoffTTL      = 2 * time.Minute
+	acctSignupTTL       = 30 * time.Minute
+	acctMaxPending      = 10000
+	acctMaxPendingPerIP = 20 // live sign-ins per clientNetKey; expired and used records do not count
+	acctTokenPrefix     = "rxs_"
 )
 
 func (c *Config) validateAccounts() error {
@@ -225,8 +227,16 @@ type acctTokens struct {
 }
 
 type acctPending struct {
-	verifier, nonce, redirect, ret string
-	created                        time.Time
+	verifier, nonce, redirect, ret, prefix, clientIP string
+	created                                          time.Time
+	consumed                                         bool
+}
+
+// occupiesCap is a sign-in that still blocks a new one. The grace window keeps an
+// expired or used record so a late callback can be told apart from a forged state,
+// and those records do not take a slot. The live window is the cookie TTL.
+func (p *acctPending) occupiesCap(now time.Time) bool {
+	return p != nil && !p.consumed && now.Sub(p.created) <= acctLoginTTL
 }
 
 type acctHandoff struct {
@@ -276,7 +286,9 @@ func (s *accountStore) gcLocked() {
 		}
 	}
 	for k, v := range s.pending {
-		if now.Sub(v.created) > acctLoginTTL {
+		// Past the grace window the state is forgotten. Until then an expired
+		// record stays so a late callback can restart instead of looking forged.
+		if now.Sub(v.created) > acctLoginTTL+acctLoginGrace {
 			delete(s.pending, k)
 		}
 	}
@@ -298,22 +310,84 @@ func (s *accountStore) addPending(state string, p *acctPending) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.gcLocked()
-	if len(s.pending) >= acctMaxPending {
+	now := s.now()
+	live, fromIP := 0, 0
+	for _, v := range s.pending {
+		if !v.occupiesCap(now) {
+			continue
+		}
+		live++
+		if clientNetKey(v.clientIP) == clientNetKey(p.clientIP) {
+			fromIP++
+		}
+	}
+	if live >= acctMaxPending || fromIP >= acctMaxPendingPerIP {
 		return errTooMany
 	}
-	p.created = s.now()
+	p.created = now
+	p.prefix = oidcStatePrefix(state)
 	s.pending[tokHash(state)] = p
 	return nil
 }
 
-func (s *accountStore) takePending(state string) *acctPending {
+// consumePending takes a still-valid sign-in so it can be finished once.
+// The record stays (marked consumed) until the grace window ends.
+// kind is "live", "expired" (past the TTL, or already consumed), or "unknown".
+func (s *accountStore) consumePending(state string) (*acctPending, string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.gcLocked()
-	k := tokHash(state)
-	p := s.pending[k]
-	delete(s.pending, k)
-	return p
+	p := s.pending[tokHash(state)]
+	if p == nil {
+		return nil, "unknown"
+	}
+	if p.consumed || s.now().Sub(p.created) > acctLoginTTL {
+		p.consumed = true
+		return nil, "expired"
+	}
+	p.consumed = true
+	cp := *p
+	return &cp, "live"
+}
+
+// pendingKind reports a sign-in without consuming it: "live", "expired", or "unknown".
+func (s *accountStore) pendingKind(state string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.gcLocked()
+	p := s.pending[tokHash(state)]
+	if p == nil {
+		return "unknown"
+	}
+	if p.consumed || s.now().Sub(p.created) > acctLoginTTL {
+		return "expired"
+	}
+	return "live"
+}
+
+// pendingReturn is the console page stored for this sign-in, or "" when there is none.
+func (s *accountStore) pendingReturn(state string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p := s.pending[tokHash(state)]
+	if p == nil || !safeReturn(p.ret) {
+		return ""
+	}
+	return p.ret
+}
+
+// dropIfPresented forgets the sign-in whose own state cookie this request presented.
+// The index cookie is client-controlled, so a prefix listed there is not enough.
+func (s *accountStore) dropIfPresented(prefix, cookieValue string) {
+	if prefix == "" || cookieValue == "" || oidcStatePrefix(cookieValue) != prefix {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k := tokHash(cookieValue)
+	if p := s.pending[k]; p != nil && p.prefix == prefix {
+		delete(s.pending, k)
+	}
 }
 
 // newSession stores a console session and returns a single-use handoff code for the browser.

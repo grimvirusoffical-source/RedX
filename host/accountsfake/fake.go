@@ -31,6 +31,7 @@ type Identity struct {
 	AMR           []string `json:"amr"`
 	AgeBand       string   `json:"age_band"`
 	Error         string   `json:"error"`       // e.g. access_denied: authorize redirects back with this error
+	Login         string   `json:"login"`       // optional login echoed on an error redirect (email_unverified)
 	OwnerScope    bool     `json:"owner_scope"` // grant the "owner" scope when it is requested
 	// ProfileOnlyInUserinfo leaves email/email_verified/preferred_username out of the ID token (userinfo has them).
 	ProfileOnlyInUserinfo bool `json:"profile_only_in_userinfo"`
@@ -106,6 +107,28 @@ type Server struct {
 	Signups       []host.SignupRequest
 	Confirmed     []string
 	Tokens        int // successful token exchanges
+	// LegacySignup makes POST /v1/signup return a session (Accounts before v1.2).
+	LegacySignup bool
+	// EmailSendFails makes a v1.2 sign-up report emailSent: false.
+	EmailSendFails bool
+	// EmailResendAfter, when set, makes POST /v1/email/resend answer 429 with that Retry-After.
+	EmailResendAfter  string
+	EmailResendLogins []string
+	// ResumeIncludesTOTP attaches totp to a resumed sign-up so tests can prove the proxy drops it.
+	ResumeIncludesTOTP bool
+	Resumes            int
+	SignupCalls        int
+	// SignupStatus, when non-zero, makes POST /v1/signup return that status instead of creating an account.
+	SignupStatus  int
+	SignupCode    string
+	SignupMessage string
+	pendingAccts  []pendingAcct
+}
+
+// pendingAcct is one unverified sign-up. v1.2.1 does not reserve the email: another sign-up with the
+// same address is a second pending account, unless the email and password both match (a resume).
+type pendingAcct struct {
+	email, username, password, twoFactor string
 }
 
 // New returns a fake with one ES256 signing key.
@@ -122,6 +145,37 @@ func New() *Server {
 
 // SetNext sets the identity of the next sign-in.
 func (s *Server) SetNext(id Identity) { s.mu.Lock(); s.next = id; s.mu.Unlock() }
+
+// SetLegacySignup switches POST /v1/signup between v1.2 (no session) and a pre-v1.2 session.
+func (s *Server) SetLegacySignup(on bool) { s.mu.Lock(); s.LegacySignup = on; s.mu.Unlock() }
+
+// SetEmailSendFails controls emailSent on the next v1.2 sign-up responses.
+func (s *Server) SetEmailSendFails(on bool) {
+	s.mu.Lock()
+	s.EmailSendFails = on
+	s.mu.Unlock()
+}
+
+// SetEmailResendAfter makes /v1/email/resend return 429 with this Retry-After (empty = 200).
+func (s *Server) SetEmailResendAfter(after string) {
+	s.mu.Lock()
+	s.EmailResendAfter = after
+	s.mu.Unlock()
+}
+
+// SetResumeIncludesTOTP controls whether a resumed sign-up response includes totp.
+func (s *Server) SetResumeIncludesTOTP(on bool) {
+	s.mu.Lock()
+	s.ResumeIncludesTOTP = on
+	s.mu.Unlock()
+}
+
+// SetSignupError makes the next sign-ups return this status and error (status 0 clears it).
+func (s *Server) SetSignupError(status int, code, message string) {
+	s.mu.Lock()
+	s.SignupStatus, s.SignupCode, s.SignupMessage = status, code, message
+	s.mu.Unlock()
+}
 
 func rnd(p string) string {
 	b := make([]byte, 24)
@@ -197,12 +251,26 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("/v1/tos/agree", s.tosAgree)
 	m.HandleFunc("/v1/validate/", s.validate)
 	m.HandleFunc("/v1/signup", s.signup)
+	m.HandleFunc("/v1/email/resend", s.emailResend)
 	m.HandleFunc("/v1/me/2fa/confirm", s.confirm)
 	m.HandleFunc("/v1/signup/resend-sms", s.resend)
 	m.HandleFunc("/v1/logout", func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		delete(s.sessions, strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
 		s.mu.Unlock()
+		j(w, 200, map[string]bool{"ok": true})
+	})
+	m.HandleFunc("/fake/signup-error", func(w http.ResponseWriter, r *http.Request) {
+		var b struct {
+			Status  int    `json:"status"`
+			Error   string `json:"error"`
+			Message string `json:"message"`
+		}
+		if r.Method != "POST" || json.NewDecoder(r.Body).Decode(&b) != nil {
+			e(w, 400, "bad_request", "POST a sign-up error")
+			return
+		}
+		s.SetSignupError(b.Status, b.Error, b.Message)
 		j(w, 200, map[string]bool{"ok": true})
 	})
 	m.HandleFunc("/fake/next-login", func(w http.ResponseWriter, r *http.Request) {
@@ -245,6 +313,9 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 	v.Set("state", q.Get("state"))
 	if s.next.Error != "" {
 		v.Set("error", s.next.Error)
+		if s.next.Login != "" {
+			v.Set("login", s.next.Login)
+		}
 	} else {
 		c := rnd("c_")
 		s.codes[c] = &code{id: s.next, clientID: s.ClientID, redirect: redir, challenge: q.Get("code_challenge"), nonce: q.Get("nonce"), scope: q.Get("scope")}
@@ -546,29 +617,126 @@ func (s *Server) signup(w http.ResponseWriter, r *http.Request) {
 		e(w, 400, "tos_grant_invalid", "Agree to the terms again.")
 		return
 	}
+	em := strings.ToLower(strings.TrimSpace(b.Email))
+	s.SignupCalls++
+	if s.SignupStatus != 0 {
+		j(w, s.SignupStatus, map[string]string{"error": s.SignupCode, "message": s.SignupMessage, "detail": s.SignupMessage})
+		return
+	}
+	if !s.LegacySignup {
+		for _, p := range s.pendingAccts {
+			if p.email == em && p.password == b.Password {
+				g.used = true
+				s.Resumes++
+				kept := b
+				kept.Username, kept.TwoFactor = p.username, p.twoFactor
+				kept.Password, kept.PasswordConfirm = "(redacted)", "(redacted)"
+				j(w, 201, s.verifyOut(kept, true))
+				return
+			}
+		}
+	}
 	if s.taken[strings.ToLower(b.Username)] {
 		j(w, 409, map[string]string{"error": "username_taken", "message": "That username is taken.", "field": "username"})
 		return
 	}
-	if s.taken[strings.ToLower(b.Email)] {
+	// v1.1 reserved the address. v1.2.1 does not: a second pending sign-up may use the same email.
+	if s.LegacySignup && s.taken[em] {
 		j(w, 409, map[string]string{"error": "email_taken", "message": "That email is already used.", "field": "email"})
 		return
 	}
 	g.used = true
-	s.taken[strings.ToLower(b.Username)], s.taken[strings.ToLower(b.Email)] = true, true
+	s.taken[strings.ToLower(b.Username)] = true
+	if s.LegacySignup {
+		s.taken[em] = true
+	} else {
+		s.pendingAccts = append(s.pendingAccts, pendingAcct{email: em, username: b.Username, password: b.Password, twoFactor: b.TwoFactor})
+	}
 	b.Password, b.PasswordConfirm = "(redacted)", "(redacted)"
 	s.Signups = append(s.Signups, b)
-	sess := rnd("rxa_s_")
-	s.sessions[sess] = b.Username
-	out := map[string]interface{}{"account": map[string]interface{}{"id": rnd("rxa_"), "username": b.Username, "email": b.Email, "emailVerified": false},
-		"session": sess, "pending": []string{}}
+	if s.LegacySignup {
+		sess := rnd("rxa_s_")
+		s.sessions[sess] = b.Username
+		pending := []string{}
+		if b.TwoFactor != "none" {
+			pending = []string{"2fa_setup"}
+		}
+		out := map[string]interface{}{
+			"account": map[string]interface{}{
+				"id": rnd("rxa_"), "username": b.Username, "email": b.Email, "emailVerified": false,
+				"firstName": b.FirstName, "middleName": b.MiddleName, "lastName": b.LastName,
+			},
+			"session": sess, "pending": pending,
+		}
+		if b.TwoFactor == "app" {
+			out["totp"] = totpFor(b.Username)
+		}
+		j(w, 201, out)
+		return
+	}
+	j(w, 201, s.verifyOut(b, false))
+}
+
+func totpFor(username string) map[string]string {
+	return map[string]string{"secret": "JBSWY3DPEHPK3PXP", "otpauthUri": "otpauth://totp/Red-XAI:" + url.PathEscape(username) + "?secret=JBSWY3DPEHPK3PXP&issuer=Red-XAI"}
+}
+
+// verifyOut is the v1.2.1 sign-up body. A resume does not include the authenticator key unless a test asks for it.
+func (s *Server) verifyOut(b host.SignupRequest, resumed bool) map[string]interface{} {
+	pending := []string{"verify_email"}
 	if b.TwoFactor != "none" {
-		out["pending"] = []string{"2fa_setup"}
+		pending = append(pending, "2fa_setup")
+	}
+	out := map[string]interface{}{
+		"step": "verify_email", "session": "",
+		"account": map[string]interface{}{
+			"id": rnd("rxa_"), "username": b.Username, "email": b.Email, "emailVerified": false,
+			"firstName": b.FirstName, "middleName": b.MiddleName, "lastName": b.LastName,
+		},
+		"pending": pending, "emailSent": !s.EmailSendFails, "emailMasked": maskEmail(b.Email),
+		"pendingUntilMs": time.Now().Add(24 * time.Hour).UnixMilli(),
+	}
+	if resumed {
+		out["resumed"] = true
+		out["message"] = "This sign-up is already waiting for the email link. The first username was kept."
+		if s.ResumeIncludesTOTP && b.TwoFactor == "app" {
+			out["totp"] = totpFor(b.Username)
+		}
+		return out
 	}
 	if b.TwoFactor == "app" {
-		out["totp"] = map[string]string{"secret": "JBSWY3DPEHPK3PXP", "otpauthUri": "otpauth://totp/Red-XAI:" + url.PathEscape(b.Username) + "?secret=JBSWY3DPEHPK3PXP&issuer=Red-XAI"}
+		out["totp"] = totpFor(b.Username)
 	}
-	j(w, 201, out)
+	return out
+}
+
+func maskEmail(e string) string {
+	e = strings.TrimSpace(e)
+	at := strings.Index(e, "@")
+	if at <= 0 {
+		return ""
+	}
+	return e[:1] + "***" + e[at:]
+}
+
+func (s *Server) emailResend(w http.ResponseWriter, r *http.Request) {
+	var b struct {
+		Login string `json:"login"`
+	}
+	if !decode(w, r, &b) {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ClientIPs = append(s.ClientIPs, r.Header.Get("X-RedXAI-Client-IP"))
+	login := strings.TrimSpace(b.Login)
+	s.EmailResendLogins = append(s.EmailResendLogins, login)
+	if s.EmailResendAfter != "" {
+		w.Header().Set("Retry-After", s.EmailResendAfter)
+		e(w, 429, "rate_limited", "Too many verification emails. Try again later.")
+		return
+	}
+	j(w, 200, map[string]bool{"ok": true})
 }
 
 func (s *Server) confirm(w http.ResponseWriter, r *http.Request) {

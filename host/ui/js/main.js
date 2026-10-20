@@ -52,8 +52,20 @@ async function boot() {
   // console session and removed from the address bar first.
   if (dl.page === 'signin') {
     history.replaceState(null, '', location.pathname);
-    const { SIGNIN_ERRORS } = await import('./pages/account.js');
-    if (dl.query.error) return showLogin(SIGNIN_ERRORS[dl.query.error] || 'The sign-in did not work. Please try again.');
+    const { SIGNIN_ERRORS, renderUnverified } = await import('./pages/account.js');
+    if (dl.query.error) {
+      const code = dl.query.error;
+      // Accounts v1.2.2 leaves unverified people on its check-email page. This still
+      // opens ours when a sign-in comes back with error=email_unverified.
+      if (code === 'email_unverified') {
+        clear(app);
+        app.className = 'plain';
+        const login = typeof dl.query.login === 'string' ? dl.query.login : '';
+        app.append(renderUnverified(login, () => showLogin()));
+        return;
+      }
+      return showLogin(SIGNIN_ERRORS[code] || 'The sign-in did not work. Please try again.');
+    }
     try {
       const r = await api('POST', '/v1/auth/handoff', { key: '', noAuthRedirect: true, json: { code: dl.query.handoff || '' } });
       session.set(r.token, false);

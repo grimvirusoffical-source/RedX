@@ -352,17 +352,23 @@ func (c *oidcClient) userinfo(ctx context.Context, access string) (map[string]in
 // call makes a JSON request to the Red-XAI Accounts API (path relative to the issuer), with the end user's IP
 // in X-RedXAI-Client-IP. It returns the status and raw JSON body; errAccountsUnavailable when unreachable.
 func (c *oidcClient) call(ctx context.Context, method, path string, body interface{}, bearer, clientIP string) (int, []byte, error) {
+	st, b, _, err := c.callRaw(ctx, method, path, body, bearer, clientIP)
+	return st, b, err
+}
+
+// callRaw is call plus the response headers (Retry-After on a verification-email resend).
+func (c *oidcClient) callRaw(ctx context.Context, method, path string, body interface{}, bearer, clientIP string) (int, []byte, http.Header, error) {
 	var rd io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
-			return 0, nil, err
+			return 0, nil, nil, err
 		}
 		rd = bytes.NewReader(b)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, c.issuer+path, rd)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, nil, err
 	}
 	req.Header.Set("Accept", "application/json")
 	if body != nil {
@@ -376,11 +382,12 @@ func (c *oidcClient) call(ctx context.Context, method, path string, body interfa
 	}
 	res, err := c.hc.Do(req)
 	if err != nil {
-		return 0, nil, errAccountsUnavailable
+		return 0, nil, nil, errAccountsUnavailable
 	}
 	defer res.Body.Close()
+	hdr := res.Header.Clone()
 	b, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
-	return res.StatusCode, b, nil
+	return res.StatusCode, b, hdr, nil
 }
 
 // clientAuth adds HTTP Basic client authentication (RFC 6749 2.3.1: both parts form-encoded).

@@ -204,4 +204,39 @@ func TestSignupRules(t *testing.T) {
 	if _, _, fe := CheckDOB("10/19/2014", now, 5); fe == nil || fe.Code != "under_min_age" {
 		t.Error("the central minimum 13 can never be lowered")
 	}
+	for n, want := range map[string]bool{"Josh": true, "Mary Ann": true, "O'Brien": true, "O’Brien": true, "José": true, "李": true, "Анна-Мария": true,
+		"A.": true, "": false, " ": false, "Josh2": false, "---": false, strings.Repeat("a", 50): true, strings.Repeat("a", 51): false} {
+		if ok(CheckName(n, true)) != want {
+			t.Errorf("name %q: want %v", n, want)
+		}
+	}
+	if !ok(CheckName("", false)) || !ok(CheckName("   ", false)) {
+		t.Error("an empty middle name is allowed")
+	}
+	req := SignupRequest{FirstName: "José", MiddleName: "A.", LastName: "李", Username: "grim_player1", Password: "Abcdefgh123!", PasswordConfirm: "Abcdefgh123!",
+		Email: "a@b.com", EmailConfirm: "a@b.com", DOB: "07/04/2001", TOSGrant: "g", TwoFactor: "none", AcceptNo2faRisk: true, AcknowledgeFalseInfo: true}
+	if fe := ValidateSignup(&req, now, 13); fe != nil {
+		t.Fatalf("valid sign-up: %v", fe)
+	}
+	for _, c := range []struct{ field, value, code string }{
+		{"first", "", "first_name_required"},
+		{"last", " ", "last_name_required"},
+		{"first", "Josh2", "first_name_chars"},
+		{"middle", "---", "middle_name_chars"},
+		{"last", strings.Repeat("日", 51), "last_name_long"},
+	} {
+		r := req
+		switch c.field {
+		case "first":
+			r.FirstName = c.value
+		case "middle":
+			r.MiddleName = c.value
+		default:
+			r.LastName = c.value
+		}
+		fe := ValidateSignup(&r, now, 13)
+		if fe == nil || fe.Code != c.code {
+			t.Errorf("name %s %q: got %v, want %s", c.field, c.value, fe, c.code)
+		}
+	}
 }

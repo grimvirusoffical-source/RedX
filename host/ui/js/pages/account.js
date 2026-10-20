@@ -21,6 +21,7 @@ export const SIGNIN_ERRORS = {
   provider: 'Red-XAI Accounts reported a problem with the sign-in.',
   unavailable: 'Red-XAI Accounts cannot be reached right now. Try again in a minute, or sign in with an API key.',
   busy: 'Too many sign-ins are in progress. Try again in a few minutes.',
+  email_unverified: 'This account’s email is not confirmed yet. Open the link we sent, or resend it below, then sign in.',
 };
 
 /** The block under the API-key form: Sign in / Create account. */
@@ -62,6 +63,59 @@ export function emailChecks(e) {
   e = e.trim();
   return [{ id: 'syntax', ok: e.length > 0 && e.length <= 254 && EMAIL_RE.test(e), message: 'A real email address, like name@example.com' }];
 }
+const NAME_MAX = 50;
+function isNameChar(c) {
+  return /\p{L}/u.test(c) || c === ' ' || c === "'" || c === '\u2019' || c === '-' || c === '.' || c === '\u2010' || c === '\u2011';
+}
+/** first/middle/last: 1–50 letters (any script), spaces, apostrophes, hyphens and periods; middle may be empty. */
+export function nameChecks(value, required = true) {
+  const s = String(value ?? '').trim();
+  if (!required && s.length === 0) {
+    return [
+      { id: 'length', ok: true, message: 'Optional — 1 to 50 characters if you add one' },
+      { id: 'chars', ok: true, message: 'Letters, spaces, apostrophes, hyphens and periods' },
+      { id: 'letters', ok: true, message: 'At least one letter' },
+    ];
+  }
+  const chars = [...s];
+  const letters = chars.filter((c) => /\p{L}/u.test(c)).length;
+  return [
+    { id: 'length', ok: chars.length >= 1 && chars.length <= NAME_MAX, message: '1 to 50 characters' },
+    { id: 'chars', ok: chars.length > 0 && chars.every(isNameChar), message: 'Letters, spaces, apostrophes, hyphens and periods' },
+    { id: 'letters', ok: letters >= 1, message: 'At least one letter' },
+  ];
+}
+/** Shown under the check-your-email screen. Empty when the server did not send an expiry. */
+export function pendingUntilText(ms) {
+  const n = Number(ms);
+  if (!Number.isFinite(n) || n <= 0) return '';
+  return 'This sign-up is held until ' + new Date(n).toLocaleString() + '. If the email is not confirmed by then, the username and email can be used again.';
+}
+/** Sign-up failures. email_taken covers an address already in use, including an owner
+ * address, and the wording stays the same either way. too_many_pending is final:
+ * the form shows it and does not send the sign-up again. */
+export function signupErrorText(err) {
+  const body = (err && err.body) || {};
+  const code = body.error || '';
+  if (code === 'email_taken') return 'That email is already in use.';
+  if (code === 'too_many_pending') return 'Too many pending sign-ups for this email. Verify one, or try again later.';
+  if (body.message) return body.message;
+  if (err && err.message && err.message !== code) return err.message;
+  return 'The account could not be created. Try again.';
+}
+/** Rate-limit and other failures from POST /v1/auth/email/resend. */
+export function resendErrorText(err) {
+  const body = (err && err.body) || {};
+  if (err && err.status === 429) {
+    const sec = Number(body.retryAfter) > 0 ? Math.ceil(Number(body.retryAfter)) : 60;
+    const base = body.message && body.message !== 'rate_limited' ? body.message : 'Too many verification emails from this network.';
+    if (new RegExp('\\b' + sec + '\\b').test(base)) return base;
+    return base.replace(/\s+$/, '') + ' Try again in ' + sec + ' seconds.';
+  }
+  if (body.message) return body.message;
+  if (err && err.message && err.message !== 'rate_limited') return err.message;
+  return 'The verification email could not be sent. Try again.';
+}
 /** Parses MM/DD/YYYY strictly; returns a Date (UTC) or null. */
 export function parseDOB(s) {
   const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(s.trim());
@@ -93,6 +147,30 @@ export function dobChecks(s, minAge = 13) {
 }
 const allOK = (checks) => checks.every((c) => c.ok);
 
+/** Shown when a live username/email check never reaches the server (after one retry). */
+export const REMOTE_CHECK_OFFLINE = "Couldn't check — check your connection.";
+
+/** True when the browser failed before any HTTP answer (VPN, offline, host unreachable). */
+export function isUnreachable(err) {
+  return !!err && err.status === 0;
+}
+
+/** Call fn, and once more if the first attempt never reached the server. */
+export async function retryUnreachable(fn) {
+  try {
+    return await fn();
+  } catch (e) {
+    if (!isUnreachable(e)) throw e;
+    return await fn();
+  }
+}
+
+/** Message for a failed live check. Network failures do not claim redxd is down. */
+export function remoteCheckMessage(err) {
+  if (isUnreachable(err)) return REMOTE_CHECK_OFFLINE;
+  return 'Could not check right now: ' + (err && err.message ? err.message : 'error');
+}
+
 function hintList(id) {
   const ul = h('ul', { class: 'hints', id, 'aria-live': 'polite' });
   ul.show = (checks) => {
@@ -104,6 +182,58 @@ function hintList(id) {
 
 function copyArrow(from, to, label, after) {
   return h('button', { class: 'icon-btn copy-arrow', type: 'button', title: label, 'aria-label': label, onclick: () => { to.value = from.value; after(); } }, '⇅');
+}
+
+/** Resend the verification link. The login is the username. known hides the box when the sign-up already has it. */
+export function emailResendControl({ login = '', known = false } = {}) {
+  const input = h('input', { class: 'input', id: 'email-resend-login', type: 'text', autocomplete: 'username', maxlength: 32, value: login, 'aria-label': 'Username' });
+  const btn = h('button', { class: 'btn', id: 'email-resend', type: 'button' }, 'Resend verification email');
+  const note = h('p', { class: 'muted small', id: 'email-resend-note' });
+  const err = h('div', { class: 'form-err', id: 'email-resend-err', role: 'alert', hidden: true });
+  let timer = 0;
+  const cooldown = (sec) => {
+    clearTimeout(timer);
+    let left = Math.max(1, Math.ceil(sec));
+    const tick = () => {
+      if (left <= 0) {
+        btn.disabled = false;
+        btn.textContent = 'Resend verification email';
+        return;
+      }
+      btn.disabled = true;
+      btn.textContent = 'Resend in ' + left + 's';
+      left -= 1;
+      timer = setTimeout(tick, 1000);
+    };
+    tick();
+  };
+  btn.onclick = async () => {
+    const who = (known ? login : input.value).trim();
+    err.hidden = true;
+    note.textContent = '';
+    if (!who || who.includes('@')) {
+      err.textContent = 'Enter your username. Resend uses the username, not the email address.';
+      err.hidden = false;
+      return;
+    }
+    btn.disabled = true;
+    try {
+      await api('POST', '/v1/auth/email/resend', { key: '', noAuthRedirect: true, json: { login: who } });
+      note.textContent = known
+        ? 'Another link is on its way. It can take a minute to arrive.'
+        : 'If that account is waiting for a confirmation email, another link is on its way.';
+      cooldown(60);
+    } catch (e) {
+      err.textContent = resendErrorText(e);
+      err.hidden = false;
+      if (e.status === 429) cooldown(Number(e.body && e.body.retryAfter) > 0 ? Number(e.body.retryAfter) : 60);
+      else btn.disabled = false;
+    }
+  };
+  const kids = [];
+  if (!known) kids.push(h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Username'), input));
+  kids.push(btn, note, err);
+  return h('div', { class: 'email-resend', id: 'email-resend-box' }, kids);
 }
 
 // ---------- sign-up ----------
@@ -160,6 +290,9 @@ function formStep(card, back, tos, rules, accepted) {
   const safe = (rules.password && rules.password.safeSpecials) || SAFE_DEFAULT;
   const minAge = Math.max(13, rules.minAge || 13);
   const inp = (id, attrs = {}) => h('input', { class: 'input', id, name: id, autocomplete: 'off', spellcheck: 'false', ...attrs });
+  const first = inp('su-first', { autocomplete: 'given-name', maxlength: 80 });
+  const middle = inp('su-middle', { autocomplete: 'additional-name', maxlength: 80 });
+  const last = inp('su-last', { autocomplete: 'family-name', maxlength: 80 });
   const user = inp('su-username', { autocomplete: 'username', maxlength: 64 });
   const email = inp('su-email', { type: 'email', autocomplete: 'email', maxlength: 254 });
   const email2 = inp('su-email2', { type: 'email', maxlength: 254, 'aria-label': 'Confirm email' });
@@ -170,6 +303,7 @@ function formStep(card, back, tos, rules, accepted) {
   const phone = inp('su-phone', { type: 'tel', placeholder: '+15555550123', autocomplete: 'tel' });
   const ackFalse = h('input', { type: 'checkbox', id: 'su-ack-false' });
   const ackNo2fa = h('input', { type: 'checkbox', id: 'su-ack-no2fa' });
+  const hF = hintList('hints-first'); const hM = hintList('hints-middle'); const hL = hintList('hints-last');
   const hU = hintList('hints-username'); const hE = hintList('hints-email'); const hE2 = hintList('hints-email2');
   const hP = hintList('hints-password'); const hP2 = hintList('hints-password2'); const hD = hintList('hints-dob');
   const ageNote = h('div', { class: 'form-err', id: 'su-age-block', role: 'alert', hidden: true }, `You must be at least ${minAge} to create a Red-XAI Account.`);
@@ -202,6 +336,10 @@ function formStep(card, back, tos, rules, accepted) {
   const err = h('div', { class: 'form-err', id: 'su-err', role: 'alert', hidden: true });
 
   function update() {
+    const nf = nameChecks(first.value, true);
+    const nm = nameChecks(middle.value, false);
+    const nl = nameChecks(last.value, true);
+    hF.show(nf); hM.show(nm); hL.show(nl);
     const u = usernameChecks(user.value.trim());
     if (remote.username && remote.username.value === user.value.trim()) u.push(...remote.username.checks);
     hU.show(u);
@@ -220,22 +358,26 @@ function formStep(card, back, tos, rules, accepted) {
     const tfaOK = tfa === 'app' || (tfa === 'phone' && /^\+[1-9][0-9]{7,14}$/.test(phone.value.trim())) || (tfa === 'none' && ackNo2fa.checked);
     const remoteOK = remote.username && remote.username.value === user.value.trim() && allOK(remote.username.checks) &&
       remote.email && remote.email.value === email.value.trim() && allOK(remote.email.checks);
-    submit.disabled = !(allOK(u) && allOK(e) && allOK(e2) && allOK(p) && allOK(p2) && allOK(d.checks) && ackFalse.checked && tfaOK && remoteOK);
+    submit.disabled = !(allOK(nf) && allOK(nm) && allOK(nl) && allOK(u) && allOK(e) && allOK(e2) && allOK(p) && allOK(p2) && allOK(d.checks) && ackFalse.checked && tfaOK && remoteOK);
   }
   const checkRemote = (field, input) => debounce(async () => {
     const v = input.value.trim();
     const local = field === 'username' ? usernameChecks(v) : emailChecks(v);
     if (!allOK(local)) return;
+    const post = () => api('POST', '/v1/auth/validate/' + field, { key: '', noAuthRedirect: true, json: { [field]: v } });
     try {
-      const r = await api('POST', '/v1/auth/validate/' + field, { key: '', noAuthRedirect: true, json: { [field]: v } });
+      // One retry: a VPN or a blip used to look like "redxd is down" on the first failure.
+      const r = await retryUnreachable(post);
       const have = new Set(local.map((c) => c.id));
       remote[field] = { value: v, checks: (r.checks || []).filter((c) => !have.has(c.id)) };
     } catch (e2) {
-      remote[field] = { value: v, checks: [{ id: 'available', ok: false, message: 'Could not check right now: ' + e2.message }] };
+      // The server checks every field again on submit; this hint is only for the form.
+      remote[field] = { value: v, checks: [{ id: 'available', ok: false, message: remoteCheckMessage(e2) }] };
     }
     update();
   }, 350);
   const ru = checkRemote('username', user); const re = checkRemote('email', email);
+  [first, middle, last].forEach((x) => x.addEventListener('input', update));
   user.addEventListener('input', () => { update(); ru(); });
   email.addEventListener('input', () => { update(); re(); });
   [email2, pass, pass2, phone].forEach((x) => x.addEventListener('input', update));
@@ -259,16 +401,19 @@ function formStep(card, back, tos, rules, accepted) {
   submit.onclick = async () => {
     submit.disabled = true;
     err.hidden = true;
-    const body = { username: user.value.trim(), password: pass.value, passwordConfirm: pass2.value, email: email.value.trim(), emailConfirm: email2.value.trim(),
+    const body = { firstName: first.value.trim(), middleName: middle.value.trim(), lastName: last.value.trim(),
+      username: user.value.trim(), password: pass.value, passwordConfirm: pass2.value, email: email.value.trim(), emailConfirm: email2.value.trim(),
       dob: dob.value.trim(), tosGrant: accepted.grant, twoFactor: tfa, phone: tfa === 'phone' ? phone.value.trim() : '', acceptNo2faRisk: tfa === 'none' && ackNo2fa.checked,
       acknowledgeFalseInfo: ackFalse.checked };
     try {
       const r = await api('POST', '/v1/auth/signup', { key: '', noAuthRedirect: true, json: body });
       pass.value = pass2.value = '';
-      twoFAStep(card, r);
+      if (r.step === 'verify_email' && !r.handle) checkEmailStep(card, r);
+      else twoFAStep(card, r);
     } catch (e) {
       const b = e.body || {};
-      err.textContent = b.message || e.message;
+      // One attempt. too_many_pending and email_taken are answers, not transient failures.
+      err.textContent = signupErrorText(e);
       err.hidden = false;
       if (b.error === 'tos_grant_invalid' || b.error === 'tos_changed') { toast('Please read and agree to the terms again.', 'warn'); tosStep(card, h('span'), tos, rules); return; }
       update();
@@ -280,6 +425,9 @@ function formStep(card, back, tos, rules, accepted) {
     h('div', { class: 'row gap' }, back),
     h('h2', null, 'Create a Red-XAI Account'),
     h('p', { class: 'ok-text small', id: 'tos-accepted' }, icon('check', 14), ` You agreed to the Terms of Service (version ${accepted.version}) at ${accepted.agreedAt.toLocaleString()}.`),
+    fld('First name', first, hF),
+    fld('Middle name (optional)', middle, hM),
+    fld('Last name', last, hL),
     fld('Username', user, hU),
     fld('Email', email, hE),
     fld('Confirm email', email2, hE2, copyArrow(email, email2, 'Copy the email into the confirm box', update)),
@@ -294,6 +442,62 @@ function formStep(card, back, tos, rules, accepted) {
     h('h3', null, 'Two-factor authentication'), tfaGroup, phoneRow, noneRow,
     err, submit);
   update();
+}
+
+/** Check-your-email page after sign-up, and after an unverified sign-in (email_unverified). */
+export function renderUnverified(login, onBack) {
+  const card = h('div', { class: 'auth-card wide signup' });
+  const back = h('button', { class: 'btn small', id: 'su-check-back', type: 'button', onclick: onBack }, '← Back to sign in');
+  const raw = String(login || '').trim();
+  const email = raw.includes('@') ? raw : '';
+  checkEmailStep(card, { account: { email, username: email ? '' : raw }, emailSent: true, signIn: true }, back);
+  return h('div', { class: 'auth' }, card);
+}
+
+function checkEmailStep(card, r, back) {
+  const email = (r.account && r.account.email) || '';
+  const username = (r.account && r.account.username) || '';
+  const shown = email || r.emailMasked || '';
+  const failed = r.emailSent === false;
+  const parts = [];
+  if (back) parts.push(h('div', { class: 'row gap' }, back));
+  parts.push(h('h2', { id: 'su-check-email' }, 'Check your email'));
+  if (r.signIn) parts.push(h('p', null, 'This account’s email is not confirmed yet. Open the link we sent, then sign in.'));
+  if (shown) {
+    parts.push(failed
+      ? h('p', null, 'The verification email to ', h('b', { id: 'su-check-address' }, shown), ' could not be sent just now.')
+      : h('p', null, 'We sent a verification link to ', h('b', { id: 'su-check-address' }, shown), '.'));
+  } else {
+    parts.push(h('p', { id: 'su-check-address' }, failed
+      ? 'The verification email could not be sent just now.'
+      : 'We sent a verification link to the email address on this account.'));
+  }
+  parts.push(h('p', null, failed
+    ? 'Use Resend to try again. The account cannot sign in until you open the link.'
+    : 'Open the link in that email, then sign in. The account cannot sign in until the link is opened.'));
+  if (r.message) parts.push(h('p', { class: 'muted' }, r.message));
+  const hold = pendingUntilText(r.pendingUntilMs);
+  if (hold) parts.push(h('p', { class: 'muted small', id: 'su-pending-until' }, hold));
+  // The authenticator key is returned once, on the first sign-up. A resume does not include it.
+  if (!r.resumed && r.totp && r.totp.secret) {
+    const cv = h('canvas', { class: 'qr', id: 'su-totp-qr', 'aria-label': 'QR code for your authenticator app' });
+    try { drawQR(cv, r.totp.otpauthUri, { scale: 5 }); } catch { /* the secret below still works */ }
+    parts.push(h('h3', null, 'Authenticator app'),
+      h('p', null, 'Add this key to your authenticator app now. It is shown only this once. You confirm the code after you sign in, not during sign-up.'),
+      cv, h('div', { class: 'keybox' }, h('code', { id: 'su-totp-secret' }, r.totp.secret)));
+  } else if (r.resumed && r.twoFactor === 'app') {
+    const link = h('a', { id: 'su-2fa-reenroll', rel: 'noopener' }, 'Red-XAI Account');
+    if (cfgCache && cfgCache.hosted_account) link.href = cfgCache.hosted_account;
+    parts.push(h('p', { id: 'su-2fa-reenroll-note' },
+      'That key was shown only once, on the first sign-up. After you open the email link and sign in, re-enrol two-factor authentication from your ', link, ' page if you no longer have it.'));
+    if (!cfgCache || !cfgCache.hosted_account) {
+      accountsConfig().then((cfg) => { if (cfg && cfg.hosted_account) link.href = cfg.hosted_account; }).catch(() => {});
+    }
+  }
+  parts.push(emailResendControl({ login: username, known: !!username }));
+  parts.push(h('a', { class: 'btn primary big', id: 'su-signin', href: '/v1/auth/login' }, 'Sign in with Red-XAI Account'),
+    h('p', { class: 'muted small' }, 'Sign in only after you open the link in the email.'));
+  card.replaceChildren(...parts);
 }
 
 function twoFAStep(card, r) {

@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Sign-up rules, mirrored from the Red-XAI Accounts v1 contract (docs/API.md "Rules"). The console shows the
@@ -18,6 +19,7 @@ const (
 	PasswordMin     = 12
 	PasswordMax     = 665
 	EmailMax        = 254
+	NameMax         = 50
 	CentralMinAge   = 13 // no Red-XAI app has under-13 accounts
 	MaxAge          = 100
 	// SafeSpecials are the special characters a password may (and must, at least once) use.
@@ -96,6 +98,86 @@ func CheckPassword(p string) []RuleCheck {
 		{"digit", dg, "A number (0–9)"},
 		{"special", sp, "A special character: " + SafeSpecials},
 		{"chars", chars && n > 0, "No spaces, quotes, backslashes, backticks or < >"},
+	}
+}
+
+// isNamePunct is a space, apostrophe, hyphen or period (Accounts v1.2 name rules).
+func isNamePunct(r rune) bool {
+	switch r {
+	case ' ', '\'', '-', '.', '’', '‐', '‑':
+		return true
+	default:
+		return false
+	}
+}
+
+// CheckName: 1–50 characters of letters (any script), spaces, apostrophes, hyphens and periods,
+// with at least one letter. An empty optional name (middle) passes.
+func CheckName(s string, required bool) []RuleCheck {
+	s = strings.TrimSpace(s)
+	if !required && s == "" {
+		return []RuleCheck{
+			{"length", true, "Optional — 1 to 50 characters if you add one"},
+			{"chars", true, "Letters, spaces, apostrophes, hyphens and periods"},
+			{"letters", true, "At least one letter"},
+		}
+	}
+	n, letters := 0, 0
+	chars := true
+	for _, r := range s {
+		n++
+		switch {
+		case unicode.IsLetter(r):
+			letters++
+		case isNamePunct(r):
+		default:
+			chars = false
+		}
+	}
+	return []RuleCheck{
+		{"length", n >= 1 && n <= NameMax, "1 to 50 characters"},
+		{"chars", chars && n > 0, "Letters, spaces, apostrophes, hyphens and periods"},
+		{"letters", letters >= 1, "At least one letter"},
+	}
+}
+
+func nameCode(field, suffix string) string {
+	switch field {
+	case "firstName":
+		return "first_name_" + suffix
+	case "middleName":
+		return "middle_name_" + suffix
+	default:
+		return "last_name_" + suffix
+	}
+}
+
+func nameLabel(field string) string {
+	switch field {
+	case "firstName":
+		return "first name"
+	case "middleName":
+		return "middle name"
+	default:
+		return "last name"
+	}
+}
+
+func nameFieldError(field, value string, required bool) *FieldError {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		if !required {
+			return nil
+		}
+		return &FieldError{nameCode(field, "required"), "Enter your " + nameLabel(field) + ".", field}
+	}
+	switch firstFail(CheckName(value, true)) {
+	case "length":
+		return &FieldError{nameCode(field, "long"), "A " + nameLabel(field) + " can have at most 50 characters.", field}
+	case "chars", "letters":
+		return &FieldError{nameCode(field, "chars"), "Use letters, spaces, apostrophes, hyphens and periods in a " + nameLabel(field) + ", with at least one letter.", field}
+	default:
+		return nil
 	}
 }
 
@@ -178,6 +260,9 @@ func firstFail(checks []RuleCheck) string {
 // SignupRequest is the body of POST /v1/signup in the Red-XAI Accounts contract (app is filled in by redxd).
 type SignupRequest struct {
 	App                  string `json:"app"`
+	FirstName            string `json:"firstName"`
+	MiddleName           string `json:"middleName,omitempty"`
+	LastName             string `json:"lastName"`
 	Username             string `json:"username"`
 	Password             string `json:"password"`
 	PasswordConfirm      string `json:"passwordConfirm"`
@@ -193,6 +278,18 @@ type SignupRequest struct {
 
 // ValidateSignup applies every rule (the server-side mirror of the console's live hints).
 func ValidateSignup(r *SignupRequest, now time.Time, minAge int) *FieldError {
+	r.FirstName = strings.TrimSpace(r.FirstName)
+	r.MiddleName = strings.TrimSpace(r.MiddleName)
+	r.LastName = strings.TrimSpace(r.LastName)
+	if fe := nameFieldError("firstName", r.FirstName, true); fe != nil {
+		return fe
+	}
+	if fe := nameFieldError("middleName", r.MiddleName, false); fe != nil {
+		return fe
+	}
+	if fe := nameFieldError("lastName", r.LastName, true); fe != nil {
+		return fe
+	}
 	switch firstFail(CheckUsername(r.Username)) {
 	case "length":
 		if len([]rune(r.Username)) < UsernameMin {

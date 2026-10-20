@@ -28,6 +28,16 @@ func SetConnectClock(h *Host, now func() time.Time) {
 	h.connect.mu.Unlock()
 }
 
+// SetAccountsClock replaces the account store's clock (sign-in expiry tests).
+func SetAccountsClock(h *Host, now func() time.Time) {
+	h.accts.mu.Lock()
+	h.accts.now = now
+	h.accts.mu.Unlock()
+}
+
+// AccountsLoginTTL is how long a console sign-in state (and its cookie) stays valid.
+func AccountsLoginTTL() time.Duration { return acctLoginTTL }
+
 // SetUpdateMembers replaces the cluster member list the rollout planner sees.
 func SetUpdateMembers(h *Host, ids []string) {
 	h.upd.mu.Lock()

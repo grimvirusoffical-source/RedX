@@ -109,6 +109,25 @@ func rightmostUntrusted(xff string, trusted []string) string {
 	return ""
 }
 
+// clientNetKey is the bucket for the pending sign-in cap and the login rate limit.
+// The input is the real client address (trusted_proxies already applied).
+// IPv4 and IPv4-mapped IPv6 key on the IPv4 address. IPv6 keys on its /64,
+// so one subnet cannot spend the global cap once per host address.
+func clientNetKey(addr string) string {
+	s := addr
+	if i := strings.IndexByte(s, '%'); i >= 0 {
+		s = s[:i]
+	}
+	ip := net.ParseIP(strings.TrimSpace(s))
+	if ip == nil {
+		return addr
+	}
+	if v4 := ip.To4(); v4 != nil {
+		return v4.String()
+	}
+	return ip.Mask(net.CIDRMask(64, 128)).String() + "/64"
+}
+
 // ipToken parses one forwarding-header token into a canonical IP string.
 func ipToken(s string) string {
 	s = strings.TrimSpace(s)
