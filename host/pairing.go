@@ -19,12 +19,14 @@ import (
 // of it is kept). The key is created when the code is redeemed, so an unused code leaves nothing behind to revoke. The
 // leader issues and redeems codes (a follower answers 409). Failed redemptions are rate limited per client and overall.
 const (
-	pairTTL        = 5 * time.Minute
-	pairMaxPending = 20
-	pairFailWindow = time.Minute
-	pairFailPerIP  = 8
-	pairFailTotal  = 40
-	signinAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789" // no 0/O/1/I
+	pairTTL         = 5 * time.Minute
+	pairMaxPending  = 20
+	pairFailWindow  = time.Minute
+	pairFailPerIP   = 8
+	pairFailPerCode = 5                                  // failed attempts against one code value per window
+	pairFailTotal   = 5000                               // global safety cap; per-IP and per-code limits do the real work
+	pairFailMaxKeys = 10000                              // bound on tracked clients / codes (oldest dropped first)
+	signinAlphabet  = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789" // no 0/O/1/I
 )
 
 type pairEntry struct {
@@ -36,7 +38,8 @@ type pairEntry struct {
 type pairStore struct {
 	mu      sync.Mutex
 	pending map[[32]byte]pairEntry
-	fails   map[string][]time.Time // client -> recent failures
+	fails   map[string][]time.Time   // client -> recent failures
+	codes   map[[32]byte][]time.Time // hash of normalized code -> recent failures
 	all     []time.Time
 	now     func() time.Time
 }
@@ -96,6 +99,28 @@ func (p *pairStore) prune(now time.Time) {
 			p.fails[c] = l
 		}
 	}
+	for c, l := range p.codes {
+		if l = trim(l); len(l) == 0 {
+			delete(p.codes, c)
+		} else {
+			p.codes[c] = l
+		}
+	}
+}
+
+// evictOldest keeps a failure map at most pairFailMaxKeys entries by dropping the entry whose newest failure is oldest.
+func evictOldest[K comparable](m map[K][]time.Time) {
+	for len(m) >= pairFailMaxKeys {
+		var victim K
+		var vt time.Time
+		first := true
+		for k, l := range m {
+			if t := l[len(l)-1]; first || t.Before(vt) {
+				victim, vt, first = k, t, false
+			}
+		}
+		delete(m, victim)
+	}
 }
 
 // issue stores a pending spec and returns its code.
@@ -133,20 +158,33 @@ func (p *pairStore) redeem(code, client string) (pairEntry, pairResult) {
 	defer p.mu.Unlock()
 	now := p.clock()
 	p.prune(now)
-	if len(p.fails[client]) >= pairFailPerIP || len(p.all) >= pairFailTotal {
+	n := normPairCode(code)
+	ck := sha256.Sum256([]byte(n))
+	if len(p.fails[client]) >= pairFailPerIP || (n != "" && len(p.codes[ck]) >= pairFailPerCode) || len(p.all) >= pairFailTotal {
 		return pairEntry{}, pairThrottled
 	}
-	if n := normPairCode(code); n != "" {
-		k := sha256.Sum256([]byte(n))
-		if e, ok := p.pending[k]; ok {
-			delete(p.pending, k)
+	if n != "" {
+		if e, ok := p.pending[ck]; ok {
+			delete(p.pending, ck)
 			return e, pairOK
 		}
 	}
 	if p.fails == nil {
 		p.fails = map[string][]time.Time{}
 	}
+	if p.codes == nil {
+		p.codes = map[[32]byte][]time.Time{}
+	}
+	if _, ok := p.fails[client]; !ok {
+		evictOldest(p.fails)
+	}
 	p.fails[client] = append(p.fails[client], now)
+	if n != "" { // malformed input is not a code; don't let it share one bucket
+		if _, ok := p.codes[ck]; !ok {
+			evictOldest(p.codes)
+		}
+		p.codes[ck] = append(p.codes[ck], now)
+	}
 	p.all = append(p.all, now)
 	return pairEntry{}, pairBad
 }

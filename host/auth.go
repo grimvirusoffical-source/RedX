@@ -74,7 +74,8 @@ var (
 func (a *Authenticator) Authenticate(r *http.Request) (*Principal, time.Duration, error) {
 	ip := remoteIP(r)
 	// Guard against brute force / argon2 CPU exhaustion: 20 failures/min/IP.
-	if wait := a.fails.blocked(ip); wait > 0 {
+	// The slot is reserved before verifying and released on success (see failTracker.reserve).
+	if wait, ok := a.fails.reserve(ip); !ok {
 		return nil, wait, ErrThrottled
 	}
 	key := bearer(r)
@@ -83,7 +84,11 @@ func (a *Authenticator) Authenticate(r *http.Request) (*Principal, time.Duration
 		return nil, 0, ErrUnauthorized
 	}
 	if strings.HasPrefix(key, acctTokenPrefix) {
-		return a.authAccount(r, ip, key)
+		pr, wait, err := a.authAccount(r, ip, key)
+		if pr != nil {
+			a.fails.release(ip)
+		}
+		return pr, wait, err
 	}
 	rec, err := a.ks.Verify(key)
 	if err != nil {
@@ -94,6 +99,7 @@ func (a *Authenticator) Authenticate(r *http.Request) (*Principal, time.Duration
 		a.fail(r, ip, id, err.Error())
 		return nil, 0, ErrUnauthorized
 	}
+	a.fails.release(ip)
 	rps, burst := rec.RateRPS, rec.RateBurst
 	if rps == 0 {
 		rps, burst = a.defRPS, a.defBurst
@@ -169,7 +175,7 @@ func auditTarget(r *http.Request) string {
 }
 
 func (a *Authenticator) fail(r *http.Request, ip, id, reason string) {
-	a.fails.record(ip)
+	// The failure slot was already reserved in Authenticate.
 	a.audit.Log(AuditEvent{Event: "auth.fail", KeyID: id, Remote: ip, Method: r.Method, Route: routeOf(r), Reason: reason})
 }
 
@@ -199,33 +205,52 @@ func newFailTracker(max int, w time.Duration) *failTracker {
 	return &failTracker{max: max, window: w, m: map[string]*failEnt{}}
 }
 
-func (f *failTracker) blocked(ip string) time.Duration {
+// reserve atomically claims a failure slot for ip before the credential is checked. It returns
+// ok=false and the remaining wait when the window is already full. A caller that then succeeds
+// must call release so only failures count; a failing caller simply keeps the slot. Because the
+// check and the increment happen under one lock, concurrent attempts cannot overshoot max.
+func (f *failTracker) reserve(ip string) (time.Duration, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	now := time.Now()
 	e := f.m[ip]
+	if e != nil && now.Sub(e.start) >= f.window {
+		delete(f.m, ip)
+		e = nil
+	}
 	if e == nil {
-		return 0
-	}
-	if rem := f.window - time.Since(e.start); rem > 0 {
-		if e.n >= f.max {
-			return rem
+		if len(f.m) >= failTrackerMaxIPs {
+			f.pruneLocked(now)
 		}
-		return 0
-	}
-	delete(f.m, ip)
-	return 0
-}
-
-func (f *failTracker) record(ip string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if len(f.m) > 20000 {
-		f.m = map[string]*failEnt{}
-	}
-	e := f.m[ip]
-	if e == nil || time.Since(e.start) >= f.window {
-		e = &failEnt{start: time.Now()}
+		e = &failEnt{start: now}
 		f.m[ip] = e
 	}
+	if e.n >= f.max {
+		return f.window - now.Sub(e.start), false
+	}
 	e.n++
+	return 0, true
+}
+
+// release returns a slot taken by reserve after a successful authentication.
+func (f *failTracker) release(ip string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if e := f.m[ip]; e != nil && e.n > 0 {
+		e.n--
+	}
+}
+
+const failTrackerMaxIPs = 20000
+
+// pruneLocked drops expired entries; if the map is still full it is reset (bounded memory).
+func (f *failTracker) pruneLocked(now time.Time) {
+	for k, e := range f.m {
+		if now.Sub(e.start) >= f.window {
+			delete(f.m, k)
+		}
+	}
+	if len(f.m) >= failTrackerMaxIPs {
+		f.m = map[string]*failEnt{}
+	}
 }

@@ -2,6 +2,7 @@ package host_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -92,7 +93,7 @@ func TestPairingWrongCodesAreThrottled(t *testing.T) {
 	code := pairIssue(t, n, `{"db":"default","scope":"read"}`)
 	got429 := false
 	for i := 0; i < 20; i++ {
-		st, _, h := do(t, "POST", n.URL+"/v1/pair/exchange", "", `{"code":"RP-AAAAA-AAAAA"}`)
+		st, _, h := do(t, "POST", n.URL+"/v1/pair/exchange", "", fmt.Sprintf(`{"code":"RP-AAAAA-AAAA%c"}`, "ABCDEFGHJKLMNPQRSTUV"[i]))
 		if st == 429 {
 			got429 = true
 			if h.Get("Retry-After") == "" {

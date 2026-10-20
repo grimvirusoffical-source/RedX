@@ -780,7 +780,7 @@ func (c *Cluster) applyEntryLocked(e LogEntry) error {
 
 func (c *Cluster) nodeAuth(w http.ResponseWriter, r *http.Request) (string, bool) {
 	ip := remoteIP(r)
-	if wait := c.h.Auth.fails.blocked(ip); wait > 0 {
+	if _, ok := c.h.Auth.fails.reserve(ip); !ok {
 		writeErr(w, http.StatusTooManyRequests, "too many failed attempts")
 		return "", false
 	}
@@ -806,11 +806,11 @@ func (c *Cluster) nodeAuth(w http.ResponseWriter, r *http.Request) (string, bool
 		}
 	}
 	if !ok {
-		c.h.Auth.fails.record(ip)
 		c.h.Audit.Log(AuditEvent{Event: "node.auth.fail", Remote: ip, Route: r.URL.Path})
 		writeErr(w, http.StatusUnauthorized, "unauthorized")
 		return "", false
 	}
+	c.h.Auth.fails.release(ip)
 	return id, true
 }
 
@@ -1045,16 +1045,18 @@ type joinResp struct {
 
 func (c *Cluster) handleJoin(w http.ResponseWriter, r *http.Request) {
 	ip := remoteIP(r)
-	if wait := c.h.Auth.fails.blocked(ip); wait > 0 {
+	if _, ok := c.h.Auth.fails.reserve(ip); !ok {
 		writeErr(w, http.StatusTooManyRequests, "too many failed attempts")
 		return
 	}
 	if !c.IsLeader() {
+		c.h.Auth.fails.release(ip)
 		writeErr(w, 409, "not the leader")
 		return
 	}
 	var jr joinReq
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<12)).Decode(&jr); err != nil || jr.Token == "" || jr.NodeID == "" || len(jr.NodeID) > 128 {
+		c.h.Auth.fails.release(ip)
 		writeErr(w, 400, "token and node_id required")
 		return
 	}
@@ -1066,11 +1068,11 @@ func (c *Cluster) handleJoin(w http.ResponseWriter, r *http.Request) {
 	}
 	c.mu.Unlock()
 	if !ok || time.Now().After(exp) {
-		c.h.Auth.fails.record(ip)
 		c.h.Audit.Log(AuditEvent{Event: "join.fail", Remote: ip, Reason: "invalid or expired join token"})
 		writeErr(w, 401, "invalid or expired join token")
 		return
 	}
+	c.h.Auth.fails.release(ip)
 	if jr.NodeID == c.h.NodeID {
 		writeErr(w, 409, "node_id collides with the leader")
 		return

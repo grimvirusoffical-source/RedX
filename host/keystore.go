@@ -448,28 +448,9 @@ func (ks *Keystore) create(sp CreateSpec, rotatedFrom string) (string, KeyRecord
 	}
 	var key string
 	rec, err := ks.mutate(func() (*KeyRecord, error) {
-		for i := 0; i < 8; i++ {
-			body := randBase62(keyBodyLen)
-			if _, clash := ks.recs[body[:keyIDLen]]; clash {
-				continue
-			}
-			key = KeyPrefix + body
-			salt := make([]byte, 16)
-			_, _ = rand.Read(salt)
-			now := ks.opts.Now().UTC().Truncate(time.Second)
-			r := &KeyRecord{ID: body[:keyIDLen], Salt: base64.RawStdEncoding.EncodeToString(salt),
-				Mem: ks.opts.ArgonMem, Time: ks.opts.ArgonTime, Threads: 1,
-				Scope: sp.Scope, DB: sp.DB, Prefix: sp.Prefix, Label: sp.Label, Roles: append([]string(nil), sp.Roles...), Created: now,
-				RateRPS: sp.RateRPS, RateBurst: sp.RateBurst, RotatedFrom: rotatedFrom, Owner: sp.Owner}
-			r.Hash = base64.RawStdEncoding.EncodeToString(hashKey(key, salt, r.Mem, r.Time, r.Threads))
-			if sp.TTL > 0 {
-				e := now.Add(sp.TTL)
-				r.Expires = &e
-			}
-			ks.recs[r.ID] = r
-			return r, nil
-		}
-		return nil, errors.New("could not allocate key id")
+		k, r, err := ks.newRecordLocked(sp, rotatedFrom)
+		key = k
+		return r, err
 	})
 	if err != nil {
 		return "", KeyRecord{}, err
@@ -478,6 +459,32 @@ func (ks *Keystore) create(sp CreateSpec, rotatedFrom string) (string, KeyRecord
 		ks.onChange(*rec)
 	}
 	return key, *rec, nil
+}
+
+// newRecordLocked builds and installs a fresh record. Caller holds ks.mu (inside mutate).
+func (ks *Keystore) newRecordLocked(sp CreateSpec, rotatedFrom string) (string, *KeyRecord, error) {
+	for i := 0; i < 8; i++ {
+		body := randBase62(keyBodyLen)
+		if _, clash := ks.recs[body[:keyIDLen]]; clash {
+			continue
+		}
+		key := KeyPrefix + body
+		salt := make([]byte, 16)
+		_, _ = rand.Read(salt)
+		now := ks.opts.Now().UTC().Truncate(time.Second)
+		r := &KeyRecord{ID: body[:keyIDLen], Salt: base64.RawStdEncoding.EncodeToString(salt),
+			Mem: ks.opts.ArgonMem, Time: ks.opts.ArgonTime, Threads: 1,
+			Scope: sp.Scope, DB: sp.DB, Prefix: sp.Prefix, Label: sp.Label, Roles: append([]string(nil), sp.Roles...), Created: now,
+			RateRPS: sp.RateRPS, RateBurst: sp.RateBurst, RotatedFrom: rotatedFrom, Owner: sp.Owner}
+		r.Hash = base64.RawStdEncoding.EncodeToString(hashKey(key, salt, r.Mem, r.Time, r.Threads))
+		if sp.TTL > 0 {
+			e := now.Add(sp.TTL)
+			r.Expires = &e
+		}
+		ks.recs[r.ID] = r
+		return key, r, nil
+	}
+	return "", nil, errors.New("could not allocate key id")
 }
 
 func parseKey(key string) (id string, err error) {
@@ -604,50 +611,63 @@ func (ks *Keystore) Revoke(id string) (KeyRecord, error) {
 	return *rec, nil
 }
 
+// ErrRotateConflict is returned when a key has already been rotated (or is being rotated concurrently).
+var ErrRotateConflict = fmt.Errorf("%w: key already has a live successor", ErrConflict)
+
 // Rotate issues a replacement with identical attributes. The old key is revoked
 // after grace (0 = immediately) by setting its expiry.
+//
+// The whole operation runs as one keystore mutation: the parent's state is
+// checked (active, no live successor) and updated in the same critical section
+// that installs the successor, so concurrent rotates of one key yield exactly
+// one successor and the rest fail with ErrRotateConflict. The successor keeps
+// the parent's absolute expiry, so rotating never extends a key's lifetime.
 func (ks *Keystore) Rotate(id string, grace time.Duration) (string, KeyRecord, error) {
-	old, ok := ks.Get(id)
-	if !ok {
-		return "", KeyRecord{}, ErrKeyNotFound
-	}
-	if err := old.Active(ks.opts.Now()); err != nil {
-		return "", KeyRecord{}, fmt.Errorf("cannot rotate: %w", err)
-	}
-	sp := CreateSpec{DB: old.DB, Scope: old.Scope, Prefix: old.Prefix, Label: old.Label, Roles: old.Roles, RateRPS: old.RateRPS, RateBurst: old.RateBurst, Owner: old.Owner}
-	if old.Expires != nil {
-		if rem := old.Expires.Sub(old.Created); rem > 0 {
-			sp.TTL = rem
+	var key string
+	var parent KeyRecord
+	rec, err := ks.mutate(func() (*KeyRecord, error) {
+		old, ok := ks.recs[id]
+		if !ok {
+			return nil, ErrKeyNotFound
 		}
-	}
-	key, nr, err := ks.create(sp, old.ID)
+		now := ks.opts.Now()
+		if err := old.Active(now); err != nil {
+			return nil, fmt.Errorf("cannot rotate: %w", err)
+		}
+		for _, r := range ks.recs {
+			if r.RotatedFrom == id && r.Revoked == nil {
+				return nil, ErrRotateConflict
+			}
+		}
+		sp := CreateSpec{DB: old.DB, Scope: old.Scope, Prefix: old.Prefix, Label: old.Label, Roles: old.Roles, RateRPS: old.RateRPS, RateBurst: old.RateBurst, Owner: old.Owner}
+		k, nr, err := ks.newRecordLocked(sp, old.ID)
+		if err != nil {
+			return nil, err
+		}
+		if old.Expires != nil {
+			e := *old.Expires
+			nr.Expires = &e
+		}
+		t := now.UTC().Truncate(time.Second)
+		if grace <= 0 {
+			old.Revoked = &t
+		} else {
+			e := now.UTC().Add(grace).Truncate(time.Second)
+			if old.Expires == nil || e.Before(*old.Expires) {
+				old.Expires = &e
+			}
+		}
+		key, parent = k, *old
+		return nr, nil
+	})
 	if err != nil {
 		return "", KeyRecord{}, err
 	}
-	if grace <= 0 {
-		if _, err := ks.Revoke(id); err != nil {
-			return "", KeyRecord{}, err
-		}
-	} else {
-		rec, err := ks.mutate(func() (*KeyRecord, error) {
-			r, ok := ks.recs[id]
-			if !ok {
-				return nil, ErrKeyNotFound
-			}
-			e := ks.opts.Now().UTC().Add(grace).Truncate(time.Second)
-			if r.Expires == nil || e.Before(*r.Expires) {
-				r.Expires = &e
-			}
-			return r, nil
-		})
-		if err != nil {
-			return "", KeyRecord{}, err
-		}
-		if ks.onChange != nil {
-			ks.onChange(*rec)
-		}
+	if ks.onChange != nil {
+		ks.onChange(*rec)
+		ks.onChange(parent)
 	}
-	return key, nr, nil
+	return key, *rec, nil
 }
 
 // Upsert installs a record received through replication (no onChange callback).
