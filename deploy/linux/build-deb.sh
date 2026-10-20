@@ -12,7 +12,10 @@ install -m 0755 "$BIN/redxd" "$BIN/redx" "$BIN/redx-launcher" "$P/usr/bin/"
 install -m 0644 "$ROOT/deploy/linux/redx.desktop" "$P/usr/share/applications/redx.desktop"
 install -m 0644 "$ROOT/assets/icons/png/redx-256.png" "$P/usr/share/icons/hicolor/256x256/apps/redx.png"
 install -m 0644 "$ROOT/assets/icons/redx.svg" "$P/usr/share/icons/hicolor/scalable/apps/redx.svg"
-install -m 0644 "$ROOT/deploy/linux/redxd.service" "$P/lib/systemd/system/redxd.service"
+# single unit template (deploy/systemd/redxd.service) rendered for the package layout
+sed -e "s#@BINDIR@#/usr/bin#g" -e "s#@DOCDIR@#/usr/share/doc/redx#g" "$ROOT/deploy/systemd/redxd.service" > "$P/lib/systemd/system/redxd.service"
+chmod 0644 "$P/lib/systemd/system/redxd.service"
+! grep -q "@[A-Z]*@" "$P/lib/systemd/system/redxd.service" || { echo "unrendered placeholder in redxd.service" >&2; exit 1; }
 for d in hosting.md getting-started.md boxql.md box-grammar.md console.md installers.md connect.md; do [ -f "$ROOT/docs/$d" ] && install -m 0644 "$ROOT/docs/$d" "$P/usr/share/doc/redx/$d"; done
 install -m 0644 "$ROOT/deploy/redx.example.toml" "$P/usr/share/doc/redx/redx.example.toml"
 install -m 0644 "$ROOT/LICENSE" "$P/usr/share/doc/redx/copyright"

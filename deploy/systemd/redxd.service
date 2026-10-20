@@ -1,6 +1,9 @@
+# SINGLE SOURCE OF TRUTH for the RedX systemd unit. Template: @BINDIR@ and @DOCDIR@ are substituted by
+# deploy/install.sh (BINDIR=<prefix>/bin, default /usr/local/bin) and deploy/linux/build-deb.sh (/usr/bin).
+# Do not install this file unrendered; do not add a second copy elsewhere in the tree.
 [Unit]
 Description=RedX database host
-Documentation=file:///usr/local/share/doc/redx/hosting.md
+Documentation=file://@DOCDIR@/hosting.md
 After=network-online.target
 Wants=network-online.target
 
@@ -8,10 +11,10 @@ Wants=network-online.target
 Type=simple
 User=redx
 Group=redx
-ExecStart=/usr/local/bin/redxd run --config /etc/redx/redx.toml
+ExecStart=@BINDIR@/redxd run --config /etc/redx/redx.toml --no-open
 Restart=on-failure
 RestartSec=3
-# The installer creates the first admin key offline, so nothing secret is ever printed to the journal.
+# The first admin key is created offline (installer / package message), so nothing secret is ever printed to the journal.
 Environment=REDX_NO_BOOTSTRAP=1
 # For an encrypted keystore put REDX_KEYSTORE_PASSPHRASE=... in this root-only file:
 EnvironmentFile=-/etc/redx/redxd.env

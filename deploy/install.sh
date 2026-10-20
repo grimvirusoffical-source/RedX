@@ -5,10 +5,12 @@
 #   ./install.sh --from dist --user                           # no root: ~/.local/bin + ~/.redx, no service
 #   ./install.sh --from dist --listen 0.0.0.0:7777 --tls auto # reachable from other devices, with TLS
 #
+#   ./install.sh --from dist --tls files --tls-cert /etc/redx/c.pem --tls-key /etc/redx/k.pem
+#   Undo with deploy/uninstall.sh (same mode flags; data/config kept unless --purge).
 # --from may be the directory holding redxd+redx, or the dist/ root (the right redx-*-OS-ARCH folder is picked).
 set -eu
 
-FROM=""; PREFIX=/usr/local; LISTEN="127.0.0.1:7777"; TLS="off"; USERMODE=0; NOSVC=0; ROLE=leader; PEERS=""
+FROM=""; PREFIX=/usr/local; LISTEN="127.0.0.1:7777"; TLS="off"; USERMODE=0; NOSVC=0; ROLE=leader; PEERS=""; TLSCERT=""; TLSKEY=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --from) FROM="$2"; shift 2;;
@@ -17,12 +19,27 @@ while [ $# -gt 0 ]; do
     --tls) TLS="$2"; shift 2;;
     --role) ROLE="$2"; shift 2;;
     --peers) PEERS="$2"; shift 2;;
+    --tls-cert) TLSCERT="$2"; shift 2;;
+    --tls-key) TLSKEY="$2"; shift 2;;
     --user) USERMODE=1; NOSVC=1; shift;;
     --no-service) NOSVC=1; shift;;
-    -h|--help) sed -n '2,10p' "$0"; exit 0;;
+    -h|--help) sed -n '2,12p' "$0"; exit 0;;
     *) echo "unknown option: $1" >&2; exit 2;;
   esac
 done
+
+# --- TOML string safety: every user value written to redx.toml goes through toml_str ----------------
+NL='
+'
+# reject_ctl NAME VALUE: refuse newlines and any other control character (C0 and DEL)
+reject_ctl() {
+  case "$2" in *"$NL"*) echo "invalid $1: newlines are not allowed" >&2; exit 2;; esac
+  if printf '%s' "$2" | LC_ALL=C grep -q '[[:cntrl:]]'; then echo "invalid $1: control characters are not allowed" >&2; exit 2; fi
+}
+# toml_str VALUE -> "VALUE" as a TOML basic string (backslash and double quote escaped)
+toml_str() { printf '"%s"' "$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"; }
+reject_ctl --listen "$LISTEN"; reject_ctl --tls "$TLS"; reject_ctl --role "$ROLE"; reject_ctl --peers "$PEERS"
+reject_ctl --tls-cert "$TLSCERT"; reject_ctl --tls-key "$TLSKEY"; reject_ctl HOME "${HOME:-}"
 
 OS=$(uname -s | tr '[:upper:]' '[:lower:]'); M=$(uname -m)
 case "$M" in
@@ -46,14 +63,16 @@ write_conf() { # $1=path $2=data_dir
   mkdir -p "$(dirname "$1")"
   if [ -e "$1" ]; then echo "keeping existing config $1"; return; fi
   {
-    echo "data_dir = \"$2\""
-    echo "listen = \"$LISTEN\""
-    echo "tls = \"$TLS\""
-    echo "role = \"$ROLE\""
+    printf '%s = %s\n' data_dir "$(toml_str "$2")"
+    printf '%s = %s\n' listen "$(toml_str "$LISTEN")"
+    printf '%s = %s\n' tls "$(toml_str "$TLS")"
+    [ -z "$TLSCERT" ] || printf '%s = %s\n' tls_cert "$(toml_str "$TLSCERT")"
+    [ -z "$TLSKEY" ] || printf '%s = %s\n' tls_key "$(toml_str "$TLSKEY")"
+    printf '%s = %s\n' role "$(toml_str "$ROLE")"
     if [ -n "$PEERS" ]; then # --peers a,b,c -> peers = ["a", "b", "c"]
-      printf 'peers = ['; SEP=""; OLDIFS=$IFS; IFS=,
-      for P in $PEERS; do [ -n "$P" ] && printf '%s"%s"' "$SEP" "$P" && SEP=", "; done
-      IFS=$OLDIFS; echo "]"
+      printf 'peers = ['; SEP=""; OLDIFS=$IFS; IFS=,; set -f
+      for P in $PEERS; do [ -n "$P" ] && printf '%s%s' "$SEP" "$(toml_str "$P")" && SEP=", "; done
+      set +f; IFS=$OLDIFS; echo "]"
     fi
   } > "$1"
   chmod 640 "$1" 2>/dev/null || true
@@ -71,6 +90,8 @@ console_url() {
 # $1 = "user" or "system". Needs redx.svg / redx.icns next to the binaries (the release archives ship them).
 install_launcher() {
   URL=$(console_url)
+  # the URL comes from --listen; only write launchers for a plain URL (no shell/desktop-entry metacharacters)
+  case "$URL" in *[!A-Za-z0-9:/.\[\]_-]*) echo "skipping console launcher (unusual --listen value)"; return 0;; esac
   if [ "$OS" = linux ]; then
     if [ "$1" = user ]; then APPS="${HOME}/.local/share/applications"; ICONS="${HOME}/.local/share/icons/hicolor/scalable/apps"
     else APPS=/usr/share/applications; ICONS=/usr/share/icons/hicolor/scalable/apps; fi
@@ -155,8 +176,11 @@ if [ "$OS" = linux ]; then
   [ -z "$RUN" ] || true
   chown -R redx:redx "$DATA"
   if [ "$NOSVC" = 0 ] && command -v systemctl >/dev/null; then
-    install -m 0644 "$HERE_DEPLOY/systemd/redxd.service" /etc/systemd/system/redxd.service 2>/dev/null || install -m 0644 "$FROM/systemd/redxd.service" /etc/systemd/system/redxd.service
-    sed -i "s#/usr/local/bin#$BIN#g" /etc/systemd/system/redxd.service
+    UNIT_SRC="$HERE_DEPLOY/systemd/redxd.service"; [ -f "$UNIT_SRC" ] || UNIT_SRC="$FROM/systemd/redxd.service"
+    # render the single unit template (deploy/systemd/redxd.service); the bin dir must be unit-safe
+    case "$BIN" in *[!A-Za-z0-9/._-]*) echo "--prefix must contain only A-Z a-z 0-9 / . _ - for the systemd unit" >&2; exit 2;; esac
+    sed -e "s#@BINDIR@#$BIN#g" -e "s#@DOCDIR@#$PREFIX/share/doc/redx#g" "$UNIT_SRC" > /etc/systemd/system/redxd.service
+    chmod 0644 /etc/systemd/system/redxd.service
     systemctl daemon-reload
     if [ "$ROLE" = follower ]; then
       systemctl enable redxd
