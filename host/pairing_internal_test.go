@@ -1,6 +1,7 @@
 package host
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -45,18 +46,18 @@ func TestPairStoreThrottleWindowReopens(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	p := &pairStore{now: func() time.Time { return now }}
 	for i := 0; i < pairFailPerIP; i++ {
-		if _, r := p.redeem("RP-AAAAA-AAAAA", "x"); r != pairBad {
+		if _, r := p.redeem(fmt.Sprintf("RP-AAAAA-AAAA%c", "ABCDEFGHJK"[i]), "x"); r != pairBad {
 			t.Fatalf("attempt %d: %v", i, r)
 		}
 	}
-	if _, r := p.redeem("RP-AAAAA-AAAAA", "x"); r != pairThrottled {
+	if _, r := p.redeem("RP-BBBBB-BBBBB", "x"); r != pairThrottled {
 		t.Fatal("not throttled")
 	}
-	if _, r := p.redeem("RP-AAAAA-AAAAA", "other"); r != pairBad {
+	if _, r := p.redeem("RP-BBBBB-BBBBB", "other"); r != pairBad {
 		t.Fatal("another client must not be throttled by x")
 	}
 	now = now.Add(pairFailWindow + time.Second)
-	if _, r := p.redeem("RP-AAAAA-AAAAA", "x"); r != pairBad {
+	if _, r := p.redeem("RP-CCCCC-CCCCC", "x"); r != pairBad {
 		t.Fatal("throttle should clear after the window")
 	}
 }
