@@ -34,11 +34,12 @@ Bytes are GiB/TiB (1024-based). Traffic and host switches reset each month on th
 | Platinum | 1 TB | 100 GB | 40 |
 | Emerald | 5 TB | 500 GB | unlimited |
 
-Enforcement applies to a signed-in non-owner and to API keys that account created (the key stores the account id). A lapsed or suspended plan is still that account: reads and writes are refused with the plan-state codes below, and quota checks keep using the stored tier instead of treating the key as self-hosted. Owner sessions, host-admin keys and self-hosted keys (no account on the key) are not capped. Storage is the bytes on disk for that account's databases, not a counter that only goes up.
+Enforcement applies to a signed-in non-owner and to API keys that account created (the key stores the account id). A lapsed or suspended plan is still that account: reads and writes are refused with the plan-state codes below, and quota checks keep using the stored tier instead of treating the key as self-hosted. Owner sessions, host-admin keys and self-hosted keys (no account on the key) are not capped. Storage is the bytes on disk for that account's databases plus its hosted apps, not a counter that only goes up.
 
 - **Storage**: a write that would pass the cap is refused with **402**, `code: "quota_exceeded"`, `limit: "storage_quota"`.
 - **Traffic**: request body + response bytes are metered. When the monthly total is already spent, further requests get **429**, `code: "quota_exceeded"`, `limit: "traffic_quota"`.
-- **Host switches**: creating or dropping a database, or `POST /v1/billing/hosting` with `action=on|off`, counts toward the budget. When it is exhausted, **402**, `code: "quota_exceeded"`, `limit: "host_switch_quota"`. The hosting route's `error` field stays `host_switch_quota`. Emerald is unlimited (`hostSwitches: -1`).
+- **Host switches**: creating or dropping a database, `POST /v1/billing/hosting` with `action=on|off`, and starting or stopping a hosted app (only when the running state changes) count toward the budget. When it is exhausted, **402**, `code: "quota_exceeded"`, `limit: "host_switch_quota"`. The hosting route's `error` field stays `host_switch_quota`. Emerald is unlimited (`hostSwitches: -1`).
+- **Hosted apps**: each tier also caps how many apps an account may run, and the CPU, memory, disk and log retention of each one. Those numbers live in [Hosting apps and sites](hosting-apps.md) and can be overridden with `apps_limits` / `REDX_APPS_LIMITS`. A second app past the cap is **402**, `limit: "app_quota"`. A deploy past the per-app disk cap is **402**, `limit: "app_disk_quota"`.
 
 ### When a plan is not active
 
