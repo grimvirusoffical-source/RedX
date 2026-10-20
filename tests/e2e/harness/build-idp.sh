@@ -1,8 +1,8 @@
 #!/bin/sh
 # Build e2e-oidc-idp from e2e-oidc-idp.patch in a throwaway worktree (shared branch untouched).
 set -e
-SRC=${REDX_SRC:-/workspace/redx-integration}
-OUT=${1:-/workspace/redx-e2e-bin/e2e-oidc-idp}
+SRC=${REDX_SRC:-${REDX_E2E_ROOT:-$(cd "$(dirname "$0")/../../.." && pwd)}}
+OUT=${1:-$SRC/bin/e2e-oidc-idp}
 HERE=$(cd "$(dirname "$0")" && pwd)
 WT=$(mktemp -d /tmp/redx-idp-wt-XXXX); rmdir "$WT"
 git -C "$SRC" worktree add -q --detach "$WT" HEAD

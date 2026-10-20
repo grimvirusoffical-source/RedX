@@ -13,7 +13,7 @@ from http.cookiejar import CookieJar
 
 from conftest import Host, free_port
 
-IDP_BIN = os.environ.get("E2E_OIDC_IDP", "/workspace/redx-e2e-bin/e2e-oidc-idp")
+IDP_BIN = os.environ.get("E2E_OIDC_IDP") or os.path.join(os.environ.get("REDX_E2E_ROOT") or os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")), "bin", "e2e-oidc-idp")
 OWNER_A = "owner@example.com"
 OWNER_B = "support-owner@example.com"
 

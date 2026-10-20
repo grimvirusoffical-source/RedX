@@ -1,8 +1,9 @@
 #!/bin/sh
 # Installer E2E inside a disposable container (real root). No shared-box /etc writes.
 set -e
-BINDIR=/workspace/redx-e2e-bin
-DEPLOY=/workspace/redx-integration/deploy
+ROOT=${REDX_E2E_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}
+BINDIR=${REDX_BIN_DIR:-$ROOT/bin}
+DEPLOY=${REDX_DEPLOY_DIR:-$ROOT/deploy}
 IMG=ubuntu:24.04
 WORKDIR=$(mktemp -d /tmp/redx-install-XXXX)
 cp -a "$BINDIR/redxd" "$BINDIR/redx" "$WORKDIR/"
