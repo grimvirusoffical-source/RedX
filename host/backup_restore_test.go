@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -82,6 +83,41 @@ func packTGZ(t *testing.T, ents []tarEntry) []byte {
 	tw.Close()
 	gz.Close()
 	return buf.Bytes()
+}
+
+// testBackupKeys seals hand-built archives: restore only accepts RXBK2.
+var testBackupKeys = host.BackupKeys{HostKey: bytes.Repeat([]byte{0x5c}, 32)}
+
+func sealTGZ(t *testing.T, tgz []byte) []byte {
+	t.Helper()
+	s, err := host.NewBackupSealer(testBackupKeys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	w, err := s.Seal(&out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write(tgz); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return out.Bytes()
+}
+
+// installed lists what a restore put in dir, ignoring the redxd.lock it takes.
+func installed(dir string) []string {
+	var out []string
+	ents, _ := os.ReadDir(dir)
+	for _, e := range ents {
+		if e.Name() != "redxd.lock" {
+			out = append(out, e.Name())
+		}
+	}
+	return out
 }
 
 func restore(dir string, raw []byte, o host.RestoreOptions) (*host.RestoreResult, error) {
@@ -229,7 +265,7 @@ func TestRestoreRefusesChangedFileBeforeInstall(t *testing.T) {
 		t.Fatal("no database file to change")
 	}
 	dir := t.TempDir()
-	_, err := restore(dir, packTGZ(t, ents), host.RestoreOptions{})
+	_, err := restore(dir, sealTGZ(t, packTGZ(t, ents)), host.RestoreOptions{Keys: testBackupKeys})
 	if err == nil || !strings.Contains(err.Error(), "integrity check failed") {
 		t.Fatalf("want integrity failure, got %v", err)
 	}
@@ -246,7 +282,7 @@ func TestRestoreRefusesChangedFileBeforeInstall(t *testing.T) {
 			dropped = append(dropped, e)
 		}
 	}
-	if _, err := restore(t.TempDir(), packTGZ(t, dropped), host.RestoreOptions{}); err == nil || !strings.Contains(err.Error(), "missing") {
+	if _, err := restore(t.TempDir(), sealTGZ(t, packTGZ(t, dropped)), host.RestoreOptions{Keys: testBackupKeys}); err == nil || !strings.Contains(err.Error(), "missing") {
 		t.Fatalf("missing entry: %v", err)
 	}
 }
@@ -267,7 +303,7 @@ func TestRestoreVersionChecks(t *testing.T) {
 		}
 		return out
 	}
-	if _, err := restore(t.TempDir(), packTGZ(t, bump("manifest.json", func(m map[string]interface{}) { m["version"] = 99 })), host.RestoreOptions{}); err == nil || !strings.Contains(err.Error(), "version 99") {
+	if _, err := restore(t.TempDir(), sealTGZ(t, packTGZ(t, bump("manifest.json", func(m map[string]interface{}) { m["version"] = 99 }))), host.RestoreOptions{Keys: testBackupKeys}); err == nil || !strings.Contains(err.Error(), "version 99") {
 		t.Fatalf("manifest version 99: %v", err)
 	}
 	// keys.json version 99, with the manifest updated to match so only the version check can refuse it
@@ -295,7 +331,7 @@ func TestRestoreVersionChecks(t *testing.T) {
 		}
 		return k99
 	}()
-	if _, err := restore(t.TempDir(), packTGZ(t, k99), host.RestoreOptions{}); err == nil || !strings.Contains(err.Error(), "keys.json version 99") {
+	if _, err := restore(t.TempDir(), sealTGZ(t, packTGZ(t, k99)), host.RestoreOptions{Keys: testBackupKeys}); err == nil || !strings.Contains(err.Error(), "keys.json version 99") {
 		t.Fatalf("keys.json version 99: %v", err)
 	}
 }
@@ -305,7 +341,7 @@ func TestRestoreAcceptsBareDirEntries(t *testing.T) {
 	ents := sampleEntries(t)
 	dirHdr := &tar.Header{Name: "dbs/", Typeflag: tar.TypeDir, Mode: 0o700}
 	ents = append([]tarEntry{{dirHdr, nil}}, ents...)
-	if _, err := restore(t.TempDir(), packTGZ(t, ents), host.RestoreOptions{}); err != nil {
+	if _, err := restore(t.TempDir(), sealTGZ(t, packTGZ(t, ents)), host.RestoreOptions{Keys: testBackupKeys}); err != nil {
 		t.Fatalf("bare dbs/ entry: %v", err)
 	}
 }
@@ -318,10 +354,10 @@ func TestRestoreForceMovesStaleStateAside(t *testing.T) {
 		os.MkdirAll(filepath.Join(dir, filepath.Dir(p)), 0o700)
 		os.WriteFile(filepath.Join(dir, p), []byte("stale"), 0o600)
 	}
-	if _, err := restore(dir, packTGZ(t, ents), host.RestoreOptions{}); err == nil || !strings.Contains(err.Error(), "--force") {
+	if _, err := restore(dir, sealTGZ(t, packTGZ(t, ents)), host.RestoreOptions{Keys: testBackupKeys}); err == nil || !strings.Contains(err.Error(), "--force") {
 		t.Fatalf("non-empty dir without --force: %v", err)
 	}
-	res, err := restore(dir, packTGZ(t, ents), host.RestoreOptions{Force: true})
+	res, err := restore(dir, sealTGZ(t, packTGZ(t, ents)), host.RestoreOptions{Keys: testBackupKeys, Force: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -357,28 +393,18 @@ func TestRestoreForceMovesStaleStateAside(t *testing.T) {
 	}
 }
 
-// Old plaintext backups still restore, with a warning.
-func TestRestoreLegacyPlaintextArchiveWarns(t *testing.T) {
-	ents := sampleEntries(t)
-	var legacy []tarEntry
-	for _, e := range ents {
-		if e.hdr.Name != "manifest.json" && !strings.HasPrefix(e.hdr.Name, "connect/") {
-			legacy = append(legacy, e)
+// Old plaintext .tgz backups are refused before anything is unpacked.
+func TestRestoreRefusesLegacyPlaintextArchive(t *testing.T) {
+	for _, ents := range [][]tarEntry{sampleEntries(t), nil} {
+		dir := t.TempDir()
+		_, err := restore(dir, packTGZ(t, ents), host.RestoreOptions{Keys: testBackupKeys, Force: true})
+		if !errors.Is(err, host.ErrLegacyBackup) || !strings.Contains(err.Error(), "unsupported legacy backup format; create a new backup with this version") {
+			t.Fatalf("plain tgz: %v", err)
+		}
+		if left := installed(dir); len(left) != 0 {
+			t.Fatalf("refused restore left files behind: %v", left)
 		}
 	}
-	dir := t.TempDir()
-	res, err := restore(dir, packTGZ(t, legacy), host.RestoreOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	all := strings.Join(res.Warnings, "\n")
-	for _, want := range []string{"unencrypted", "no manifest", "connect"} {
-		if !strings.Contains(all, want) {
-			t.Fatalf("legacy warnings missing %q: %v", want, res.Warnings)
-		}
-	}
-	n := startNode(t, dir, nil)
-	_ = n
 }
 
 // The offline path with redxd running: the daemon's answer is encrypted on disk too.

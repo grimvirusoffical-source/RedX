@@ -93,33 +93,6 @@ func TestWycheproofChaCha20Poly1305(t *testing.T) {
 	}
 }
 
-func TestWycheproofAES256GCMOpen(t *testing.T) {
-	f := loadWP(t, "aes_gcm_test.json")
-	n := 0
-	for _, g := range f.TestGroups {
-		if g.KeySize != 256 || g.TagSize != 128 {
-			continue // the migration reader is AES-256 with 16-byte tags only
-		}
-		for _, c := range g.Tests {
-			if len(c.Iv) == 0 {
-				continue // zero-length IV is not valid GCM; the reader refuses it with ErrParam
-			}
-			pt, err := AES256GCMOpenLegacy(unhex(t, c.Key), unhex(t, c.Iv), unhex(t, c.Aad), unhex(t, c.Ct), unhex(t, c.Tag))
-			if c.Result == "valid" || c.Result == "acceptable" {
-				if err != nil || !CtEq(pt, unhex(t, c.Msg)) {
-					t.Errorf("tc %d: valid case failed: %v", c.TcID, err)
-				}
-			} else if err == nil {
-				t.Errorf("tc %d (%v): invalid case accepted", c.TcID, c.Flags)
-			}
-			n++
-		}
-	}
-	if n < 50 {
-		t.Fatalf("only %d AES-256 cases ran", n)
-	}
-}
-
 func TestWycheproofHmacSha1(t *testing.T) {
 	f := loadWP(t, "hmac_sha1_test.json")
 	n := 0
@@ -176,38 +149,6 @@ func TestWycheproofHkdfSha256(t *testing.T) {
 	}
 	if n != f.NumberOfTests {
 		t.Fatalf("ran %d of %d", n, f.NumberOfTests)
-	}
-}
-
-func TestAES256NISTVectors(t *testing.T) {
-	// FIPS-197 Appendix C.3
-	eqHex(t, "aes256 fips197 C.3", aes256EncryptBlockForTest(unhex(t, "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"), unhex(t, "00112233445566778899aabbccddeeff")), "8ea2b7ca516745bfeafc49904b496089")
-	// GCM spec (McGrew & Viega) test cases 13-16, AES-256
-	k0 := make([]byte, 32)
-	if p, err := AES256GCMOpenLegacy(k0, make([]byte, 12), nil, nil, unhex(t, "530f8afbc74536b9a963b4f1c4cb738b")); err != nil || len(p) != 0 {
-		t.Fatal("gcm tc13")
-	}
-	if p, err := AES256GCMOpenLegacy(k0, make([]byte, 12), nil, unhex(t, "cea7403d4d606b6e074ec5d3baf39d18"), unhex(t, "d0d1c8a799996bf0265b98b5d48ab919")); err != nil || !CtEq(p, make([]byte, 16)) {
-		t.Fatal("gcm tc14")
-	}
-	K := unhex(t, "feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308")
-	IV := unhex(t, "cafebabefacedbaddecaf888")
-	P := "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a721c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b391aafd255"
-	C := "522dc1f099567d07f47f37a32a84427d643a8cdcbfe5c0c97598a2bd2555d1aa8cb08e48590dbb3da7b08b1056828838c5f61e6393ba7a0abcc9f662898015ad"
-	p, err := AES256GCMOpenLegacy(K, IV, nil, unhex(t, C), unhex(t, "b094dac5d93471bdec1a502270e3cc6c"))
-	if err != nil {
-		t.Fatal("gcm tc15", err)
-	}
-	eqHex(t, "gcm tc15", p, P)
-	p, err = AES256GCMOpenLegacy(K, IV, unhex(t, "feedfacedeadbeeffeedfacedeadbeefabaddad2"), unhex(t, C[:120]), unhex(t, "76fc6ece0f4e1768cddf8853bb2d551b"))
-	if err != nil {
-		t.Fatal("gcm tc16", err)
-	}
-	eqHex(t, "gcm tc16", p, P[:120])
-	bad := unhex(t, "76fc6ece0f4e1768cddf8853bb2d551b")
-	bad[15] ^= 1
-	if _, err := AES256GCMOpenLegacy(K, IV, unhex(t, "feedfacedeadbeeffeedfacedeadbeefabaddad2"), unhex(t, C[:120]), bad); err != ErrAuth {
-		t.Fatal("gcm tc16 with a flipped tag must be ErrAuth")
 	}
 }
 

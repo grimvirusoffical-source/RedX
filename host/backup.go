@@ -844,9 +844,6 @@ func OfflineRestore(dataDir string, r io.Reader, opts RestoreOptions) (*RestoreR
 	if err != nil {
 		return nil, err
 	}
-	if hdr == nil {
-		res.Warnings = append(res.Warnings, "this is an unencrypted backup from an older RedX: it stores the signing key, keys.json and tenants.json in plaintext. Restore it, then take a new (encrypted) backup and destroy this file")
-	}
 	tmp, err := os.MkdirTemp(dataDir, ".restore-")
 	if err != nil {
 		return nil, err

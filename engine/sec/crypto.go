@@ -37,13 +37,12 @@ import (
 // "redx-sec wrap v2"), and the wrap and every segment use ChaCha20-Poly1305
 // (RFC 8439, 96-bit random nonce, 16-byte tag), so all sizes are unchanged. The
 // segment additional data starts with "RXSEC2-seg" instead of "RXSEC-seg".
-// Version 1 (AES-256-GCM) is still read, through the Red-SecretsXAI decrypt-only
-// AES-GCM migration reader, and is never written: Rewrap of a v1 file decrypts
-// and re-encrypts it as v2.
+// Version 1 (the old AES-256-GCM files) is neither read nor written: it is refused
+// with ErrLegacyFormat and has to be recreated with this version.
 const (
 	magic              = "RXSEC"
 	formatVersion      = 2
-	legacyVersion      = 1
+	legacyVersion      = 1 // refused, see ErrLegacyFormat
 	DefaultSegmentSize = 64 << 10
 	MinSegmentSize     = 16
 	MaxSegmentSize     = 1 << 20
@@ -108,7 +107,10 @@ func readHeader(r io.Reader) (*header, error) {
 	if string(fixed[:5]) != magic {
 		return nil, fmt.Errorf("%w: bad magic", ErrFormat)
 	}
-	if fixed[5] != formatVersion && fixed[5] != legacyVersion {
+	if fixed[5] == legacyVersion {
+		return nil, ErrLegacyFormat
+	}
+	if fixed[5] != formatVersion {
 		return nil, fmt.Errorf("%w: unsupported version %d", ErrFormat, fixed[5])
 	}
 	if fixed[6] != 0 {
@@ -146,14 +148,9 @@ func headerErr(err error) error {
 	return err
 }
 
-// deriveWrapKey is HKDF-SHA256 (RFC 5869), one 32-byte output block. The info
-// string differs per version.
-func deriveWrapKey(master *[KeySize]byte, salt []byte, ver byte) [32]byte {
-	info := "redx-sec wrap v2"
-	if ver == legacyVersion {
-		info = "redx-sec wrap v1"
-	}
-	okm, _ := rsx.HkdfSha256(master[:], salt, []byte(info), 32)
+// deriveWrapKey is HKDF-SHA256 (RFC 5869), one 32-byte output block.
+func deriveWrapKey(master *[KeySize]byte, salt []byte) [32]byte {
+	okm, _ := rsx.HkdfSha256(master[:], salt, []byte("redx-sec wrap v2"), 32)
 	var out [32]byte
 	copy(out[:], okm)
 	rsx.Wipe(okm)
@@ -162,26 +159,20 @@ func deriveWrapKey(master *[KeySize]byte, salt []byte, ver byte) [32]byte {
 
 func wipe(b []byte) { rsx.Wipe(b) }
 
-// seal is ChaCha20-Poly1305 appending ct||tag to dst (v2 only: v1 is never written).
+// seal is ChaCha20-Poly1305 appending ct||tag to dst.
 func seal(dst, key, nonce, plain, aad []byte) []byte {
 	ct, tag, _ := rsx.AeadEncrypt(key, nonce, aad, plain)
 	dst = append(dst, ct...)
 	return append(dst, tag[:]...)
 }
 
-// open authenticates and decrypts ct||tag for either version.
-func open(ver byte, key, nonce, sealed, aad []byte) ([]byte, error) {
+// open authenticates and decrypts ct||tag.
+func open(key, nonce, sealed, aad []byte) ([]byte, error) {
 	if len(sealed) < gcmTag {
 		return nil, ErrAuth
 	}
 	ct, tag := sealed[:len(sealed)-gcmTag], sealed[len(sealed)-gcmTag:]
-	var pt []byte
-	var err error
-	if ver == legacyVersion {
-		pt, err = rsx.AES256GCMOpenLegacy(key, nonce, aad, ct, tag)
-	} else {
-		pt, err = rsx.AeadDecrypt(key, nonce, aad, ct, tag)
-	}
+	pt, err := rsx.AeadDecrypt(key, nonce, aad, ct, tag)
 	if err != nil {
 		return nil, ErrAuth
 	}
@@ -198,7 +189,7 @@ func (h *header) wrap(master *MasterKey, dataKey []byte, ctx []byte) error {
 	if err := rsx.Random(h.nonce[:]); err != nil {
 		return fmt.Errorf("sec: random: %w", err)
 	}
-	wk := deriveWrapKey(master.key, h.salt[:], h.ver)
+	wk := deriveWrapKey(master.key, h.salt[:])
 	defer wipe(wk[:])
 	out := seal(nil, wk[:], h.nonce[:], dataKey, withContext(h.aadPrefix(), ctx))
 	copy(h.wrapped[:], out)
@@ -207,18 +198,14 @@ func (h *header) wrap(master *MasterKey, dataKey []byte, ctx []byte) error {
 
 // unwrap returns the data key. The caller wipes it.
 func (h *header) unwrap(master *MasterKey, ctx []byte) ([]byte, error) {
-	wk := deriveWrapKey(master.key, h.salt[:], h.ver)
+	wk := deriveWrapKey(master.key, h.salt[:])
 	defer wipe(wk[:])
-	return open(h.ver, wk[:], h.nonce[:], h.wrapped[:], withContext(h.aadPrefix(), ctx))
+	return open(wk[:], h.nonce[:], h.wrapped[:], withContext(h.aadPrefix(), ctx))
 }
 
 func segAAD(h *header, idx uint64, final bool, ctx []byte) []byte {
 	b := make([]byte, 0, 9+fileIDLen+4+8+1+4+len(ctx))
-	if h.ver == legacyVersion {
-		b = append(b, "RXSEC-seg"...)
-	} else {
-		b = append(b, "RXSEC2-seg"...)
-	}
+	b = append(b, "RXSEC2-seg"...)
 	b = append(b, h.fileID[:]...)
 	b = binary.BigEndian.AppendUint32(b, h.segSize)
 	b = binary.BigEndian.AppendUint64(b, idx)
@@ -340,7 +327,7 @@ func newReaderFromHeader(br *bufio.Reader, h *header, master *MasterKey, o Optio
 	return &Reader{br: br, key: dk, h: h, ctx: append([]byte(nil), o.Context...)}, nil
 }
 
-// Version reports the format version of the stream being read (1 = legacy AES-GCM).
+// Version reports the format version of the stream being read (always 2: version 1 is refused).
 func (r *Reader) Version() int { return int(r.h.ver) }
 
 func (r *Reader) nextSegment() error {
@@ -372,10 +359,10 @@ func (r *Reader) nextSegment() error {
 		return perr
 	}
 	nonce, ct := buf[:gcmNonce], buf[gcmNonce:]
-	pt, err := open(r.h.ver, r.key, nonce, ct, segAAD(r.h, r.idx, final, r.ctx))
+	pt, err := open(r.key, nonce, ct, segAAD(r.h, r.idx, final, r.ctx))
 	if err != nil {
 		// Work out whether it was cut short or has extra data: retry with the other flag.
-		if _, err2 := open(r.h.ver, r.key, nonce, ct, segAAD(r.h, r.idx, !final, r.ctx)); err2 == nil {
+		if _, err2 := open(r.key, nonce, ct, segAAD(r.h, r.idx, !final, r.ctx)); err2 == nil {
 			if final {
 				return fmt.Errorf("%w: stream ends before its final segment", ErrTruncated)
 			}
@@ -471,20 +458,6 @@ func Rewrap(dst io.Writer, src io.Reader, from KeySource, to *MasterKey, o Optio
 	old, ok := from.Key(h.keyID)
 	if !ok || !old.usable() {
 		return fmt.Errorf("%w: %q", ErrUnknownKey, h.keyID)
-	}
-	if h.ver == legacyVersion {
-		// v1 (AES-GCM) cannot be re-wrapped without writing AES: decrypt it fully
-		// (every segment is authenticated) and write it again as v2.
-		r, err := newReaderFromHeader(bufio.NewReaderSize(src, 1<<16), h, old, o)
-		if err != nil {
-			return err
-		}
-		o2 := o
-		o2.SegmentSize = int(h.segSize)
-		if o2.SegmentSize > MaxSegmentSize {
-			o2.SegmentSize = MaxSegmentSize
-		}
-		return Encrypt(dst, r, to, o2)
 	}
 	dk, err := h.unwrap(old, o.Context)
 	if err != nil {

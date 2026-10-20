@@ -2,6 +2,7 @@ package host_test
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -10,12 +11,11 @@ import (
 )
 
 // testdata/legacy/rxbk1_*.bin were written by the pre-migration RedX (d1f2122):
-// RXBK1 = engine/sec v1 (AES-256-GCM) with an Argon2id passphrase or the host key.
-// They must still restore, through the Red-SecretsXAI migration readers, and the
-// restored host must serve the data that was in them.
-func TestLegacyRXBK1BackupsRestore(t *testing.T) {
+// RXBK1 = engine/sec v1 (AES-256-GCM). They are no longer supported: restore
+// must refuse them with ErrLegacyBackup even with the right secret, before any
+// decryption, and install nothing.
+func TestLegacyRXBK1BackupsRefused(t *testing.T) {
 	hk, _ := os.ReadFile("testdata/legacy/rxbk1_hostkey.key")
-	key, _ := os.ReadFile("testdata/legacy/key.txt")
 	for _, c := range []struct {
 		file string
 		keys host.BackupKeys
@@ -28,30 +28,15 @@ func TestLegacyRXBK1BackupsRestore(t *testing.T) {
 			t.Fatalf("%s: fixture missing or not RXBK1", c.file)
 		}
 		dir := t.TempDir()
-		if _, err := restore(dir, raw, host.RestoreOptions{Keys: c.keys}); err != nil {
-			t.Fatalf("%s: restore: %v", c.file, err)
+		_, err = restore(dir, raw, host.RestoreOptions{Keys: c.keys})
+		if !errors.Is(err, host.ErrLegacyBackup) || !strings.Contains(err.Error(), "unsupported legacy backup format; create a new backup with this version") {
+			t.Fatalf("%s: %v", c.file, err)
 		}
-		n := startNode(t, dir, nil)
-		st, b, _ := do(t, "GET", n.URL+P+"b:B.K", strings.TrimSpace(string(key)), "")
-		if st != 200 || !strings.Contains(b, "legacy-value-rxbk1") {
-			t.Fatalf("%s: restored value: %d %s", c.file, st, b)
+		if left := installed(dir); len(left) != 0 {
+			t.Fatalf("%s: refused restore left %v", c.file, left)
 		}
-		n.Stop()
-		// wrong secret and a flipped byte are refused, and nothing is installed
-		wrong := c.keys
-		if wrong.Passphrase != "" {
-			wrong.Passphrase += "x"
-		} else {
-			wrong.HostKey = bytes.Repeat([]byte{1}, 32)
-		}
-		if _, err := restore(t.TempDir(), raw, host.RestoreOptions{Keys: wrong}); err == nil {
-			t.Fatalf("%s: wrong secret accepted", c.file)
-		}
-		bad := append([]byte(nil), raw...)
-		bad[len(bad)-20] ^= 1
-		d2 := t.TempDir()
-		if _, err := restore(d2, bad, host.RestoreOptions{Keys: c.keys}); err == nil {
-			t.Fatalf("%s: tampered archive accepted", c.file)
+		if _, _, err := host.OpenBackup(bytes.NewReader(raw), c.keys); !errors.Is(err, host.ErrLegacyBackup) {
+			t.Fatalf("%s: OpenBackup: %v", c.file, err)
 		}
 	}
 }

@@ -122,3 +122,25 @@ func ShamirCombine(shares [][]byte) ([]byte, error) {
 	}
 	return out, nil
 }
+
+// gmul8 multiplies in GF(2^8) modulo x^8+x^4+x^3+x+1 (the field librsx's
+// Shamir code uses), branch-free.
+func gmul8(a, b byte) byte {
+	var p byte
+	for i := 0; i < 8; i++ {
+		p ^= -(b & 1) & a
+		hi := -(a >> 7)
+		a = a<<1 ^ (hi & 0x1b)
+		b >>= 1
+	}
+	return p
+}
+
+func gfInv8(a byte) byte { // a^254; inv(0) = 0
+	r, x := byte(1), a
+	for i := 0; i < 7; i++ {
+		x = gmul8(x, x)
+		r = gmul8(r, x)
+	}
+	return r
+}

@@ -1,6 +1,9 @@
 package sec
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // Errors. Use errors.Is.
 var (
@@ -20,4 +23,7 @@ var (
 	ErrTruncated = errors.New("sec: truncated ciphertext")
 	// ErrFormat: not a RedX encrypted file or an unsupported version.
 	ErrFormat = errors.New("sec: bad encrypted-file format")
+	// ErrLegacyFormat: the data is in the old RXSEC v1 (AES-GCM) format, which is
+	// not read any more. It also matches ErrFormat.
+	ErrLegacyFormat = fmt.Errorf("%w: unsupported legacy RXSEC v1 (AES-GCM) data; recreate it with this version", ErrFormat)
 )

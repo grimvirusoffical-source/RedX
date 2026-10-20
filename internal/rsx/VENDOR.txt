@@ -1,9 +1,8 @@
 Red-SecretsXAI pure-Go package, vendored from sdk/go/rsx
-commit cfde70efdd9fac7816108b7652ac005e3331332f
+commit e9fb6740f054681e069ccdb3dbca70fc706e5057
 branch go-port
 Do not edit these files here: change Red-SecretsXAI and re-run scripts/sync-rsx.sh.
 files (sha256 of the vendored library files):
-74b7a4b721a28a51303a8a22ac1375209453c3e59912a4d437b21a8625b8cd2d  aesgcm_legacy.go
 6dcd36a8a06c9405758d2eaa56f65a995b520e5c152c23aefa26e80991803d61  argon2.go
 6878a33a2a2231175708b962da078869cda919d3840639bdbccc6a5f6a4afac8  atomic.go
 ec11d8b4a15e0582f95b5c521ef4ad22bb1187c91d9f9ef15e6fa0010d181b4d  cancel.go
@@ -25,6 +24,6 @@ b6e66bbf3e1d94b976f331453478cd50eabb2c0847d44425b2121fdd1d056818  random_unix.go
 389f909775f08666e42f65d6a96a0b6faad9202e3ace0412d62cca6595915065  random_windows.go
 b64bf9d6f7b66058c39bf04aeb10d30ec21bb928b5b1feb389e36107467b9d91  ratchet.go
 32f247b79700e7e57b11080d8bcf920d8295f2557e1951403f719afff1391c8f  session.go
-ecef0ece9a9f7419adcd0bbfbcb8da080cbe71fb8a19c8c63f835a4821f5f303  shamir.go
+a44e3a82c7f538fd3357e0f1dc72c77bd0ddc2fa9a907ba6951e1e0fd2109dd6  shamir.go
 0595b29dcfbcb8e7ea3f64a0a36a0b0fa81df4a8025626fae99ab63a7b2abc2d  stream.go
 5a4fe2021959f10c8d75cf6ae9bbb283201b6b60ed7fc5835d45c8d3526126bf  util.go

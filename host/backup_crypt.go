@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"redx/engine/sec"
 	"redx/internal/rsx"
 )
 
@@ -30,15 +29,16 @@ import (
 // KDF parameters and mode cannot be altered, and RSX3 authenticates completion
 // (a truncated archive never restores).
 //
-// Older archives still restore (migration readers):
-//   - "RXBK1\n" archives (engine/sec v1, AES-256-GCM) through the engine/sec
-//     legacy reader, which uses the Red-SecretsXAI decrypt-only AES-GCM;
-//   - plain tar.gz (gzip magic 1f 8b), with a warning.
+// Older archives are refused, never decrypted or unpacked: "RXBK1\n" (AES-GCM
+// era) and plain tar.gz (gzip magic 1f 8b) both fail with ErrLegacyBackup.
 
 const (
 	backupMagic   = "RXBK2\n"
-	backupMagicV1 = "RXBK1\n"
+	backupMagicV1 = "RXBK1\n" // refused
 )
+
+// ErrLegacyBackup is returned for .tgz and RXBK1 (AES-era) archives.
+var ErrLegacyBackup = errors.New("unsupported legacy backup format; create a new backup with this version")
 
 // BackupSealer encrypts and decrypts one backup archive stream.
 type BackupSealer interface {
@@ -72,20 +72,15 @@ const (
 	backupKDFMemKiB = 64 * 1024
 	backupKDFPar    = 4
 	backupCipher    = "rsx3-v2"
-	backupCipherV1  = "redx-sec-v1"
-	backupKeyID     = "redx-backup"
-	backupKeyFile   = "backup.key"
+
+	backupKeyID   = "redx-backup"
+	backupKeyFile = "backup.key"
 )
 
 type rsxSealer struct {
 	key  []byte
 	hdr  BackupHeader
 	line []byte
-}
-
-// secSealer opens legacy RXBK1 archives only.
-type secSealer struct {
-	key []byte
 }
 
 func keyFP(k []byte) string { s := rsx.Sha256(k); return hex.EncodeToString(s[:8]) }
@@ -195,42 +190,12 @@ func (r *rsxReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// Seal is not supported for legacy RXBK1: new backups are always RXBK2.
-func (s *secSealer) Seal(dst io.Writer) (io.WriteCloser, error) {
-	return nil, errors.New("backup: RXBK1 is read-only")
-}
-
-func (s *secSealer) Open(src io.Reader, hdr BackupHeader, raw []byte) (io.Reader, error) {
-	mk, err := sec.NewMasterKey(backupKeyID, s.key)
-	if err != nil {
-		return nil, err
-	}
-	ring, err := sec.NewKeyring(mk)
-	if err != nil {
-		return nil, err
-	}
-	r, err := sec.NewReader(src, ring, sec.Options{Context: backupAAD(backupMagicV1, raw)})
-	if err != nil {
-		if errors.Is(err, sec.ErrAuth) {
-			return nil, errBackupAuth
-		}
-		return nil, err
-	}
-	return r, nil
-}
-
 // openerFor derives the key for an existing header. magic is the archive's magic line.
 func openerFor(magic string, h BackupHeader, k BackupKeys) (BackupSealer, error) {
-	legacy := magic == backupMagicV1
-	if (legacy && (h.V != 1 || h.Cipher != backupCipherV1)) || (!legacy && (h.V != 2 || h.Cipher != backupCipher)) {
+	if magic != backupMagic || h.V != 2 || h.Cipher != backupCipher {
 		return nil, fmt.Errorf("backup: unsupported encrypted backup (v%d, %s); it was made by a newer RedX", h.V, h.Cipher)
 	}
-	mk := func(key []byte) BackupSealer {
-		if legacy {
-			return &secSealer{key: key}
-		}
-		return &rsxSealer{key: key, hdr: h}
-	}
+	mk := func(key []byte) BackupSealer { return &rsxSealer{key: key, hdr: h} }
 	switch h.Mode {
 	case "passphrase":
 		if k.Passphrase == "" {
@@ -261,7 +226,8 @@ func openerFor(magic string, h BackupHeader, k BackupKeys) (BackupSealer, error)
 }
 
 // OpenBackup detects the archive format. It returns the plaintext tar.gz
-// reader, the header (nil for a legacy plaintext archive) and an error.
+// reader, the header and an error. Legacy archives (plain tar.gz, RXBK1) are
+// refused with ErrLegacyBackup before anything is decrypted or unpacked.
 func OpenBackup(src io.Reader, k BackupKeys) (io.Reader, *BackupHeader, error) {
 	br := bufio.NewReader(src)
 	peek, err := br.Peek(len(backupMagic))
@@ -269,10 +235,13 @@ func OpenBackup(src io.Reader, k BackupKeys) (io.Reader, *BackupHeader, error) {
 		return nil, nil, fmt.Errorf("backup: %w", err)
 	}
 	if len(peek) >= 2 && peek[0] == 0x1f && peek[1] == 0x8b {
-		return br, nil, nil // legacy plaintext tar.gz
+		return nil, nil, fmt.Errorf("backup: %w (plain .tgz)", ErrLegacyBackup)
 	}
 	magic := string(peek)
-	if magic != backupMagic && magic != backupMagicV1 {
+	if magic == backupMagicV1 {
+		return nil, nil, fmt.Errorf("backup: %w (RXBK1)", ErrLegacyBackup)
+	}
+	if magic != backupMagic {
 		return nil, nil, errors.New("backup: not a RedX backup (unknown format)")
 	}
 	_, _ = br.Discard(len(magic))

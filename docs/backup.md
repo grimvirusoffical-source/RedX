@@ -10,7 +10,7 @@ redx restore cold.rxbk --data-dir /var/lib/redx [--force]
 
 ## Encryption
 
-Backups are always encrypted. Nothing in the file is readable without the key: not the databases, not `keys.json`, not `tenants.json`, not the update signing key. The file is `RXBK1`: a short header line (mode, KDF parameters, salt, key fingerprint), then an authenticated stream (HKDF-SHA256 key wrap, AES-256-GCM segments, the header is bound as associated data, a truncated file fails).
+Backups are always encrypted. Nothing in the file is readable without the key: not the databases, not `keys.json`, not `tenants.json`, not the update signing key. The file is `RXBK2`: a short header line (mode, Argon2id parameters, salt, key fingerprint), then a Red-SecretsXAI RSX3 v2 stream (ChaCha20-Poly1305 chunks under a random data key wrapped by the passphrase-derived or host backup key; the header is bound as associated data, and a truncated file fails).
 
 Two key modes:
 
@@ -19,7 +19,7 @@ Two key modes:
 
 `redx restore` uses `REDX_BACKUP_PASSPHRASE` / `--passphrase-file` for passphrase backups and `--backup-key-file FILE` (or the target's own `<data>/backup.key`) for host-key backups. A wrong passphrase, a wrong key or a changed byte is refused before anything is written.
 
-Backups made before encryption (plain `.tgz`) still restore; `redx restore` warns that they are unencrypted and have no manifest.
+Older backups (plain `.tgz`, and `RXBK1` files from the AES-GCM era) are refused with "unsupported legacy backup format; create a new backup with this version". They are not decrypted or unpacked.
 
 ## Contents
 
