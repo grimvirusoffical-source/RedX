@@ -53,7 +53,7 @@ func (h *Host) BillingUsage(accountSub string) (billing.UsageStatus, bool) {
 
 func (h *Host) billingRoute(w http.ResponseWriter, r *http.Request) {
 	if h.billing == nil {
-		writeErr(w, 404, "not found")
+		writeAPIErr(w, 404, "not found", "billing_off", "Billing is not enabled on this server.")
 		return
 	}
 	h.billing.Handler(func(w http.ResponseWriter, r *http.Request) (billing.Identity, bool) {
@@ -61,12 +61,12 @@ func (h *Host) billingRoute(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, ErrThrottled):
 			w.Header().Set("Retry-After", strconv.Itoa(int(wait/time.Second)+1))
-			writeErr(w, http.StatusTooManyRequests, "rate limit exceeded")
+			writeAPIErr(w, http.StatusTooManyRequests, "rate limit exceeded", "rate_limited", "Too many requests. Wait a moment and try again.")
 			return billing.Identity{}, false
 		case err != nil:
 			h.authBad.Add(1)
 			w.Header().Set("WWW-Authenticate", `Bearer realm="redx"`)
-			writeErr(w, http.StatusUnauthorized, "unauthorized")
+			writeAPIErr(w, http.StatusUnauthorized, "unauthorized", "unauthorized", "Sign in, or send a valid API key, to use billing.")
 			return billing.Identity{}, false
 		}
 		if pr.Account == nil || pr.Account.Sub == "" {

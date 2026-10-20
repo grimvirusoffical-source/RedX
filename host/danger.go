@@ -140,5 +140,5 @@ func requireDangerConfirm(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func writeErrCode(w http.ResponseWriter, status int, code, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg, "code": code})
+	writeAPIErr(w, status, msg, code, msg)
 }

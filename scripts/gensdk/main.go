@@ -284,7 +284,12 @@ func openapi(s *Spec) string {
 		"components": map[string]interface{}{
 			"securitySchemes": map[string]interface{}{"bearer": map[string]string{"type": "http", "scheme": "bearer"}},
 			"responses": map[string]interface{}{"Error": map[string]interface{}{"description": "Error", "content": map[string]interface{}{"application/json": map[string]interface{}{
-				"schema": map[string]interface{}{"type": "object", "properties": map[string]interface{}{"error": map[string]string{"type": "string"}, "code": map[string]string{"type": "string"}}}}}}},
+				"schema": map[string]interface{}{"type": "object", "required": []string{"error", "code", "message"}, "properties": map[string]interface{}{
+					"code":    map[string]string{"type": "string", "description": "Stable machine-readable error code (for example not_found, unauthorized, rate_limited, billing_off, bad_plan, plan_required). Safe to switch on."},
+					"message": map[string]string{"type": "string", "description": "Human-readable explanation for display."},
+					"error":   map[string]string{"type": "string", "description": "Legacy field kept for compatibility. On /v1/billing/* and account routes it equals code; elsewhere it carries the previous message text. New clients should read code and message."},
+					"upgrade": map[string]string{"type": "string", "description": "Present on quota errors: where to change plan."},
+				}}}}}},
 		},
 	}
 	b, _ := json.MarshalIndent(doc, "", " ")

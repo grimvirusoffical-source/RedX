@@ -7,12 +7,27 @@
       "schema": {
        "properties": {
         "code": {
+         "description": "Stable machine-readable error code (for example not_found, unauthorized, rate_limited, billing_off, bad_plan, plan_required). Safe to switch on.",
          "type": "string"
         },
         "error": {
+         "description": "Legacy field kept for compatibility. On /v1/billing/* and account routes it equals code; elsewhere it carries the previous message text. New clients should read code and message.",
+         "type": "string"
+        },
+        "message": {
+         "description": "Human-readable explanation for display.",
+         "type": "string"
+        },
+        "upgrade": {
+         "description": "Present on quota errors: where to change plan.",
          "type": "string"
         }
        },
+       "required": [
+        "error",
+        "code",
+        "message"
+       ],
        "type": "object"
       }
      }

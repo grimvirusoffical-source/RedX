@@ -125,6 +125,18 @@ func runDaemon(ctx context.Context, args []string, sink func(string)) error {
 		return err
 	}
 	logf := makeLogf(cfg.LogLevel, sink)
+	// Bind first: if the address is taken we must fail before host.New, which can
+	// create and print the first-run admin key for a daemon that never serves.
+	ln, err := net.Listen("tcp", cfg.Listen)
+	if err != nil {
+		return err
+	}
+	served := false
+	defer func() {
+		if !served {
+			ln.Close()
+		}
+	}()
 	op, err := opener(cfg, logf)
 	if err != nil {
 		return err
@@ -162,11 +174,6 @@ func runDaemon(ctx context.Context, args []string, sink func(string)) error {
 	} else if openFlag != "never" {
 		logf("console: %s", url)
 	}
-	ln, err := net.Listen("tcp", cfg.Listen)
-	if err != nil {
-		h.Close()
-		return err
-	}
 	if shouldOpen(cfg, openFlag, h.WebSetupPending()) {
 		go func() {
 			time.Sleep(300 * time.Millisecond)
@@ -175,6 +182,7 @@ func runDaemon(ctx context.Context, args []string, sink func(string)) error {
 			}
 		}()
 	}
+	served = true
 	return h.Serve(ctx, ln)
 }
 
