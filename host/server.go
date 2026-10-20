@@ -19,8 +19,57 @@ func writeJSON(w http.ResponseWriter, code int, v interface{}) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+// APIError is the JSON error body: a stable machine code, a human-readable
+// message, and the legacy "error" field (kept with its old value for clients
+// that read it).
+type APIError struct {
+	Error   string `json:"error"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// errCodeFor is the stable code used when a handler gives only a message.
+func errCodeFor(status int) string {
+	switch status {
+	case 400:
+		return "bad_request"
+	case 401:
+		return "unauthorized"
+	case 402:
+		return "payment_required"
+	case 403:
+		return "forbidden"
+	case 404:
+		return "not_found"
+	case 405:
+		return "method_not_allowed"
+	case 409:
+		return "conflict"
+	case 413:
+		return "too_large"
+	case 415:
+		return "unsupported_media_type"
+	case 429:
+		return "rate_limited"
+	case 502:
+		return "bad_gateway"
+	case 503:
+		return "unavailable"
+	}
+	if status >= 500 {
+		return "internal"
+	}
+	return "error"
+}
+
+// writeAPIErr writes {"error": legacy, "code": code, "message": msg}.
+func writeAPIErr(w http.ResponseWriter, status int, legacy, code, msg string) {
+	writeJSON(w, status, APIError{Error: legacy, Code: code, Message: msg})
+}
+
+// writeErr keeps "error" = msg and adds a code derived from the status.
 func writeErr(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
+	writeAPIErr(w, code, msg, errCodeFor(code), msg)
 }
 
 // KeyView is the API representation of a key record (no hash/salt).

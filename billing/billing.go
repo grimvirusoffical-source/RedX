@@ -352,8 +352,10 @@ func jout(w http.ResponseWriter, code int, v interface{}) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+// jerr writes the billing error body: stable "code", human "message", and the
+// legacy "error" field (same value as code, as before).
 func jerr(w http.ResponseWriter, code int, errCode, msg string) {
-	jout(w, code, map[string]string{"error": errCode, "message": msg})
+	jout(w, code, map[string]string{"error": errCode, "code": errCode, "message": msg})
 }
 
 func readBody(w http.ResponseWriter, r *http.Request, v interface{}) bool {
@@ -416,7 +418,7 @@ var idemRe = regexp.MustCompile(`^[A-Za-z0-9_-]{8,80}$`)
 
 func (s *Service) checkoutRoute(w http.ResponseWriter, r *http.Request, id Identity) {
 	if !s.Enabled() {
-		jerr(w, 503, "billing_off", s.reason)
+		jerr(w, 503, "billing_off", "Billing is off on this server: "+s.reason)
 		return
 	}
 	var in struct {
@@ -496,7 +498,7 @@ var sessRe = regexp.MustCompile(`^cs_(test|live)_[A-Za-z0-9]{10,200}$`)
 
 func (s *Service) statusRoute(w http.ResponseWriter, r *http.Request, id Identity, sid string) {
 	if !s.Enabled() {
-		jerr(w, 503, "billing_off", s.reason)
+		jerr(w, 503, "billing_off", "Billing is off on this server: "+s.reason)
 		return
 	}
 	if !sessRe.MatchString(sid) {
@@ -564,7 +566,7 @@ func (s *Service) meRoute(w http.ResponseWriter, id Identity) {
 
 func (s *Service) portalRoute(w http.ResponseWriter, r *http.Request, id Identity) {
 	if !s.Enabled() {
-		jerr(w, 503, "billing_off", s.reason)
+		jerr(w, 503, "billing_off", "Billing is off on this server: "+s.reason)
 		return
 	}
 	p, _ := s.store.Get(id.Sub)
@@ -613,10 +615,11 @@ func (s *Service) hostingRoute(w http.ResponseWriter, r *http.Request, id Identi
 	if err := s.usage.TryHostSwitch(id.Sub, q, wantOn, s.now(), p.PeriodEnd); err != nil {
 		var qe *ErrQuota
 		if errors.As(err, &qe) {
-			jout(w, qe.HTTP, map[string]string{"error": qe.Code, "message": qe.Message, "upgrade": "/ui/billing.html"})
+			jout(w, qe.HTTP, map[string]string{"error": qe.Code, "code": qe.Code, "message": qe.Message, "upgrade": "/ui/billing.html"})
 			return
 		}
-		jerr(w, 500, "error", err.Error())
+		s.logf("billing: host switch: %v", err)
+		jout(w, 500, map[string]string{"error": "error", "code": "internal", "message": "Could not change hosting right now; try again."})
 		return
 	}
 	st := s.usage.Status(id.Sub, p.Tier, p.Interval, q, s.now(), p.PeriodEnd)

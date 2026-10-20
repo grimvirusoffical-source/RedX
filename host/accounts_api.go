@@ -24,7 +24,7 @@ func (h *Host) acctThrottle(w http.ResponseWriter, r *http.Request, bucket strin
 }
 
 func acctErr(w http.ResponseWriter, code int, errCode, msg string) {
-	writeJSON(w, code, map[string]string{"error": errCode, "message": msg})
+	writeAPIErr(w, code, errCode, errCode, msg)
 }
 
 // readJSON decodes a small JSON body; POSTs must be application/json (a cross-site form cannot send that).
