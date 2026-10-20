@@ -50,7 +50,11 @@ write_conf() { # $1=path $2=data_dir
     echo "listen = \"$LISTEN\""
     echo "tls = \"$TLS\""
     echo "role = \"$ROLE\""
-    if [ -n "$PEERS" ]; then echo "peers = [\"$PEERS\"]"; fi
+    if [ -n "$PEERS" ]; then # --peers a,b,c -> peers = ["a", "b", "c"]
+      printf 'peers = ['; SEP=""; OLDIFS=$IFS; IFS=,
+      for P in $PEERS; do [ -n "$P" ] && printf '%s"%s"' "$SEP" "$P" && SEP=", "; done
+      IFS=$OLDIFS; echo "]"
+    fi
   } > "$1"
   chmod 640 "$1" 2>/dev/null || true
 }
