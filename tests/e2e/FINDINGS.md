@@ -1,7 +1,7 @@
 # RedX host/DB end-to-end findings (updated 2026-10-20 06:35 America/New_York)
 
-Target binary: `host-integration@ed8051d` (+ local accountsfake `force_iss`/`force_aud`
-for OIDC confusion probes) built into `/workspace/redx-e2e-bin/redxd`
+Target binary: `host-integration@ed8051d` (clean; the OIDC IdP is built separately from
+`tests/e2e/harness/e2e-oidc-idp.patch`) built into `/workspace/redx-e2e-bin/redxd`
 (`v0.4.5-29-ged8051d-dirty`). Worktree: `/workspace/repos/RedX-e2e` branch `e2e-tests`.
 Nothing pushed.
 
@@ -78,7 +78,7 @@ production Dex/Keycloak (those lack ES256 without custom keys).
 ```sh
 cd /workspace/redx-integration && make build
 cp -f bin/redxd bin/redx /workspace/redx-e2e-bin/
-CGO_ENABLED=0 go build -o /workspace/redx-e2e-bin/e2e-oidc-idp ./cmd/e2e-oidc-idp
+/workspace/repos/RedX-e2e/tests/e2e/harness/build-idp.sh   # patch applied in a temp worktree
 
 cd /workspace/repos/RedX-e2e
 export REDXD=/workspace/redx-e2e-bin/redxd
