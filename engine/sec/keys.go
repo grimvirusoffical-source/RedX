@@ -1,11 +1,12 @@
 package sec
 
 import (
-	"crypto/rand"
 	"fmt"
 	"io"
 	"sort"
 	"sync"
+
+	"redx/internal/rsx"
 )
 
 // KeySize is the master key size in bytes (AES-256).
@@ -58,7 +59,7 @@ func NewMasterKey(id string, key []byte) (*MasterKey, error) {
 // that need a new master key. Nothing is stored.
 func RandomKey() ([]byte, error) {
 	b := make([]byte, KeySize)
-	if _, err := io.ReadFull(rand.Reader, b); err != nil {
+	if err := rsx.Random(b); err != nil {
 		return nil, fmt.Errorf("sec: random: %w", err)
 	}
 	return b, nil

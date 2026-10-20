@@ -1,0 +1,41 @@
+{
+ "format": "RSX1",
+ "iters": 200000,
+ "vectors": [
+  {
+   "name": "roundtrip",
+   "password": "vector-password",
+   "iters": 200000,
+   "salt_hex": "000102030405060708090a0b0c0d0e0f",
+   "nonce_hex": "000102030405060708090a0b",
+   "plaintext_hex": "68656c6c6f2052535820766563746f7273",
+   "blob_hex": "525358310100030d40000102030405060708090a0b0c0d0e0f000102030405060708090a0b00000011eff973edb29ac3c6a38231b0f669ccf5550be6e460788ec886d4dc865756cb432a8a34822cc04f442f8dd6962df87e75cb",
+   "expect": "OK"
+  },
+  {
+   "name": "neg_tag_flip",
+   "blob_hex": "525358310100030d40000102030405060708090a0b0c0d0e0f000102030405060708090a0b00000011eff973edb29ac3c6a38231b0f669ccf5550be6e460788ec886d4dc865756cb432a8a34822cc04f442f8dd6962df87e75ca",
+   "expect": "REJECT",
+   "librsx_rc": -1
+  },
+  {
+   "name": "neg_trunc",
+   "blob_hex": "525358310100030d40000102030405060708090a0b0c0d0e0f000102030405060708090a0b00000011eff973edb29ac3c6a38231b0f669ccf5550be6e460788ec886d4dc865756cb432a8a34822cc04f442f8dd696",
+   "expect": "REJECT",
+   "librsx_rc": -2
+  },
+  {
+   "name": "neg_wrong_password",
+   "blob_hex": "525358310100030d40000102030405060708090a0b0c0d0e0f000102030405060708090a0b00000011eff973edb29ac3c6a38231b0f669ccf5550be6e460788ec886d4dc865756cb432a8a34822cc04f442f8dd6962df87e75cb",
+   "expect": "REJECT",
+   "librsx_rc": -1,
+   "password": "wrong"
+  },
+  {
+   "name": "neg_iters_low",
+   "blob_hex": "5253583101000003e8000102030405060708090a0b0c0d0e0f000102030405060708090a0b00000011eff973edb29ac3c6a38231b0f669ccf5550be6e460788ec886d4dc865756cb432a8a34822cc04f442f8dd6962df87e75cb",
+   "expect": "REJECT",
+   "librsx_rc": -6
+  }
+ ]
+}

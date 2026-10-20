@@ -142,7 +142,7 @@ func TestBackupIsEncryptedAndPassphraseWorks(t *testing.T) {
 	n := startNode(t, t.TempDir(), nil)
 	do(t, "PUT", n.URL+P+"b:B.K", n.Key, `"secretvalue-123"`)
 	raw := onlineBackup(t, n)
-	if bytes.HasPrefix(raw, []byte{0x1f, 0x8b}) || !bytes.HasPrefix(raw, []byte("RXBK1\n")) {
+	if bytes.HasPrefix(raw, []byte{0x1f, 0x8b}) || !bytes.HasPrefix(raw, []byte("RXBK2\n")) {
 		t.Fatal("backup must be the encrypted RXBK format, not plain tar.gz")
 	}
 	seed, _ := os.ReadFile(filepath.Join(n.Dir, "updates", "signing.key"))
@@ -391,7 +391,7 @@ func TestOfflineBackupWhileRunningIsEncrypted(t *testing.T) {
 	if err := host.OfflineBackup(dir, &buf, host.BackupOptions{Keys: host.BackupKeys{Passphrase: pass}}); err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.HasPrefix(buf.Bytes(), []byte("RXBK1\n")) || bytes.Contains(buf.Bytes(), []byte("keys.json")) {
+	if !bytes.HasPrefix(buf.Bytes(), []byte("RXBK2\n")) || bytes.Contains(buf.Bytes(), []byte("keys.json")) {
 		t.Fatal("offline backup must be encrypted")
 	}
 	if left, _ := filepath.Glob(filepath.Join(dir, "backup", "out-*")); len(left) != 0 {

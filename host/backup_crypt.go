@@ -3,8 +3,6 @@ package host
 import (
 	"bufio"
 	"bytes"
-	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -15,29 +13,32 @@ import (
 	"path/filepath"
 	"strings"
 
-	"golang.org/x/crypto/argon2"
-
 	"redx/engine/sec"
+	"redx/internal/rsx"
 )
 
 // Backup archive encryption.
 //
-// Everything that touches the cipher goes through BackupSealer so the
-// algorithm can later be swapped for Red-SecretsXAI (librsx) without changing
-// the archive code. Today the implementation reuses the repository's own
-// engine/sec stream format (HKDF-SHA256 key wrap + authenticated segments)
-// with an Argon2id passphrase KDF.
+// Everything that touches the cipher goes through BackupSealer. Since
+// 2026-10-20 new backups are Red-SecretsXAI RSX3 v2 streams:
 //
-// File layout:
+//	"RXBK2\n" | header JSON line ("\n"-terminated) | RSX3 stream of the tar.gz
 //
-//	"RXBK1\n" | header JSON line ("\n"-terminated) | engine/sec stream of the tar.gz
+// The RSX3 key-encryption key is Argon2id(passphrase, salt) in passphrase mode,
+// or the 32-byte host backup key in hostkey mode; RSX3 wraps a fresh random data
+// key under it. The magic and header line are the RSX3 additional data, so the
+// KDF parameters and mode cannot be altered, and RSX3 authenticates completion
+// (a truncated archive never restores).
 //
-// The magic and header line are bound into the stream as additional
-// authenticated data, so the KDF parameters and mode cannot be altered.
-// Legacy backups are plain tar.gz (gzip magic 1f 8b) and are still restorable
-// with a warning.
+// Older archives still restore (migration readers):
+//   - "RXBK1\n" archives (engine/sec v1, AES-256-GCM) through the engine/sec
+//     legacy reader, which uses the Red-SecretsXAI decrypt-only AES-GCM;
+//   - plain tar.gz (gzip magic 1f 8b), with a warning.
 
-const backupMagic = "RXBK1\n"
+const (
+	backupMagic   = "RXBK2\n"
+	backupMagicV1 = "RXBK1\n"
+)
 
 // BackupSealer encrypts and decrypts one backup archive stream.
 type BackupSealer interface {
@@ -70,32 +71,44 @@ const (
 	backupKDFTime   = 3
 	backupKDFMemKiB = 64 * 1024
 	backupKDFPar    = 4
-	backupCipher    = "redx-sec-v1"
+	backupCipher    = "rsx3-v2"
+	backupCipherV1  = "redx-sec-v1"
 	backupKeyID     = "redx-backup"
 	backupKeyFile   = "backup.key"
 )
 
-type secSealer struct {
+type rsxSealer struct {
 	key  []byte
 	hdr  BackupHeader
 	line []byte
 }
 
-func keyFP(k []byte) string { s := sha256.Sum256(k); return hex.EncodeToString(s[:8]) }
+// secSealer opens legacy RXBK1 archives only.
+type secSealer struct {
+	key []byte
+}
+
+func keyFP(k []byte) string { s := rsx.Sha256(k); return hex.EncodeToString(s[:8]) }
+
+func backupKDF(pass string, salt []byte, t, m uint32, p uint8) ([]byte, error) {
+	return rsx.Argon2id([]byte(pass), salt, t, m, uint32(p), 32)
+}
 
 // NewBackupSealer picks passphrase mode when a passphrase is given, otherwise hostkey mode.
 func NewBackupSealer(k BackupKeys) (BackupSealer, error) {
-	h := BackupHeader{V: 1, Cipher: backupCipher}
+	h := BackupHeader{V: 2, Cipher: backupCipher}
 	var key []byte
 	switch {
 	case k.Passphrase != "":
-		salt := make([]byte, 16)
-		if _, err := rand.Read(salt); err != nil {
+		salt, err := rsx.RandomBytes(16)
+		if err != nil {
 			return nil, err
 		}
 		h.Mode, h.KDF, h.T, h.M, h.P = "passphrase", "argon2id", backupKDFTime, backupKDFMemKiB, backupKDFPar
 		h.Salt = base64.RawStdEncoding.EncodeToString(salt)
-		key = argon2.IDKey([]byte(k.Passphrase), salt, h.T, h.M, h.P, 32)
+		if key, err = backupKDF(k.Passphrase, salt, h.T, h.M, h.P); err != nil {
+			return nil, err
+		}
 	case len(k.HostKey) == 32:
 		h.Mode, h.KeyFP = "hostkey", keyFP(k.HostKey)
 		key = append([]byte(nil), k.HostKey...)
@@ -103,42 +116,88 @@ func NewBackupSealer(k BackupKeys) (BackupSealer, error) {
 		return nil, errors.New("backup: no passphrase and no backup key")
 	}
 	line, _ := json.Marshal(h)
-	return &secSealer{key: key, hdr: h, line: append(line, '\n')}, nil
+	return &rsxSealer{key: key, hdr: h, line: append(line, '\n')}, nil
 }
 
-func (s *secSealer) aad(line []byte) []byte { return append([]byte(backupMagic), line...) }
+func backupAAD(magic string, line []byte) []byte { return append([]byte(magic), line...) }
 
-type sealWriter struct {
-	pw   *io.PipeWriter
-	done chan error
+type rsxWriter struct {
+	w *rsx.StreamWriter
+	s *rsx.Session
 }
 
-func (w *sealWriter) Write(p []byte) (int, error) { return w.pw.Write(p) }
-func (w *sealWriter) Close() error {
-	_ = w.pw.Close()
-	return <-w.done
+func (w *rsxWriter) Write(p []byte) (int, error) { return w.w.Write(p) }
+func (w *rsxWriter) Close() error {
+	err := w.w.Close()
+	w.s.Close()
+	return err
 }
 
-func (s *secSealer) Seal(dst io.Writer) (io.WriteCloser, error) {
-	mk, err := sec.NewMasterKey(backupKeyID, s.key)
+func (s *rsxSealer) Seal(dst io.Writer) (io.WriteCloser, error) {
+	if s.line == nil {
+		return nil, errors.New("backup: this sealer only opens archives")
+	}
+	sess, err := rsx.NewSessionFromKey(s.key)
 	if err != nil {
 		return nil, err
 	}
 	if _, err := io.WriteString(dst, backupMagic); err != nil {
+		sess.Close()
 		return nil, err
 	}
 	if _, err := dst.Write(s.line); err != nil {
+		sess.Close()
 		return nil, err
 	}
-	pr, pw := io.Pipe()
-	w := &sealWriter{pw: pw, done: make(chan error, 1)}
-	go func() {
-		err := sec.Encrypt(dst, pr, mk, sec.Options{Context: s.aad(s.line)})
-		mk.Destroy()
-		_ = pr.CloseWithError(err)
-		w.done <- err
-	}()
-	return w, nil
+	w, err := sess.NewEncryptWriter(dst, backupAAD(backupMagic, s.line))
+	if err != nil {
+		sess.Close()
+		return nil, err
+	}
+	return &rsxWriter{w: w, s: sess}, nil
+}
+
+var errBackupAuth = errors.New("backup: wrong passphrase or backup key, or the archive was changed")
+
+func (s *rsxSealer) Open(src io.Reader, hdr BackupHeader, raw []byte) (io.Reader, error) {
+	sess, err := rsx.NewSessionFromKey(s.key)
+	if err != nil {
+		return nil, err
+	}
+	r, err := sess.NewDecryptReader(src, backupAAD(backupMagic, raw))
+	if err != nil {
+		sess.Close()
+		if errors.Is(err, rsx.ErrAuth) {
+			return nil, errBackupAuth
+		}
+		return nil, fmt.Errorf("backup: %v", err)
+	}
+	return &rsxReader{r: r, s: sess}, nil
+}
+
+// rsxReader maps RSX3 errors to backup errors and closes the session at the end.
+type rsxReader struct {
+	r *rsx.StreamReader
+	s *rsx.Session
+}
+
+func (r *rsxReader) Read(p []byte) (int, error) {
+	n, err := r.r.Read(p)
+	if err != nil {
+		r.s.Close()
+		if err != io.EOF {
+			if errors.Is(err, rsx.ErrAuth) {
+				return n, errBackupAuth
+			}
+			return n, fmt.Errorf("backup: archive is truncated or damaged (%v)", err)
+		}
+	}
+	return n, err
+}
+
+// Seal is not supported for legacy RXBK1: new backups are always RXBK2.
+func (s *secSealer) Seal(dst io.Writer) (io.WriteCloser, error) {
+	return nil, errors.New("backup: RXBK1 is read-only")
 }
 
 func (s *secSealer) Open(src io.Reader, hdr BackupHeader, raw []byte) (io.Reader, error) {
@@ -150,20 +209,27 @@ func (s *secSealer) Open(src io.Reader, hdr BackupHeader, raw []byte) (io.Reader
 	if err != nil {
 		return nil, err
 	}
-	r, err := sec.NewReader(src, ring, sec.Options{Context: s.aad(raw)})
+	r, err := sec.NewReader(src, ring, sec.Options{Context: backupAAD(backupMagicV1, raw)})
 	if err != nil {
 		if errors.Is(err, sec.ErrAuth) {
-			return nil, errors.New("backup: wrong passphrase or backup key, or the archive was changed")
+			return nil, errBackupAuth
 		}
 		return nil, err
 	}
 	return r, nil
 }
 
-// openerFor derives the key for an existing header.
-func openerFor(h BackupHeader, k BackupKeys) (BackupSealer, error) {
-	if h.V != 1 || h.Cipher != backupCipher {
+// openerFor derives the key for an existing header. magic is the archive's magic line.
+func openerFor(magic string, h BackupHeader, k BackupKeys) (BackupSealer, error) {
+	legacy := magic == backupMagicV1
+	if (legacy && (h.V != 1 || h.Cipher != backupCipherV1)) || (!legacy && (h.V != 2 || h.Cipher != backupCipher)) {
 		return nil, fmt.Errorf("backup: unsupported encrypted backup (v%d, %s); it was made by a newer RedX", h.V, h.Cipher)
+	}
+	mk := func(key []byte) BackupSealer {
+		if legacy {
+			return &secSealer{key: key}
+		}
+		return &rsxSealer{key: key, hdr: h}
 	}
 	switch h.Mode {
 	case "passphrase":
@@ -177,7 +243,11 @@ func openerFor(h BackupHeader, k BackupKeys) (BackupSealer, error) {
 		if err != nil || len(salt) < 16 {
 			return nil, errors.New("backup: bad salt in header")
 		}
-		return &secSealer{key: argon2.IDKey([]byte(k.Passphrase), salt, h.T, h.M, h.P, 32), hdr: h}, nil
+		key, err := backupKDF(k.Passphrase, salt, h.T, h.M, h.P)
+		if err != nil {
+			return nil, fmt.Errorf("backup: KDF: %v", err)
+		}
+		return mk(key), nil
 	case "hostkey":
 		if len(k.HostKey) != 32 {
 			return nil, fmt.Errorf("backup is encrypted with host backup key %s: pass --backup-key-file (the %s from the source host)", h.KeyFP, backupKeyFile)
@@ -185,7 +255,7 @@ func openerFor(h BackupHeader, k BackupKeys) (BackupSealer, error) {
 		if keyFP(k.HostKey) != h.KeyFP {
 			return nil, fmt.Errorf("backup was encrypted with backup key %s, but the given key is %s", h.KeyFP, keyFP(k.HostKey))
 		}
-		return &secSealer{key: append([]byte(nil), k.HostKey...), hdr: h}, nil
+		return mk(append([]byte(nil), k.HostKey...)), nil
 	}
 	return nil, fmt.Errorf("backup: unknown mode %q", h.Mode)
 }
@@ -201,10 +271,11 @@ func OpenBackup(src io.Reader, k BackupKeys) (io.Reader, *BackupHeader, error) {
 	if len(peek) >= 2 && peek[0] == 0x1f && peek[1] == 0x8b {
 		return br, nil, nil // legacy plaintext tar.gz
 	}
-	if string(peek) != backupMagic {
+	magic := string(peek)
+	if magic != backupMagic && magic != backupMagicV1 {
 		return nil, nil, errors.New("backup: not a RedX backup (unknown format)")
 	}
-	_, _ = br.Discard(len(backupMagic))
+	_, _ = br.Discard(len(magic))
 	raw, err := br.ReadSlice('\n')
 	if err != nil {
 		return nil, nil, errors.New("backup: truncated header")
@@ -216,7 +287,7 @@ func OpenBackup(src io.Reader, k BackupKeys) (io.Reader, *BackupHeader, error) {
 	if err := dec.Decode(&h); err != nil {
 		return nil, nil, fmt.Errorf("backup: bad header: %v", err)
 	}
-	s, err := openerFor(h, k)
+	s, err := openerFor(magic, h, k)
 	if err != nil {
 		return nil, &h, err
 	}
@@ -233,8 +304,8 @@ func loadOrCreateBackupKey(dataDir string) ([]byte, error) {
 		}
 		return b, nil
 	}
-	k := make([]byte, 32)
-	if _, err := rand.Read(k); err != nil {
+	k, err := rsx.RandomBytes(32)
+	if err != nil {
 		return nil, err
 	}
 	if err := atomicWrite(p, k); err != nil {

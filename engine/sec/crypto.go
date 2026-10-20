@@ -3,15 +3,12 @@ package sec
 import (
 	"bufio"
 	"bytes"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/hmac"
-	"crypto/rand"
-	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
+
+	"redx/internal/rsx"
 )
 
 // Encrypted-file layout (all integers big-endian):
@@ -34,9 +31,19 @@ import (
 //
 // Rewrap replaces only the header (new salt, nonce, wrapped key, key id), so
 // segments stay valid: the segment additional data does not mention the key id.
+//
+// Version 2 (written since 2026-10-20) keeps exactly this layout and replaces the
+// cipher with Red-SecretsXAI primitives: wrapKey = HKDF-SHA256(masterKey, salt,
+// "redx-sec wrap v2"), and the wrap and every segment use ChaCha20-Poly1305
+// (RFC 8439, 96-bit random nonce, 16-byte tag), so all sizes are unchanged. The
+// segment additional data starts with "RXSEC2-seg" instead of "RXSEC-seg".
+// Version 1 (AES-256-GCM) is still read, through the Red-SecretsXAI decrypt-only
+// AES-GCM migration reader, and is never written: Rewrap of a v1 file decrypts
+// and re-encrypts it as v2.
 const (
 	magic              = "RXSEC"
-	formatVersion      = 1
+	formatVersion      = 2
+	legacyVersion      = 1
 	DefaultSegmentSize = 64 << 10
 	MinSegmentSize     = 16
 	MaxSegmentSize     = 1 << 20
@@ -59,6 +66,7 @@ type Options struct {
 }
 
 type header struct {
+	ver     byte
 	keyID   string
 	fileID  [fileIDLen]byte
 	segSize uint32
@@ -70,7 +78,7 @@ type header struct {
 func (h *header) aadPrefix() []byte {
 	b := make([]byte, 0, 8+len(h.keyID)+fileIDLen+4)
 	b = append(b, magic...)
-	b = append(b, formatVersion, 0, byte(len(h.keyID)))
+	b = append(b, h.ver, 0, byte(len(h.keyID)))
 	b = append(b, h.keyID...)
 	b = append(b, h.fileID[:]...)
 	b = binary.BigEndian.AppendUint32(b, h.segSize)
@@ -100,7 +108,7 @@ func readHeader(r io.Reader) (*header, error) {
 	if string(fixed[:5]) != magic {
 		return nil, fmt.Errorf("%w: bad magic", ErrFormat)
 	}
-	if fixed[5] != formatVersion {
+	if fixed[5] != formatVersion && fixed[5] != legacyVersion {
 		return nil, fmt.Errorf("%w: unsupported version %d", ErrFormat, fixed[5])
 	}
 	if fixed[6] != 0 {
@@ -114,7 +122,7 @@ func readHeader(r io.Reader) (*header, error) {
 	if _, err := io.ReadFull(r, rest); err != nil {
 		return nil, headerErr(err)
 	}
-	h := &header{keyID: string(rest[:n])}
+	h := &header{ver: fixed[5], keyID: string(rest[:n])}
 	if !validKeyID(h.keyID) {
 		return nil, fmt.Errorf("%w: bad key id", ErrFormat)
 	}
@@ -138,74 +146,79 @@ func headerErr(err error) error {
 	return err
 }
 
-// deriveWrapKey is HKDF (RFC 5869) with HMAC-SHA256, one output block.
-func deriveWrapKey(master *[KeySize]byte, salt []byte) [32]byte {
-	ext := hmac.New(sha256.New, salt)
-	ext.Write(master[:])
-	prk := ext.Sum(nil)
-	exp := hmac.New(sha256.New, prk)
-	exp.Write([]byte("redx-sec wrap v1"))
-	exp.Write([]byte{1})
-	var out [32]byte
-	copy(out[:], exp.Sum(nil))
-	for i := range prk {
-		prk[i] = 0
+// deriveWrapKey is HKDF-SHA256 (RFC 5869), one 32-byte output block. The info
+// string differs per version.
+func deriveWrapKey(master *[KeySize]byte, salt []byte, ver byte) [32]byte {
+	info := "redx-sec wrap v2"
+	if ver == legacyVersion {
+		info = "redx-sec wrap v1"
 	}
+	okm, _ := rsx.HkdfSha256(master[:], salt, []byte(info), 32)
+	var out [32]byte
+	copy(out[:], okm)
+	rsx.Wipe(okm)
 	return out
 }
 
-func newGCM(key []byte) (cipher.AEAD, error) {
-	b, err := aes.NewCipher(key)
+func wipe(b []byte) { rsx.Wipe(b) }
+
+// seal is ChaCha20-Poly1305 appending ct||tag to dst (v2 only: v1 is never written).
+func seal(dst, key, nonce, plain, aad []byte) []byte {
+	ct, tag, _ := rsx.AeadEncrypt(key, nonce, aad, plain)
+	dst = append(dst, ct...)
+	return append(dst, tag[:]...)
+}
+
+// open authenticates and decrypts ct||tag for either version.
+func open(ver byte, key, nonce, sealed, aad []byte) ([]byte, error) {
+	if len(sealed) < gcmTag {
+		return nil, ErrAuth
+	}
+	ct, tag := sealed[:len(sealed)-gcmTag], sealed[len(sealed)-gcmTag:]
+	var pt []byte
+	var err error
+	if ver == legacyVersion {
+		pt, err = rsx.AES256GCMOpenLegacy(key, nonce, aad, ct, tag)
+	} else {
+		pt, err = rsx.AeadDecrypt(key, nonce, aad, ct, tag)
+	}
 	if err != nil {
-		return nil, err
+		return nil, ErrAuth
 	}
-	return cipher.NewGCM(b)
+	return pt, nil
 }
 
-func wipe(b []byte) {
-	for i := range b {
-		b[i] = 0
-	}
-}
-
-// wrapDataKey fills h.salt, h.nonce and h.wrapped for dataKey under master.
+// wrap fills h.salt, h.nonce and h.wrapped for dataKey under master (always v2).
 func (h *header) wrap(master *MasterKey, dataKey []byte, ctx []byte) error {
+	h.ver = formatVersion
 	h.keyID = master.id
-	if _, err := io.ReadFull(rand.Reader, h.salt[:]); err != nil {
+	if err := rsx.Random(h.salt[:]); err != nil {
 		return fmt.Errorf("sec: random: %w", err)
 	}
-	if _, err := io.ReadFull(rand.Reader, h.nonce[:]); err != nil {
+	if err := rsx.Random(h.nonce[:]); err != nil {
 		return fmt.Errorf("sec: random: %w", err)
 	}
-	wk := deriveWrapKey(master.key, h.salt[:])
+	wk := deriveWrapKey(master.key, h.salt[:], h.ver)
 	defer wipe(wk[:])
-	aead, err := newGCM(wk[:])
-	if err != nil {
-		return err
-	}
-	out := aead.Seal(nil, h.nonce[:], dataKey, withContext(h.aadPrefix(), ctx))
+	out := seal(nil, wk[:], h.nonce[:], dataKey, withContext(h.aadPrefix(), ctx))
 	copy(h.wrapped[:], out)
 	return nil
 }
 
 // unwrap returns the data key. The caller wipes it.
 func (h *header) unwrap(master *MasterKey, ctx []byte) ([]byte, error) {
-	wk := deriveWrapKey(master.key, h.salt[:])
+	wk := deriveWrapKey(master.key, h.salt[:], h.ver)
 	defer wipe(wk[:])
-	aead, err := newGCM(wk[:])
-	if err != nil {
-		return nil, err
-	}
-	dk, err := aead.Open(nil, h.nonce[:], h.wrapped[:], withContext(h.aadPrefix(), ctx))
-	if err != nil {
-		return nil, ErrAuth
-	}
-	return dk, nil
+	return open(h.ver, wk[:], h.nonce[:], h.wrapped[:], withContext(h.aadPrefix(), ctx))
 }
 
 func segAAD(h *header, idx uint64, final bool, ctx []byte) []byte {
 	b := make([]byte, 0, 9+fileIDLen+4+8+1+4+len(ctx))
-	b = append(b, "RXSEC-seg"...)
+	if h.ver == legacyVersion {
+		b = append(b, "RXSEC-seg"...)
+	} else {
+		b = append(b, "RXSEC2-seg"...)
+	}
 	b = append(b, h.fileID[:]...)
 	b = binary.BigEndian.AppendUint32(b, h.segSize)
 	b = binary.BigEndian.AppendUint64(b, idx)
@@ -232,20 +245,16 @@ func Encrypt(dst io.Writer, src io.Reader, master *MasterKey, o Options) error {
 	if seg < MinSegmentSize || seg > MaxSegmentSize {
 		return fmt.Errorf("sec: SegmentSize must be %d..%d", MinSegmentSize, MaxSegmentSize)
 	}
-	h := &header{segSize: uint32(seg)}
-	if _, err := io.ReadFull(rand.Reader, h.fileID[:]); err != nil {
+	h := &header{ver: formatVersion, segSize: uint32(seg)}
+	if err := rsx.Random(h.fileID[:]); err != nil {
 		return fmt.Errorf("sec: random: %w", err)
 	}
 	dataKey := make([]byte, KeySize)
 	defer wipe(dataKey)
-	if _, err := io.ReadFull(rand.Reader, dataKey); err != nil {
+	if err := rsx.Random(dataKey); err != nil {
 		return fmt.Errorf("sec: random: %w", err)
 	}
 	if err := h.wrap(master, dataKey, o.Context); err != nil {
-		return err
-	}
-	aead, err := newGCM(dataKey)
-	if err != nil {
 		return err
 	}
 	if _, err := dst.Write(h.marshal()); err != nil {
@@ -261,11 +270,11 @@ func Encrypt(dst io.Writer, src io.Reader, master *MasterKey, o Options) error {
 		frame = frame[:0]
 		frame = binary.BigEndian.AppendUint32(frame, uint32(len(plain)+gcmTag))
 		frame = frame[:4+gcmNonce]
-		if _, err := io.ReadFull(rand.Reader, frame[4:]); err != nil {
+		if err := rsx.Random(frame[4:]); err != nil {
 			return fmt.Errorf("sec: random: %w", err)
 		}
 		nonce := append([]byte(nil), frame[4:]...)
-		frame = aead.Seal(frame, nonce, plain, segAAD(h, idx, final, o.Context))
+		frame = seal(frame, dataKey, nonce, plain, segAAD(h, idx, final, o.Context))
 		idx++
 		_, err := dst.Write(frame)
 		return err
@@ -298,7 +307,7 @@ func Encrypt(dst io.Writer, src io.Reader, master *MasterKey, o Options) error {
 // was present and authentic.
 type Reader struct {
 	br    *bufio.Reader
-	aead  cipher.AEAD
+	key   []byte
 	h     *header
 	ctx   []byte
 	idx   uint64
@@ -320,17 +329,19 @@ func NewReader(src io.Reader, keys KeySource, o Options) (*Reader, error) {
 	if !ok || !master.usable() {
 		return nil, fmt.Errorf("%w: %q", ErrUnknownKey, h.keyID)
 	}
+	return newReaderFromHeader(br, h, master, o)
+}
+
+func newReaderFromHeader(br *bufio.Reader, h *header, master *MasterKey, o Options) (*Reader, error) {
 	dk, err := h.unwrap(master, o.Context)
 	if err != nil {
 		return nil, err
 	}
-	defer wipe(dk)
-	aead, err := newGCM(dk)
-	if err != nil {
-		return nil, err
-	}
-	return &Reader{br: br, aead: aead, h: h, ctx: append([]byte(nil), o.Context...)}, nil
+	return &Reader{br: br, key: dk, h: h, ctx: append([]byte(nil), o.Context...)}, nil
 }
+
+// Version reports the format version of the stream being read (1 = legacy AES-GCM).
+func (r *Reader) Version() int { return int(r.h.ver) }
 
 func (r *Reader) nextSegment() error {
 	var lenb [4]byte
@@ -361,10 +372,10 @@ func (r *Reader) nextSegment() error {
 		return perr
 	}
 	nonce, ct := buf[:gcmNonce], buf[gcmNonce:]
-	pt, err := r.aead.Open(r.plain[:0], nonce, ct, segAAD(r.h, r.idx, final, r.ctx))
+	pt, err := open(r.h.ver, r.key, nonce, ct, segAAD(r.h, r.idx, final, r.ctx))
 	if err != nil {
 		// Work out whether it was cut short or has extra data: retry with the other flag.
-		if _, err2 := r.aead.Open(nil, nonce, ct, segAAD(r.h, r.idx, !final, r.ctx)); err2 == nil {
+		if _, err2 := open(r.h.ver, r.key, nonce, ct, segAAD(r.h, r.idx, !final, r.ctx)); err2 == nil {
 			if final {
 				return fmt.Errorf("%w: stream ends before its final segment", ErrTruncated)
 			}
@@ -379,6 +390,7 @@ func (r *Reader) nextSegment() error {
 	r.idx++
 	if final {
 		r.err = io.EOF // delivered after the buffered plaintext
+		wipe(r.key)
 	}
 	return nil
 }
@@ -459,6 +471,20 @@ func Rewrap(dst io.Writer, src io.Reader, from KeySource, to *MasterKey, o Optio
 	old, ok := from.Key(h.keyID)
 	if !ok || !old.usable() {
 		return fmt.Errorf("%w: %q", ErrUnknownKey, h.keyID)
+	}
+	if h.ver == legacyVersion {
+		// v1 (AES-GCM) cannot be re-wrapped without writing AES: decrypt it fully
+		// (every segment is authenticated) and write it again as v2.
+		r, err := newReaderFromHeader(bufio.NewReaderSize(src, 1<<16), h, old, o)
+		if err != nil {
+			return err
+		}
+		o2 := o
+		o2.SegmentSize = int(h.segSize)
+		if o2.SegmentSize > MaxSegmentSize {
+			o2.SegmentSize = MaxSegmentSize
+		}
+		return Encrypt(dst, r, to, o2)
 	}
 	dk, err := h.unwrap(old, o.Context)
 	if err != nil {
