@@ -1,11 +1,9 @@
 # RedX host/DB end-to-end findings (updated 2026-10-20 06:08 America/New_York)
 
-Target binary: `host-sec-fixes@db91b86` built from `/workspace/redx-sec-fixes` into
-`/workspace/redx-e2e-bin/redxd` (v0.4.5-10-gdb91b86). Worktree: `/workspace/repos/RedX-e2e`
-branch `e2e-tests`. Nothing pushed.
-
-`host-integration` was **not present** when this run started (Encryption code expect
-still creating it). Full suite ran against the F1–F4 fixed binary instead.
+Target binary: `host-integration@7d602f4` built from `/workspace/redx-integration`
+into `/workspace/redx-e2e-bin/redxd` (v0.4.5-28-g7d602f4). Includes merged
+`host-sec-fixes` (F1–F4). Worktree: `/workspace/repos/RedX-e2e` branch `e2e-tests`.
+Nothing pushed.
 
 ## Architecture (short)
 
@@ -14,7 +12,7 @@ still creating it). Full suite ran against the F1–F4 fixed binary instead.
 
 ## Ran
 
-**63 passed / 0 failed** (`python3 -m pytest -q tests/e2e/`, `REDXD=/workspace/redx-e2e-bin/redxd`).
+**63 passed / 0 failed** against `host-integration` (`REDXD=/workspace/redx-e2e-bin/redxd`).
 
 F1–F4 flipped to regressions asserting FIXED behaviour:
 - F2: rotated key 401s after original TTL (`test_f2_rotated_key_expires_at_original_ttl`)
@@ -34,7 +32,6 @@ persistence/SIGKILL, body limits, slow-body health.
 
 | Item | Reason |
 |---|---|
-| Full suite on `host-integration` | Branch not available yet (plan item 1) |
 | TLS / pin / trusted_proxies | No cert fixtures in this pass |
 | Leader/follower / promote | Needs two nodes |
 | Accounts / OIDC / owner / Stripe / updates webhook | Optional overlays off |
@@ -54,10 +51,8 @@ INFO (unchanged): no HTTP body-read deadline (`host/daemon.go` ReadHeaderTimeout
 ## Rerun
 
 ```sh
-# Build fixed binary (or point at host-integration when it exists)
-cd /workspace/redx-sec-fixes && make build
+cd /workspace/redx-integration && make build
 cp -f bin/redxd bin/redx /workspace/redx-e2e-bin/
-
 cd /workspace/repos/RedX-e2e
 export REDXD=/workspace/redx-e2e-bin/redxd
 python3 -m pytest -q tests/e2e/
