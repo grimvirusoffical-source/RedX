@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -27,7 +29,18 @@ type Client struct {
 // PinnedTLSConfig trusts exactly the certificate whose SHA-256 (hex, optional
 // "sha256:" prefix and colons) is pin. Chain verification is replaced by the pin.
 func PinnedTLSConfig(pin string) *tls.Config {
-	return tlspin.Config(pin)
+	c := tlspin.Config(pin)
+	verify := c.VerifyPeerCertificate
+	c.VerifyPeerCertificate = func(raw [][]byte, chains [][]*x509.Certificate) error {
+		if err := verify(raw, chains); err != nil {
+			if errors.Is(err, tlspin.ErrMismatch) {
+				return errors.New("server certificate does not match --pin")
+			}
+			return fmt.Errorf("--pin: %w", err)
+		}
+		return nil
+	}
+	return c
 }
 
 // New creates a client. pin (sha256 hex of the server certificate, optional) lets
