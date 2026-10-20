@@ -15,7 +15,13 @@ import (
 // ---- /v1/auth/*: Red-XAI Accounts sign-in and sign-up for the web console ----
 
 func (h *Host) acctThrottle(w http.ResponseWriter, r *http.Request, bucket string, rps float64, burst int) bool {
-	if ok, wait := h.acctLim.Allow(bucket+"|"+remoteIP(r), rps, burst); !ok {
+	ip := remoteIP(r)
+	// Login is what creates pending sign-ins. Key it the same way as the cap
+	// (IPv6 /64, IPv4-mapped as IPv4) so a subnet cannot outrun either limit.
+	if bucket == "login" {
+		ip = clientNetKey(ip)
+	}
+	if ok, wait := h.acctLim.Allow(bucket+"|"+ip, rps, burst); !ok {
 		w.Header().Set("Retry-After", strconv.Itoa(int(wait/time.Second)+1))
 		writeJSON(w, 429, map[string]string{"error": "rate_limited", "message": "Too many tries. Wait a moment and try again."})
 		return true

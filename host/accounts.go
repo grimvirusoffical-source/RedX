@@ -42,7 +42,7 @@ const (
 	acctHandoffTTL      = 2 * time.Minute
 	acctSignupTTL       = 30 * time.Minute
 	acctMaxPending      = 10000
-	acctMaxPendingPerIP = 20 // live sign-ins per client address; expired and used records do not count
+	acctMaxPendingPerIP = 20 // live sign-ins per clientNetKey; expired and used records do not count
 	acctTokenPrefix     = "rxs_"
 )
 
@@ -317,7 +317,7 @@ func (s *accountStore) addPending(state string, p *acctPending) error {
 			continue
 		}
 		live++
-		if v.clientIP == p.clientIP {
+		if clientNetKey(v.clientIP) == clientNetKey(p.clientIP) {
 			fromIP++
 		}
 	}

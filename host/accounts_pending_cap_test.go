@@ -108,6 +108,67 @@ func TestPendingGlobalCapStillAppliesToLiveSignIns(t *testing.T) {
 	}
 }
 
+func TestClientNetKeyGroupsIPv6AndMappedIPv4(t *testing.T) {
+	same := clientNetKey("2001:db8:aaaa:1::1")
+	if same != "2001:db8:aaaa:1::/64" {
+		t.Fatalf("key: %s", same)
+	}
+	for _, addr := range []string{
+		"2001:db8:aaaa:1::2",
+		"2001:0db8:aaaa:0001:ffff:ffff:ffff:ffff",
+		"2001:db8:aaaa:1::%eth0",
+	} {
+		if got := clientNetKey(addr); got != same {
+			t.Fatalf("%s -> %s, want %s", addr, got, same)
+		}
+	}
+	if other := clientNetKey("2001:db8:aaaa:2::1"); other == same {
+		t.Fatalf("adjacent /64 collapsed: %s", other)
+	}
+	if clientNetKey("203.0.113.10") != "203.0.113.10" || clientNetKey("203.0.113.11") == clientNetKey("203.0.113.10") {
+		t.Fatal("IPv4 addresses must stay distinct")
+	}
+	if clientNetKey("::ffff:203.0.113.10") != "203.0.113.10" || clientNetKey("::ffff:192.0.2.1") != "192.0.2.1" {
+		t.Fatal("IPv4-mapped IPv6 must key as the IPv4 address")
+	}
+}
+
+func TestIPv6PendingCapIsPerPrefix(t *testing.T) {
+	s := newAccountStore()
+	s.now = time.Now
+	add := func(ip string) error {
+		return s.addPending(randToken(""), &acctPending{clientIP: ip, verifier: "v", nonce: "n"})
+	}
+	for i := 0; i < acctMaxPendingPerIP; i++ {
+		if err := add(fmt.Sprintf("2001:db8:aaaa:1::%x", i+1)); err != nil {
+			t.Fatalf("host %d in one /64: %v", i, err)
+		}
+	}
+	if err := add("2001:db8:aaaa:1::ffff"); err != errTooMany {
+		t.Fatalf("another address in the same /64: %v", err)
+	}
+	if err := add("2001:db8:aaaa:2::1"); err != nil {
+		t.Fatalf("a second /64 was capped with the first: %v", err)
+	}
+	for i := 0; i < acctMaxPendingPerIP; i++ {
+		if err := add("203.0.113.10"); err != nil {
+			t.Fatalf("IPv4 %d: %v", i, err)
+		}
+	}
+	if err := add("203.0.113.10"); err != errTooMany {
+		t.Fatalf("IPv4 cap: %v", err)
+	}
+	if err := add("203.0.113.11"); err != nil {
+		t.Fatalf("a different IPv4 was capped with the first: %v", err)
+	}
+	if err := add("::ffff:203.0.113.10"); err != errTooMany {
+		t.Fatalf("IPv4-mapped address did not share the IPv4 cap: %v", err)
+	}
+	if err := add("::ffff:203.0.113.11"); err != nil {
+		t.Fatalf("mapped form of a free IPv4: %v", err)
+	}
+}
+
 func countLive(s *accountStore, now time.Time) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()

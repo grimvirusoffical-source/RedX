@@ -1209,6 +1209,53 @@ func TestAccountsTwoIPsCannotStarvePendingCap(t *testing.T) {
 	}
 }
 
+func TestAccountsIPv6PrefixSharesLoginCap(t *testing.T) {
+	_, iss := startFake(t)
+	n := startNode(t, t.TempDir(), func(c *host.Config, _ string) {
+		c.AccountsIssuer = iss
+		c.AccountsClientSecret = "test-client-secret"
+		c.AccountsEventsPoll = 3600
+		c.TrustedProxies = []string{"127.0.0.1", "::1"}
+	})
+	okLogin := func(ip string) {
+		t.Helper()
+		res := loginFrom(t, n, ip)
+		loc := res.Header.Get("Location")
+		if res.StatusCode != http.StatusFound || strings.Contains(loc, "error=") {
+			t.Fatalf("%s login: %d %s", ip, res.StatusCode, loc)
+		}
+	}
+	// A full bucket answers 429 while the login limit holds, or busy once it refills and the pending cap is what stops the next sign-in.
+	blocked := func(ip string) {
+		t.Helper()
+		res := loginFrom(t, n, ip)
+		loc := res.Header.Get("Location")
+		if res.StatusCode == http.StatusTooManyRequests || (res.StatusCode == http.StatusFound && strings.Contains(loc, "error=busy")) {
+			return
+		}
+		t.Fatalf("%s was treated as a new client: %d %s", ip, res.StatusCode, loc)
+	}
+	for i := 1; i <= 20; i++ {
+		okLogin(fmt.Sprintf("2001:db8:aaaa:1::%x", i))
+	}
+	blocked("2001:db8:aaaa:1::ff")
+	okLogin("2001:db8:bbbb:2::1")
+	// IPv4 addresses stay one bucket each.
+	for i := 0; i < 20; i++ {
+		okLogin("198.51.100.10")
+	}
+	blocked("198.51.100.10")
+	blocked("::ffff:198.51.100.10")
+	okLogin("198.51.100.11")
+	okLogin("::ffff:198.51.100.11")
+	// Once the login limit refills, the /64 is still at its pending cap.
+	res := loginPastLimit(t, n, "2001:db8:aaaa:1::ee")
+	if loc := res.Header.Get("Location"); res.StatusCode != http.StatusFound || !strings.Contains(loc, "error=busy") {
+		t.Fatalf("same /64 after the rate limit: %d %s", res.StatusCode, loc)
+	}
+	okLogin("2001:db8:cccc:3::5")
+}
+
 func TestAccountsPendingCapIgnoresSpoofedForwarding(t *testing.T) {
 	_, iss := startFake(t)
 	n := startAcctNode(t, iss)
@@ -1223,6 +1270,10 @@ func TestAccountsPendingCapIgnoresSpoofedForwarding(t *testing.T) {
 	loc := res.Header.Get("Location")
 	if res.StatusCode != http.StatusFound || !strings.Contains(loc, "error=busy") {
 		t.Fatalf("a spoofed X-Forwarded-For must share the socket address cap: %d %s", res.StatusCode, loc)
+	}
+	res = loginPastLimit(t, n, "2001:db8:eeee:1::1")
+	if loc = res.Header.Get("Location"); res.StatusCode != http.StatusFound || !strings.Contains(loc, "error=busy") {
+		t.Fatalf("a spoofed IPv6 prefix must not get its own cap: %d %s", res.StatusCode, loc)
 	}
 }
 
