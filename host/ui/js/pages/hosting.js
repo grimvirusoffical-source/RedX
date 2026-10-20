@@ -2,7 +2,7 @@
 import { h, icon, chip, mount, toast, field, fmtBytes, fmtTime } from '../util.js';
 import { api } from '../api.js';
 import { state } from '../state.js';
-import { pageHead, page } from './shared.js';
+import { pageHead, page, apiMessage, apiCode } from './shared.js';
 
 const ACCESS = {
   full: 'Full access: you can create, read, write and drop databases and keys, within this tier\'s quotas.',
@@ -35,15 +35,29 @@ export default async function render() {
 
   const account = state.who && state.who.account;
   let me = null;
+  let meFailed = false;
   if (account) {
-    try { me = await api('GET', '/v1/billing/me', { noAuthRedirect: true }); } catch { me = null; }
+    try { me = await api('GET', '/v1/billing/me', { noAuthRedirect: true }); }
+    catch (e) {
+      meFailed = true;
+      const code = apiCode(e);
+      if (code === 'account_required' || e.status === 403) {
+        body.append(h('div', { class: 'callout info' }, icon('info'), h('div', null, 'Sign in with a Red-XAI Account to choose a plan and see usage.')));
+      } else if (e.status === 404) {
+        body.append(h('div', { class: 'callout info', id: 'hosting-me-missing', role: 'status' }, icon('info'),
+          h('div', null, 'Account billing is not available on this host yet.')));
+      } else {
+        body.append(h('div', { class: 'callout info', id: 'hosting-me-error', role: 'status' }, icon('info'),
+          h('div', null, apiMessage(e, "Couldn't load this account's plan, try again"))));
+      }
+    }
   } else {
     body.append(h('div', { class: 'callout info' }, icon('info'), h('div', null, 'Sign in with a Red-XAI Account to choose a plan and see usage.')));
   }
 
   if (me) body.append(accountCard(me, plans));
   if (plans && plans.enabled) body.append(planGrid(plans, me));
-  if (account) body.append(createCard());
+  if (account && !meFailed) body.append(createCard());
   return root;
 }
 

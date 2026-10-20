@@ -1,8 +1,8 @@
 // Usage & quotas: meters for this account. An API key has no account, so this page does not call /v1/billing/me.
-import { h, fmtBytes } from '../util.js';
+import { h, icon, fmtBytes } from '../util.js';
 import { api } from '../api.js';
 import { state } from '../state.js';
-import { pageHead, page } from './shared.js';
+import { pageHead, page, apiMessage, apiCode } from './shared.js';
 
 export default async function render() {
   const root = page();
@@ -15,7 +15,21 @@ export default async function render() {
     return root;
   }
   let me = null;
-  try { me = await api('GET', '/v1/billing/me', { noAuthRedirect: true }); } catch { me = null; }
+  try {
+    me = await api('GET', '/v1/billing/me', { noAuthRedirect: true });
+  } catch (e) {
+    const code = apiCode(e);
+    if (code === 'account_required' || e.status === 403) {
+      body.append(h('p', { class: 'muted' }, 'Sign in with a Red-XAI Account to see usage against your plan.'));
+    } else if (e.status === 404) {
+      body.append(h('div', { class: 'callout info', id: 'usage-missing', role: 'status' }, icon('info'),
+        h('div', null, 'Usage is not available on this host yet.')));
+    } else {
+      body.append(h('div', { class: 'callout info', id: 'usage-error', role: 'status' }, icon('info'),
+        h('div', null, apiMessage(e, "Couldn't load usage, try again"))));
+    }
+    return root;
+  }
   if (!me || !me.usage || !me.quota) {
     body.append(h('p', { class: 'muted' }, 'Usage appears here once a plan is on this account.'));
     return root;

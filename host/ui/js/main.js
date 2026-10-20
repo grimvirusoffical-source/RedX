@@ -178,8 +178,9 @@ function themeSwitcher() {
 
 function buildShell() {
   const nav = h('nav', { class: 'nav', 'aria-label': 'Main' });
+  const brand = h('a', { class: 'brand', href: '#/dashboard', id: 'console-brand' }, h('img', { src: '/ui/icons/redx-128.png', width: 34, height: 34, alt: '' }), h('span', null, h('b', null, 'RedX'), h('small', null, 'console')));
   const side = h('aside', { class: 'side' },
-    h('a', { class: 'brand', href: '#/dashboard' }, h('img', { src: '/ui/icons/redx-128.png', width: 34, height: 34, alt: '' }), h('span', null, h('b', null, 'RedX'), h('small', null, 'console'))),
+    brand,
     nav,
     h('div', { class: 'side-foot' }, h('span', { class: 'muted small', id: 'ver' }, 'v' + (state.who && state.who.version || ''))));
   const dbSel = h('select', { class: 'select', 'aria-label': 'Current database', onchange: (e) => setDb(e.target.value) });
@@ -239,6 +240,7 @@ function buildShell() {
       o.setAttribute('aria-pressed', String(on));
     });
     root.dataset.console = state.consoleMode;
+    brand.href = state.consoleMode === 'host' ? '#/hosting' : '#/dashboard';
     themeBtn.sync();
     const acct = state.who && state.who.account;
     mount(who, !state.who ? '' : acct ? (acct.username || acct.email) + (acct.owner === true ? ' · owner' : '') : (state.who.label || state.who.id) + ' · ' + state.who.scope);
@@ -284,10 +286,12 @@ async function route() {
   if (known && !(entry ? entryAllowed(entry) : pageAllowed(id))) {
     document.title = 'Not found · RedX Console';
     clear(main);
+    const home = state.consoleMode === 'host' ? '#/hosting' : '#/dashboard';
+    const homeLabel = state.consoleMode === 'host' ? 'Back to Plans & billing' : 'Back to the dashboard';
     main.append(h('div', { class: 'page', id: 'page-missing' },
       h('h1', null, 'Page not found'),
       h('p', null, 'That page does not exist.'),
-      h('p', null, h('a', { href: '#/dashboard' }, 'Back to the dashboard'))));
+      h('p', null, h('a', { href: home, id: 'page-missing-home' }, homeLabel))));
     return;
   }
   const titled = NAV.find((n) => n.route === id);

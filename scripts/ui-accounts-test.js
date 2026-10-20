@@ -181,9 +181,16 @@ const OWNER = 'owner@example.com'; // placeholder; real owner addresses live in 
     await p.click('.nav-item[data-id="logs"]');
     await p.waitForSelector('#logs-page');
     expect(/activity/i.test(await p.textContent('#logs-page')) && await p.$('.errbox') === null && await p.$('#page-missing') === null, 'Logs shows this account\'s activity');
+    expect(await p.$('#activity-error') === null && await p.$('#activity-missing') === null, 'Logs has no silent API failure callout for a signed-in account');
+    await p.click('.nav-item[data-id="usage"]');
+    await p.waitForSelector('#usage-page');
+    expect(/Usage|plan|Sign in/i.test(await p.textContent('#usage-page')) && await p.$('.errbox') === null, 'Usage page loads for a signed-in account');
+    expect(await p.$('#usage-error') === null, 'Usage does not show a load error when billing/me answers');
+    expect(await p.getAttribute('#console-brand', 'href') === '#/hosting', 'brand link stays on Host home while in Host mode');
     await p.click('#console-mode [data-surface="database"]');
     await p.waitForSelector('.nav-item[data-id="dashboard"]');
     expect(await p.$('.nav-item[data-id="hosting"]') === null, 'toggle back to Database hides Host pages');
+    expect(await p.getAttribute('#console-brand', 'href') === '#/dashboard', 'brand link returns to Dashboard in Database mode');
     where = 'mode-persist';
     await p.click('#console-mode [data-surface="host"]');
     await p.waitForSelector('.nav-item[data-id="hosting"]');
