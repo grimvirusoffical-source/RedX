@@ -15,7 +15,10 @@ import (
 // must refuse them with ErrLegacyBackup even with the right secret, before any
 // decryption, and install nothing.
 func TestLegacyRXBK1BackupsRefused(t *testing.T) {
-	hk, _ := os.ReadFile("testdata/legacy/rxbk1_hostkey.key")
+	hk, err := os.ReadFile("testdata/legacy/rxbk1_hostkey.bin.hostkey")
+	if err != nil || len(hk) != 32 {
+		t.Fatal("fixture host key missing", err)
+	}
 	for _, c := range []struct {
 		file string
 		keys host.BackupKeys

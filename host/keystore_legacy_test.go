@@ -29,7 +29,10 @@ func copyFixture(t *testing.T, name string) string {
 // unchanged (same algorithm and parameters), and reject a wrong key.
 func TestKeystoreOldArgon2HashesStillVerify(t *testing.T) {
 	p := copyFixture(t, "keys_plain_v1.json")
-	key, _ := os.ReadFile("testdata/legacy/keys_plain_v1.json.key")
+	key, err := os.ReadFile("testdata/legacy/keys_plain_v1.apikey.txt")
+	if err != nil || len(key) == 0 {
+		t.Fatal("fixture key missing", err)
+	}
 	ks, err := host.OpenKeystore(p, host.KeystoreOptions{})
 	if err != nil {
 		t.Fatal(err)
