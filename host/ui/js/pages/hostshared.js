@@ -2,6 +2,7 @@ import { h, icon, errorBox, mount, emptyState, spinner, table } from '../util.js
 import { api, enc } from '../api.js';
 import { state, isHostAdmin } from '../state.js';
 import { navigate } from '../main.js';
+import { apiMessage } from './shared.js';
 
 export function planNotice(e) {
   const code = e && e.body && e.body.code;
@@ -12,9 +13,15 @@ export function planNotice(e) {
     h('a', { href: '/ui/billing.html' }, 'Choose a plan'));
 }
 
-export function showErr(box, e) {
+export function showErr(box, e, retry) {
   const note = planNotice(e);
-  mount(box, note || errorBox(e.message || String(e)));
+  if (note) { mount(box, note); return; }
+  const status = e && e.status;
+  if (status === 404) {
+    mount(box, h('div', { class: 'callout info', role: 'status' }, icon('info'), h('div', null, 'This Host feature is not available on this server yet.')));
+    return;
+  }
+  mount(box, errorBox(apiMessage(e, 'Request failed'), retry));
 }
 
 export async function loadApps() {

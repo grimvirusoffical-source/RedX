@@ -154,7 +154,7 @@ const OWNER = 'owner@example.com'; // placeholder; real owner addresses live in 
     const hiddenAccount = ['owner', 'updates', 'keys', 'devices', 'apps', 'backups', 'cluster', 'presets', 'raw', 'policy', 'watch'];
     for (const id of hiddenAccount) expect(await p.$(`.nav-item[data-id="${id}"]`) === null, 'regular account hides ' + id);
     const hostOnly = ['hosting', 'usage', 'updates', 'logs'];
-    const notInNav = ['hostapps', 'deploy', 'domains', 'env', 'applogs'];
+    const notInNav = ['deploy', 'domains', 'env', 'applogs']; // hostapps/hostdeploy/... are real Host pages now
     expect(await p.getAttribute('#console-mode [data-surface="database"]', 'aria-pressed') === 'true', 'default mode is Database');
     expect(await p.evaluate(() => {
       const header = document.querySelector('header.top');
@@ -170,7 +170,7 @@ const OWNER = 'owner@example.com'; // placeholder; real owner addresses live in 
     await p.click('#console-mode [data-surface="host"]');
     await p.waitForSelector('.nav-item[data-id="hosting"]');
     expect(await p.getAttribute('#console-mode [data-surface="host"]', 'aria-pressed') === 'true', 'toggle selects Host');
-    for (const id of ['hosting', 'usage', 'logs']) {
+    for (const id of ['hosting', 'usage', 'logs', 'hostapps', 'hostdeploy', 'hostdomains', 'hostsecrets', 'hostlogs']) {
       expect(await p.$(`.nav-item[data-id="${id}"]`) !== null, 'Host mode shows ' + id);
     }
     for (const id of notInNav) expect(await p.$(`.nav-item[data-id="${id}"]`) === null, 'Host mode has no ' + id + ' entry');

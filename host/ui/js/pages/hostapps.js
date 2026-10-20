@@ -6,6 +6,7 @@ const NAME_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
 
 export default async function render({ args }) {
   const root = page();
+  root.id = 'hostapps-page';
   if (args && args[0]) return renderOne(root, args[0]);
   return renderList(root);
 }
