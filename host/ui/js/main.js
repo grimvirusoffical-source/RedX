@@ -2,9 +2,18 @@ import { h, icon, mount, toast, $, clear } from './util.js';
 import { api, session, setUnauthorizedHandler, exchangePairingCode } from './api.js';
 import { state, subscribe, setMode, setTheme, setDb, applyTheme, loadWho, loadDbs, isHostAdmin, wizard } from './state.js';
 
+// HOST_NAV is one entry per working Host page. bc-292e00d9's consolePages
+// (host/ui/js/main.js registry + whoami pages) must include these ids or
+// pageAllowed hides them: hostapps, hostdeploy, hostdomains, hostsecrets, hostlogs.
+const HOST_NAV = [
+  { id: 'hostapps', title: 'Apps', icon: 'rocket' },
+  { id: 'hostdeploy', title: 'Deploy', icon: 'upload' },
+  { id: 'hostdomains', title: 'Domains', icon: 'globe' },
+];
 const NAV = [
   { id: 'dashboard', title: 'Dashboard', icon: 'home' },
   { id: 'databases', title: 'Databases', icon: 'db' },
+  ...HOST_NAV,
   { id: 'data', title: 'Data Explorer', icon: 'table' },
   { id: 'studio', title: 'BoxQL Studio', icon: 'terminal' },
   { id: 'keys', title: 'API Keys', icon: 'key' },

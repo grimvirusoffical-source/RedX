@@ -97,6 +97,26 @@ OPERATIONS: Dict[str, Dict[str, Any]] = {
     "updateAppRollback": {"id": "updateAppRollback", "group": "updates", "method": "POST", "path": "/v1/updates/apps/{app}/rollback", "shorthand": "", "auth": "host-admin", "danger": "dangerous", "danger_level": 3, "response": "json", "request": "json", "host_confirm": "", "summary": "Restore one snapshot for an app."},
     "updatePublish": {"id": "updatePublish", "group": "updates", "method": "POST", "path": "/v1/updates/apps/{app}/publish", "shorthand": "", "auth": "host-admin", "danger": "dangerous", "danger_level": 3, "response": "json", "request": "json", "host_confirm": "", "summary": "Sign a host and/or github manifest for an app already in hosted_apps. A github target creates the release."},
     "updateGitHubWebhook": {"id": "updateGitHubWebhook", "group": "updates", "method": "POST", "path": "/v1/updates/github/webhook", "shorthand": "", "auth": "none", "danger": "write", "danger_level": 1, "response": "json", "request": "", "host_confirm": "", "summary": "GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest. No webhook secret configured is 404."},
+    "listHostedApps": {"id": "listHostedApps", "group": "hosted", "method": "GET", "path": "/v1/hosted/apps", "shorthand": "", "auth": "key", "danger": "safe", "danger_level": 0, "response": "json", "request": "", "host_confirm": "", "summary": "Hosted apps the caller may see. Tenants see their own. Owners and host-admin keys see every app."},
+    "createHostedApp": {"id": "createHostedApp", "group": "hosted", "method": "POST", "path": "/v1/hosted/apps", "shorthand": "", "auth": "key", "danger": "write", "danger_level": 1, "response": "json", "request": "json", "host_confirm": "", "summary": "Create a tenant app. kind is static, container or process. db is the tenant's logical database name."},
+    "getHostedApp": {"id": "getHostedApp", "group": "hosted", "method": "GET", "path": "/v1/hosted/apps/{id}", "shorthand": "", "auth": "key", "danger": "safe", "danger_level": 0, "response": "json", "request": "", "host_confirm": "", "summary": "One hosted app: deploys, domains, masked secrets, limits and the sandbox runtime spec."},
+    "deleteHostedApp": {"id": "deleteHostedApp", "group": "hosted", "method": "DELETE", "path": "/v1/hosted/apps/{id}", "shorthand": "", "auth": "key", "danger": "dangerous", "danger_level": 3, "response": "json", "request": "", "host_confirm": "", "summary": "Delete a hosted app, its releases and its scoped database key."},
+    "deployHostedApp": {"id": "deployHostedApp", "group": "hosted", "method": "POST", "path": "/v1/hosted/apps/{id}/deploy", "shorthand": "", "auth": "key", "danger": "write", "danger_level": 1, "response": "json", "request": "json", "host_confirm": "", "summary": "Deploy from github, image or dockerfile. strategy is direct, canary or blue_green."},
+    "uploadHostedArchive": {"id": "uploadHostedArchive", "group": "hosted", "method": "POST", "path": "/v1/hosted/apps/{id}/archive", "shorthand": "", "auth": "key", "danger": "write", "danger_level": 1, "response": "json", "request": "binary", "host_confirm": "", "summary": "Deploy a static site or build context from a zip, tar or tar.gz body."},
+    "listHostedDeploys": {"id": "listHostedDeploys", "group": "hosted", "method": "GET", "path": "/v1/hosted/apps/{id}/deploys", "shorthand": "", "auth": "key", "danger": "safe", "danger_level": 0, "response": "json", "request": "", "host_confirm": "", "summary": "Deploy history for one app."},
+    "getHostedManifest": {"id": "getHostedManifest", "group": "hosted", "method": "GET", "path": "/v1/hosted/apps/{id}/deploys/{deploy}/manifest", "shorthand": "", "auth": "key", "danger": "safe", "danger_level": 0, "response": "json", "request": "", "host_confirm": "", "summary": "Signed redx.update-manifest/v1 bytes for a deploy. X-RedX-Signature is ed25519 over those exact bytes."},
+    "rollbackHostedApp": {"id": "rollbackHostedApp", "group": "hosted", "method": "POST", "path": "/v1/hosted/apps/{id}/rollback", "shorthand": "", "auth": "key", "danger": "admin", "danger_level": 2, "response": "json", "request": "json", "host_confirm": "", "summary": "Make a previous deploy current. Pass deploy or snapshot."},
+    "promoteHostedApp": {"id": "promoteHostedApp", "group": "hosted", "method": "POST", "path": "/v1/hosted/apps/{id}/promote", "shorthand": "", "auth": "key", "danger": "admin", "danger_level": 2, "response": "json", "request": "", "host_confirm": "", "summary": "Promote the canary or blue-green standby to current."},
+    "startHostedApp": {"id": "startHostedApp", "group": "hosted", "method": "POST", "path": "/v1/hosted/apps/{id}/start", "shorthand": "", "auth": "key", "danger": "write", "danger_level": 1, "response": "json", "request": "", "host_confirm": "", "summary": "Start an app. A state change counts as one host_switch_quota switch."},
+    "stopHostedApp": {"id": "stopHostedApp", "group": "hosted", "method": "POST", "path": "/v1/hosted/apps/{id}/stop", "shorthand": "", "auth": "key", "danger": "write", "danger_level": 1, "response": "json", "request": "", "host_confirm": "", "summary": "Stop an app. A state change counts as one host_switch_quota switch."},
+    "listHostedDomains": {"id": "listHostedDomains", "group": "hosted", "method": "GET", "path": "/v1/hosted/apps/{id}/domains", "shorthand": "", "auth": "key", "danger": "safe", "danger_level": 0, "response": "json", "request": "", "host_confirm": "", "summary": "Default hostname and custom domains, with the DNS records for unverified names."},
+    "addHostedDomain": {"id": "addHostedDomain", "group": "hosted", "method": "POST", "path": "/v1/hosted/apps/{id}/domains", "shorthand": "", "auth": "key", "danger": "write", "danger_level": 1, "response": "json", "request": "json", "host_confirm": "", "summary": "Claim a custom domain. method is txt or http. A name another tenant holds is refused."},
+    "deleteHostedDomain": {"id": "deleteHostedDomain", "group": "hosted", "method": "DELETE", "path": "/v1/hosted/apps/{id}/domains/{domain}", "shorthand": "", "auth": "key", "danger": "write", "danger_level": 1, "response": "json", "request": "", "host_confirm": "", "summary": "Drop a custom domain. The default hostname cannot be dropped."},
+    "verifyHostedDomain": {"id": "verifyHostedDomain", "group": "hosted", "method": "POST", "path": "/v1/hosted/apps/{id}/domains/{domain}/verify", "shorthand": "", "auth": "key", "danger": "write", "danger_level": 1, "response": "json", "request": "", "host_confirm": "", "summary": "Check the TXT or HTTP challenge and mark the domain verified so it can be routed."},
+    "getHostedUsage": {"id": "getHostedUsage", "group": "hosted", "method": "GET", "path": "/v1/hosted/apps/{id}/usage", "shorthand": "", "auth": "key", "danger": "safe", "danger_level": 0, "response": "json", "request": "", "host_confirm": "", "summary": "Disk used by one app and the tier limits that apply."},
+    "getHostedHealth": {"id": "getHostedHealth", "group": "hosted", "method": "GET", "path": "/v1/hosted/apps/{id}/health", "shorthand": "", "auth": "key", "danger": "safe", "danger_level": 0, "response": "json", "request": "", "host_confirm": "", "summary": "Probe the current release. A failed direct deploy is rolled back to the previous release."},
+    "hostedTLSAsk": {"id": "hostedTLSAsk", "group": "hosted", "method": "GET", "path": "/v1/hosted/tls/ask", "shorthand": "", "auth": "none", "danger": "safe", "danger_level": 0, "response": "json", "request": "", "host_confirm": "", "summary": "Caddy on-demand TLS ask. 200 only for a verified app domain, and only from loopback or with X-RedX-Caddy-Ask."},
+    "hostedCaddy": {"id": "hostedCaddy", "group": "hosted", "method": "GET", "path": "/v1/hosted/caddy", "shorthand": "", "auth": "key", "danger": "safe", "danger_level": 0, "response": "text", "request": "", "host_confirm": "", "summary": "Caddyfile fragment for on-demand TLS. Owner or host-admin only."},
 }
 
 
@@ -445,3 +465,83 @@ class Operations:
     def update_git_hub_webhook(self, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
         """GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest. No webhook secret configured is 404. (POST /v1/updates/github/webhook; auth none; danger write)"""
         return self.call("updateGitHubWebhook", confirm=confirm, headers=headers)
+
+    def list_hosted_apps(self, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Hosted apps the caller may see. Tenants see their own. Owners and host-admin keys see every app. (GET /v1/hosted/apps; auth key; danger safe)"""
+        return self.call("listHostedApps", confirm=confirm, headers=headers)
+
+    def create_hosted_app(self, *, body: Any = None, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Create a tenant app. kind is static, container or process. db is the tenant's logical database name. (POST /v1/hosted/apps; auth key; danger write)"""
+        return self.call("createHostedApp", body=body, confirm=confirm, headers=headers)
+
+    def get_hosted_app(self, id: str, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """One hosted app: deploys, domains, masked secrets, limits and the sandbox runtime spec. (GET /v1/hosted/apps/{id}; auth key; danger safe)"""
+        return self.call("getHostedApp", id=id, confirm=confirm, headers=headers)
+
+    def delete_hosted_app(self, id: str, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Delete a hosted app, its releases and its scoped database key. (DELETE /v1/hosted/apps/{id}; auth key; danger dangerous)"""
+        return self.call("deleteHostedApp", id=id, confirm=confirm, headers=headers)
+
+    def deploy_hosted_app(self, id: str, *, body: Any = None, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Deploy from github, image or dockerfile. strategy is direct, canary or blue_green. (POST /v1/hosted/apps/{id}/deploy; auth key; danger write)"""
+        return self.call("deployHostedApp", id=id, body=body, confirm=confirm, headers=headers)
+
+    def upload_hosted_archive(self, id: str, *, body: Any = None, query: Optional[Dict[str, Any]] = None, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Deploy a static site or build context from a zip, tar or tar.gz body. (POST /v1/hosted/apps/{id}/archive; auth key; danger write)"""
+        return self.call("uploadHostedArchive", id=id, body=body, query=query, confirm=confirm, headers=headers)
+
+    def list_hosted_deploys(self, id: str, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Deploy history for one app. (GET /v1/hosted/apps/{id}/deploys; auth key; danger safe)"""
+        return self.call("listHostedDeploys", id=id, confirm=confirm, headers=headers)
+
+    def get_hosted_manifest(self, id: str, deploy: str, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Signed redx.update-manifest/v1 bytes for a deploy. X-RedX-Signature is ed25519 over those exact bytes. (GET /v1/hosted/apps/{id}/deploys/{deploy}/manifest; auth key; danger safe)"""
+        return self.call("getHostedManifest", id=id, deploy=deploy, confirm=confirm, headers=headers)
+
+    def rollback_hosted_app(self, id: str, *, body: Any = None, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Make a previous deploy current. Pass deploy or snapshot. (POST /v1/hosted/apps/{id}/rollback; auth key; danger admin)"""
+        return self.call("rollbackHostedApp", id=id, body=body, confirm=confirm, headers=headers)
+
+    def promote_hosted_app(self, id: str, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Promote the canary or blue-green standby to current. (POST /v1/hosted/apps/{id}/promote; auth key; danger admin)"""
+        return self.call("promoteHostedApp", id=id, confirm=confirm, headers=headers)
+
+    def start_hosted_app(self, id: str, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Start an app. A state change counts as one host_switch_quota switch. (POST /v1/hosted/apps/{id}/start; auth key; danger write)"""
+        return self.call("startHostedApp", id=id, confirm=confirm, headers=headers)
+
+    def stop_hosted_app(self, id: str, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Stop an app. A state change counts as one host_switch_quota switch. (POST /v1/hosted/apps/{id}/stop; auth key; danger write)"""
+        return self.call("stopHostedApp", id=id, confirm=confirm, headers=headers)
+
+    def list_hosted_domains(self, id: str, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Default hostname and custom domains, with the DNS records for unverified names. (GET /v1/hosted/apps/{id}/domains; auth key; danger safe)"""
+        return self.call("listHostedDomains", id=id, confirm=confirm, headers=headers)
+
+    def add_hosted_domain(self, id: str, *, body: Any = None, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Claim a custom domain. method is txt or http. A name another tenant holds is refused. (POST /v1/hosted/apps/{id}/domains; auth key; danger write)"""
+        return self.call("addHostedDomain", id=id, body=body, confirm=confirm, headers=headers)
+
+    def delete_hosted_domain(self, id: str, domain: str, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Drop a custom domain. The default hostname cannot be dropped. (DELETE /v1/hosted/apps/{id}/domains/{domain}; auth key; danger write)"""
+        return self.call("deleteHostedDomain", id=id, domain=domain, confirm=confirm, headers=headers)
+
+    def verify_hosted_domain(self, id: str, domain: str, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Check the TXT or HTTP challenge and mark the domain verified so it can be routed. (POST /v1/hosted/apps/{id}/domains/{domain}/verify; auth key; danger write)"""
+        return self.call("verifyHostedDomain", id=id, domain=domain, confirm=confirm, headers=headers)
+
+    def get_hosted_usage(self, id: str, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Disk used by one app and the tier limits that apply. (GET /v1/hosted/apps/{id}/usage; auth key; danger safe)"""
+        return self.call("getHostedUsage", id=id, confirm=confirm, headers=headers)
+
+    def get_hosted_health(self, id: str, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Probe the current release. A failed direct deploy is rolled back to the previous release. (GET /v1/hosted/apps/{id}/health; auth key; danger safe)"""
+        return self.call("getHostedHealth", id=id, confirm=confirm, headers=headers)
+
+    def hosted_t_l_s_ask(self, *, query: Optional[Dict[str, Any]] = None, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Caddy on-demand TLS ask. 200 only for a verified app domain, and only from loopback or with X-RedX-Caddy-Ask. (GET /v1/hosted/tls/ask; auth none; danger safe)"""
+        return self.call("hostedTLSAsk", query=query, confirm=confirm, headers=headers)
+
+    def hosted_caddy(self, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Caddyfile fragment for on-demand TLS. Owner or host-admin only. (GET /v1/hosted/caddy; auth key; danger safe)"""
+        return self.call("hostedCaddy", confirm=confirm, headers=headers)

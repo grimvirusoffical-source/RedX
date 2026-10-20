@@ -58,6 +58,7 @@ func baseCfg(dir string) host.Config {
 	c.ArgonMemKiB, c.ArgonTime = 64, 1
 	c.Heartbeat = 1
 	c.LogLevel = "quiet"
+	c.AppsRuntime = "none"
 	return c
 }
 

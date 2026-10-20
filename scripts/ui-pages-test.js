@@ -18,7 +18,7 @@ if (!redx) { console.error('usage: node scripts/ui-pages-test.js <redxd> <redx>'
 const free = () => new Promise((r) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); }); });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ABOUT = 'RedX is developed and maintained by Red-XAI LLC. Red-XAI LLC is wholly owned by GRIM-VIRUS, an independent recording artist who leads development under the alias MainDirectory. © Red-XAI LLC. All rights reserved.';
-const PAGES = ['dashboard', 'databases', 'data', 'studio', 'keys', 'devices', 'backups', 'settings', 'help', 'watch', 'raw', 'policy', 'cluster', 'presets', 'wizard', 'apps', 'connect'];
+const PAGES = ['dashboard', 'databases', 'hostapps', 'hostdeploy', 'hostdomains', 'data', 'studio', 'keys', 'devices', 'backups', 'settings', 'help', 'watch', 'raw', 'policy', 'cluster', 'presets', 'wizard', 'apps', 'connect'];
 (async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'redx-pages-'));
   const port = await free(), url = `http://127.0.0.1:${port}`;

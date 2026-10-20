@@ -189,6 +189,46 @@ export interface RedXOperations {
   updatePublish(opts: { app: string; body?: { artifacts?: unknown[]; channel?: string; notes_md?: string; outcome_tags?: unknown[]; targets?: unknown[]; version?: string }; confirm: true; headers?: Record<string, string> }): Promise<any>;
   /** GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest. No webhook secret configured is 404. (POST /v1/updates/github/webhook; auth none; danger write) */
   updateGitHubWebhook(opts?: { headers?: Record<string, string> }): Promise<any>;
+  /** Hosted apps the caller may see. Tenants see their own. Owners and host-admin keys see every app. (GET /v1/hosted/apps; auth key; danger safe) */
+  listHostedApps(opts?: { headers?: Record<string, string> }): Promise<any>;
+  /** Create a tenant app. kind is static, container or process. db is the tenant's logical database name. (POST /v1/hosted/apps; auth key; danger write) */
+  createHostedApp(opts?: { body?: { db?: string; kind?: string; name?: string }; headers?: Record<string, string> }): Promise<any>;
+  /** One hosted app: deploys, domains, masked secrets, limits and the sandbox runtime spec. (GET /v1/hosted/apps/{id}; auth key; danger safe) */
+  getHostedApp(opts: { id: string; headers?: Record<string, string> }): Promise<any>;
+  /** Delete a hosted app, its releases and its scoped database key. (DELETE /v1/hosted/apps/{id}; auth key; danger dangerous) */
+  deleteHostedApp(opts: { id: string; confirm: true; headers?: Record<string, string> }): Promise<any>;
+  /** Deploy from github, image or dockerfile. strategy is direct, canary or blue_green. (POST /v1/hosted/apps/{id}/deploy; auth key; danger write) */
+  deployHostedApp(opts: { id: string; body?: { canaryPct?: number; command?: unknown[]; dockerfile?: string; image?: string; ref?: string; repo?: string; source?: string; strategy?: string }; headers?: Record<string, string> }): Promise<any>;
+  /** Deploy a static site or build context from a zip, tar or tar.gz body. (POST /v1/hosted/apps/{id}/archive; auth key; danger write) */
+  uploadHostedArchive(opts: { id: string; body: string | Uint8Array | Buffer; query?: { canaryPct?: string; strategy?: string }; headers?: Record<string, string> }): Promise<any>;
+  /** Deploy history for one app. (GET /v1/hosted/apps/{id}/deploys; auth key; danger safe) */
+  listHostedDeploys(opts: { id: string; headers?: Record<string, string> }): Promise<any>;
+  /** Signed redx.update-manifest/v1 bytes for a deploy. X-RedX-Signature is ed25519 over those exact bytes. (GET /v1/hosted/apps/{id}/deploys/{deploy}/manifest; auth key; danger safe) */
+  getHostedManifest(opts: { id: string; deploy: string; headers?: Record<string, string> }): Promise<any>;
+  /** Make a previous deploy current. Pass deploy or snapshot. (POST /v1/hosted/apps/{id}/rollback; auth key; danger admin) */
+  rollbackHostedApp(opts: { id: string; body?: { deploy?: string; snapshot?: string }; headers?: Record<string, string> }): Promise<any>;
+  /** Promote the canary or blue-green standby to current. (POST /v1/hosted/apps/{id}/promote; auth key; danger admin) */
+  promoteHostedApp(opts: { id: string; headers?: Record<string, string> }): Promise<any>;
+  /** Start an app. A state change counts as one host_switch_quota switch. (POST /v1/hosted/apps/{id}/start; auth key; danger write) */
+  startHostedApp(opts: { id: string; headers?: Record<string, string> }): Promise<any>;
+  /** Stop an app. A state change counts as one host_switch_quota switch. (POST /v1/hosted/apps/{id}/stop; auth key; danger write) */
+  stopHostedApp(opts: { id: string; headers?: Record<string, string> }): Promise<any>;
+  /** Default hostname and custom domains, with the DNS records for unverified names. (GET /v1/hosted/apps/{id}/domains; auth key; danger safe) */
+  listHostedDomains(opts: { id: string; headers?: Record<string, string> }): Promise<any>;
+  /** Claim a custom domain. method is txt or http. A name another tenant holds is refused. (POST /v1/hosted/apps/{id}/domains; auth key; danger write) */
+  addHostedDomain(opts: { id: string; body?: { domain?: string; method?: string }; headers?: Record<string, string> }): Promise<any>;
+  /** Drop a custom domain. The default hostname cannot be dropped. (DELETE /v1/hosted/apps/{id}/domains/{domain}; auth key; danger write) */
+  deleteHostedDomain(opts: { id: string; domain: string; headers?: Record<string, string> }): Promise<any>;
+  /** Check the TXT or HTTP challenge and mark the domain verified so it can be routed. (POST /v1/hosted/apps/{id}/domains/{domain}/verify; auth key; danger write) */
+  verifyHostedDomain(opts: { id: string; domain: string; headers?: Record<string, string> }): Promise<any>;
+  /** Disk used by one app and the tier limits that apply. (GET /v1/hosted/apps/{id}/usage; auth key; danger safe) */
+  getHostedUsage(opts: { id: string; headers?: Record<string, string> }): Promise<any>;
+  /** Probe the current release. A failed direct deploy is rolled back to the previous release. (GET /v1/hosted/apps/{id}/health; auth key; danger safe) */
+  getHostedHealth(opts: { id: string; headers?: Record<string, string> }): Promise<any>;
+  /** Caddy on-demand TLS ask. 200 only for a verified app domain, and only from loopback or with X-RedX-Caddy-Ask. (GET /v1/hosted/tls/ask; auth none; danger safe) */
+  hostedTLSAsk(opts?: { query?: { domain?: string }; headers?: Record<string, string> }): Promise<any>;
+  /** Caddyfile fragment for on-demand TLS. Owner or host-admin only. (GET /v1/hosted/caddy; auth key; danger safe) */
+  hostedCaddy(opts?: { headers?: Record<string, string> }): Promise<string>;
 }
 
 export declare const OPERATIONS: Readonly<Record<string, Operation>>;
