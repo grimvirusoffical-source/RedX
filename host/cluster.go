@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -16,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"redx/internal/rsx"
+	"redx/internal/tlspin"
 	"sort"
 	"strconv"
 	"strings"
@@ -129,6 +129,8 @@ type Cluster struct {
 	loopStop      chan struct{}
 	ctx           context.Context
 	snaps         int
+	sealWarn      sync.Once
+	bindWarn      sync.Once
 }
 
 func randHex(n int) string {
@@ -219,21 +221,7 @@ func (c *Cluster) newClient() *http.Client {
 
 // pinnedTLS trusts exactly the certificate whose SHA-256 (hex) equals pin.
 func pinnedTLS(pin string) *tls.Config {
-	pin = strings.ToLower(strings.ReplaceAll(pin, ":", ""))
-	return &tls.Config{
-		InsecureSkipVerify: true, // verification replaced by the pin check below
-		MinVersion:         tls.VersionTLS12,
-		VerifyPeerCertificate: func(raw [][]byte, _ [][]*x509.Certificate) error {
-			if len(raw) == 0 {
-				return errors.New("no peer certificate")
-			}
-			sum := rsx.Sha256(raw[0])
-			if !rsx.CtEq([]byte(hex.EncodeToString(sum[:])), []byte(pin)) {
-				return errors.New("peer certificate does not match pinned fingerprint")
-			}
-			return nil
-		},
-	}
+	return tlspin.Config(pin)
 }
 
 // ---- ClusterHook ----
@@ -640,13 +628,30 @@ func (c *Cluster) pullOnce(ctx context.Context, stop <-chan struct{}) error {
 	q := url.Values{"from": {strconv.FormatUint(next, 10)}, "replid": {replid}, "wait_ms": {strconv.Itoa(c.h.Cfg.Heartbeat * 1000)}, "limit": {"500"}}
 	req, _ := http.NewRequestWithContext(ctx2, "GET", leader+"/v1/cluster/log?"+q.Encode(), nil)
 	c.nodeHeaders(req)
+	sr, err := c.sealRequest(req)
+	if err != nil {
+		return err
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 	var lr logResp
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
+	var body []byte
+	if resp.StatusCode == 200 || resp.StatusCode == http.StatusConflict {
+		rd, done, err := c.openSealed(req, resp, sr, "", "")
+		if err != nil {
+			return err
+		}
+		body, err = io.ReadAll(io.LimitReader(rd, 64<<20))
+		done()
+		if err != nil {
+			return err
+		}
+	} else {
+		body, _ = io.ReadAll(io.LimitReader(resp.Body, 64<<20))
+	}
 	_ = json.Unmarshal(body, &lr)
 	switch {
 	case resp.StatusCode == http.StatusConflict && lr.NeedSnapshot:
@@ -916,7 +921,7 @@ func (c *Cluster) handleLog(w http.ResponseWriter, r *http.Request) {
 	}
 	if !resumable {
 		c.touchMember(id, r.Header.Get("X-Redx-Addr"), 0, "follower")
-		writeJSON(w, http.StatusConflict, logResp{NeedSnapshot: true, ReplID: cur, Last: last})
+		c.writeNodeJSON(w, r, id, http.StatusConflict, logResp{NeedSnapshot: true, ReplID: cur, Last: last})
 		return
 	}
 	// "from" implies the follower applied from-1.
@@ -942,7 +947,7 @@ func (c *Cluster) handleLog(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	writeJSON(w, 200, logResp{ReplID: cur, Entries: es, Last: c.log.Last(), Members: c.memberList()})
+	c.writeNodeJSON(w, r, id, 200, logResp{ReplID: cur, Entries: es, Last: c.log.Last(), Members: c.memberList()})
 }
 
 func (c *Cluster) memberList() []Member {

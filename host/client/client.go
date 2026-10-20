@@ -5,15 +5,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
-	"crypto/x509"
-	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"redx/internal/rsx"
+	"redx/internal/tlspin"
 	"strings"
 	"time"
 
@@ -30,18 +27,7 @@ type Client struct {
 // PinnedTLSConfig trusts exactly the certificate whose SHA-256 (hex, optional
 // "sha256:" prefix and colons) is pin. Chain verification is replaced by the pin.
 func PinnedTLSConfig(pin string) *tls.Config {
-	p := strings.ToLower(strings.ReplaceAll(strings.TrimPrefix(strings.TrimSpace(pin), "sha256:"), ":", ""))
-	return &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12,
-		VerifyPeerCertificate: func(raw [][]byte, _ [][]*x509.Certificate) error {
-			if len(raw) == 0 {
-				return errors.New("no certificate")
-			}
-			s := rsx.Sha256(raw[0])
-			if !rsx.CtEq([]byte(hex.EncodeToString(s[:])), []byte(p)) {
-				return errors.New("server certificate does not match --pin")
-			}
-			return nil
-		}}
+	return tlspin.Config(pin)
 }
 
 // New creates a client. pin (sha256 hex of the server certificate, optional) lets

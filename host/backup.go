@@ -416,7 +416,8 @@ func (h *Host) serveFileAs(w http.ResponseWriter, path string, offset uint64, na
 }
 
 func (c *Cluster) handleSnapshot(w http.ResponseWriter, r *http.Request) {
-	if _, ok := c.nodeAuth(w, r); !ok {
+	id, ok := c.nodeAuth(w, r)
+	if !ok {
 		return
 	}
 	if !c.IsLeader() {
@@ -429,7 +430,28 @@ func (c *Cluster) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 		c.h.Logf("snapshot: %v", err)
 		return
 	}
-	c.h.serveFile(w, p, off, "redx-snapshot.tgz")
+	defer os.Remove(p)
+	f, err := os.Open(p)
+	if err != nil {
+		writeErr(w, 500, "snapshot failed")
+		return
+	}
+	defer f.Close()
+	c.mu.Lock()
+	rid := c.meta.ReplID
+	c.mu.Unlock()
+	offs := strconv.FormatUint(off, 10)
+	w.Header().Set("Content-Disposition", `attachment; filename="redx-snapshot.tgz"`)
+	w.Header().Set("X-Redx-Snapshot-Offset", offs)
+	w.Header().Set("X-Redx-Replid", rid)
+	bw, finish, ok := c.sealedResponse(w, r, id, 200, "application/gzip", offs, rid)
+	if !ok {
+		return
+	}
+	if _, err := io.Copy(bw, f); err != nil {
+		return // no final chunk: a sealed reader sees a truncated stream
+	}
+	_ = finish()
 }
 
 // installSnapshot downloads and installs a full snapshot from the leader.
@@ -438,6 +460,10 @@ func (c *Cluster) installSnapshot(ctx context.Context, leader string, client *ht
 	h := c.h
 	req, _ := http.NewRequestWithContext(ctx, "GET", leader+"/v1/cluster/snapshot", nil)
 	c.nodeHeaders(req)
+	sr, err := c.sealRequest(req)
+	if err != nil {
+		return err
+	}
 	cl := &http.Client{Transport: client.Transport} // no overall timeout: large transfers
 	resp, err := cl.Do(req)
 	if err != nil {
@@ -452,14 +478,23 @@ func (c *Cluster) installSnapshot(ctx context.Context, leader string, client *ht
 		return errors.New("snapshot: missing offset header")
 	}
 	rid := resp.Header.Get("X-Redx-Replid")
+	body, done, err := c.openSealed(req, resp, sr, resp.Header.Get("X-Redx-Snapshot-Offset"), rid)
+	if err != nil {
+		return err
+	}
+	defer done()
 	tmp, err := os.MkdirTemp(h.Cfg.DataDir, ".snap-")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(tmp)
-	sc, err := ExtractSnapshot(resp.Body, filepath.Join(tmp, "dbs"))
+	sc, err := ExtractSnapshot(body, filepath.Join(tmp, "dbs"))
 	if err != nil {
 		return err
+	}
+	// A sealed stream authenticates only at its end: read it to EOF before installing.
+	if _, err := io.Copy(io.Discard, body); err != nil {
+		return fmt.Errorf("snapshot: %w", err)
 	}
 	h.pause.Lock()
 	defer h.pause.Unlock()

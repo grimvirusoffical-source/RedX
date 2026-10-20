@@ -7,6 +7,8 @@ set -u
 cd "$(dirname "$0")/.."
 # file|allowed imports (space separated). Everything else must use redx/internal/rsx.
 ALLOW='
+internal/tlspin/tlspin.go|crypto/tls crypto/x509
+sdk/go/internal/tlspin/tlspin.go|crypto/tls crypto/x509
 host/tlsutil.go|crypto/tls crypto/x509 crypto/x509/pkix crypto/ecdsa crypto/elliptic
 host/client/client.go|crypto/tls crypto/x509
 host/cluster.go|crypto/tls crypto/x509

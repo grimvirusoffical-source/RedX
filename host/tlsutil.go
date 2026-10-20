@@ -6,7 +6,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/hex"
 	"encoding/pem"
 	"fmt"
 	"math/big"
@@ -14,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"redx/internal/rsx"
+	"redx/internal/tlspin"
 	"time"
 )
 
@@ -27,8 +27,7 @@ func Fingerprint(certFile string) (string, error) {
 	if blk == nil {
 		return "", fmt.Errorf("no PEM block in %s", certFile)
 	}
-	sum := rsx.Sha256(blk.Bytes)
-	return hex.EncodeToString(sum[:]), nil
+	return tlspin.Fingerprint(blk.Bytes), nil
 }
 
 // EnsureSelfSigned creates (or reuses, if still valid >30 days) an ECDSA P-256

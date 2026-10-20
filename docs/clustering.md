@@ -35,6 +35,14 @@ tells the leader how to reach this node). The token procedure below does the sam
 4. Check: `redx node status` (on the leader: members, ack offsets, lag, health).
 5. Static clusters (docker-compose): set the same `cluster_secret` / `REDX_CLUSTER_SECRET` on every node and `role=follower`, `peers=[leader url]`; no token needed.
 
+**Replication seal (rxn1).** Inside TLS, the leader's replication answers (`/v1/cluster/log`, `/v1/cluster/snapshot`) are a Red-SecretsXAI RSX3 stream.
+- The key is derived per pull from the node secret and a fresh nonce. It is bound to the node id, the path and the leader's TLS certificate fingerprint.
+- If a TLS-intercepting proxy sits in between, the follower sees a different certificate, and the answer fails to authenticate.
+- A leader on plain HTTP behind a TLS proxy announces no certificate, so the seal is used without that binding (logged once).
+- `cluster_seal = "prefer"` (default) seals when both ends support it, so older nodes keep working over TLS only.
+- `require` refuses unsealed answers and pulls (426). `off` disables the seal.
+- Certificate pins (`--leader-pin`, `pin_sha256`) are SHA-256 fingerprints checked with Red-SecretsXAI.
+
 Clients may talk to **any** node: reads are served locally (eventually consistent), writes/key changes/db creation are transparently forwarded to the leader.
 For read-your-writes send the `X-Redx-Seq` you got from the write as `X-Redx-Wait-Seq` on the read (waits up to 3 s for that offset).
 For a stronger write ack send `X-Redx-Wait-Replicas: N` on the write: the leader waits up to 2 s for N followers to confirm and returns `X-Redx-Replicas-Acked`

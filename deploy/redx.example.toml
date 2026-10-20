@@ -18,6 +18,7 @@ listen = "127.0.0.1:7777"             # loopback by default. For other devices u
 role = "leader"                       # leader | follower
 # peers = ["https://192.168.1.10:7777"]   # follower: first entry is the leader
 # advertise = "https://192.168.1.20:7777" # how other nodes reach THIS node (shown in `redx node status`)
+# cluster_seal = "prefer"            # prefer | require | off: end-to-end seal of replication inside TLS
 # cluster_secret = ""                 # optional shared secret for static clusters (docker-compose); prefer `redx node join`
 # repl_log_max = 1000000              # replication log entries kept for follower catch-up (older => full snapshot)
 # heartbeat_seconds = 3

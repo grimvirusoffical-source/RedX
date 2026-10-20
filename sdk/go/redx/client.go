@@ -13,12 +13,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/grimvirusoffical-source/RedX/sdk/go/internal/rsx"
+	"github.com/grimvirusoffical-source/RedX/sdk/go/internal/tlspin"
 	"io"
 	"net/http"
 	"net/url"
@@ -192,20 +192,7 @@ func WithHTTPClient(hc *http.Client) Option {
 }
 
 func pinnedTLS(pin string) *tls.Config {
-	return &tls.Config{
-		InsecureSkipVerify: true, // replaced by the pin check
-		MinVersion:         tls.VersionTLS12,
-		VerifyPeerCertificate: func(raw [][]byte, _ [][]*x509.Certificate) error {
-			if len(raw) == 0 {
-				return errors.New("no peer certificate")
-			}
-			sum := rsx.Sha256(raw[0])
-			if !rsx.CtEq([]byte(hex.EncodeToString(sum[:])), []byte(pin)) {
-				return errors.New("peer certificate does not match the pinned fingerprint")
-			}
-			return nil
-		},
-	}
+	return tlspin.Config(pin)
 }
 
 // New makes a client. key may be empty only for operations whose auth is "none".

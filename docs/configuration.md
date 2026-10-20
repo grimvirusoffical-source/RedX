@@ -27,6 +27,7 @@ $REDX_KEY)" and `--join` "(currently set from $REDX_JOIN or redx.toml)".
 | `tls` (`off`/`auto`/`files`), `tls_cert`, `tls_key`, `tls_hosts` | `REDX_TLS…` | `off` |
 | `node_id` | `REDX_NODE_ID` | generated once → `<data>/node.id` |
 | `role` (`leader`/`follower`), `peers`, `advertise`, `cluster_secret` | `REDX_ROLE/PEERS/ADVERTISE/CLUSTER_SECRET` | `leader` |
+| `cluster_seal` (`prefer`/`require`/`off`): Red-SecretsXAI rxn1 seal of replication answers inside TLS (see clustering) | `REDX_CLUSTER_SEAL` | `prefer` |
 | `default_db` | `REDX_DEFAULT_DB` | `default` |
 | `rate_limit_rps`, `rate_limit_burst` | `REDX_RATE_LIMIT_RPS` | 100 / 200 |
 | `keystore_encrypt` | `REDX_KEYSTORE_ENCRYPT` + `REDX_KEYSTORE_PASSPHRASE` | off |

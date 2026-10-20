@@ -23,6 +23,7 @@ type Config struct {
 	Peers            []string `toml:"peers"`          // follower: peers[0] is the leader URL
 	Advertise        string   `toml:"advertise"`      // URL other nodes use to reach this node
 	ClusterKey       string   `toml:"cluster_secret"` // optional shared secret for static clusters
+	ClusterSeal      string   `toml:"cluster_seal"`   // prefer (default) | require | off: Red-SecretsXAI rxn1 seal inside TLS on replication
 	DefaultDB        string   `toml:"default_db"`     // db served at /v1/path/... (default "default")
 	TLS              string   `toml:"tls"`            // off | auto | files
 	TLSCert          string   `toml:"tls_cert"`
@@ -268,6 +269,7 @@ func (c *Config) ApplyEnv(get func(string) string) error {
 	s("REDX_ROLE", &c.Role)
 	s("REDX_ADVERTISE", &c.Advertise)
 	s("REDX_CLUSTER_SECRET", &c.ClusterKey)
+	s("REDX_CLUSTER_SEAL", &c.ClusterSeal)
 	s("REDX_DEFAULT_DB", &c.DefaultDB)
 	s("REDX_TLS", &c.TLS)
 	s("REDX_TLS_CERT", &c.TLSCert)
@@ -403,6 +405,11 @@ func (c *Config) Validate() error {
 	}
 	if !ValidDBName(c.DefaultDB) {
 		return fmt.Errorf("invalid default_db %q", c.DefaultDB)
+	}
+	switch c.ClusterSeal {
+	case "", "prefer", "require", "off":
+	default:
+		return fmt.Errorf("cluster_seal must be prefer|require|off, got %q", c.ClusterSeal)
 	}
 	switch c.EngineDurability {
 	case "", "sync", "group", "async":
