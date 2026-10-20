@@ -23,7 +23,11 @@ const PAGES = ['dashboard', 'databases', 'data', 'studio', 'keys', 'devices', 'b
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'redx-pages-'));
   const port = await free(), url = `http://127.0.0.1:${port}`;
   const key = JSON.parse(execFileSync(redx, ['key', 'create', '--offline', '--data-dir', dir, '--scope', 'admin', '--db', '*', '--label', 'pages', '--json'], { stdio: ['ignore', 'pipe', 'ignore'] }).toString()).key;
-  const host = spawn(redxd, ['run', '--no-open', '--bootstrap', 'console', '--data-dir', dir, '--listen', `127.0.0.1:${port}`], { stdio: 'ignore', env: { ...process.env, REDX_NO_OPEN: '1' } });
+  const logPath = path.join(os.tmpdir(), `redx-pages-${port}.log`);
+  const logFd = fs.openSync(logPath, 'w');
+  const host = spawn(redxd, ['run', '--no-open', '--bootstrap', 'console', '--data-dir', dir, '--listen', `127.0.0.1:${port}`], { stdio: ['ignore', logFd, logFd], env: { ...process.env, REDX_NO_OPEN: '1' } });
+  let hostExit = null;
+  host.once('exit', (code, sig) => { hostExit = `code=${code} signal=${sig}`; });
   let failures = 0;
   const fail = (m) => { failures++; console.log('FAIL ', m); };
   try {
@@ -103,6 +107,7 @@ const PAGES = ['dashboard', 'databases', 'data', 'studio', 'keys', 'devices', 'b
     }
     await b.close();
   } finally {
+    if (hostExit) { fail(`redxd exited early (${hostExit}); its log:\n` + fs.readFileSync(logPath, 'utf8').slice(-4000)); }
     host.kill();
     await new Promise((r) => { host.once('exit', r); setTimeout(r, 3000); });
     try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5 }); } catch {}
