@@ -395,6 +395,7 @@ func (h *Host) consolePages(pr *Principal) map[string]bool {
 		raw = true
 	}
 	backups := hostAdmin && pr.SeesEverything()
+	hostedApps := pr != nil && h.apps != nil
 	return map[string]bool{
 		"dashboard": true,
 		"databases": true,
@@ -418,5 +419,11 @@ func (h *Host) consolePages(pr *Principal) map[string]bool {
 		"owner":     owner,
 		"usage":     true,
 		"logs":      true,
+		// Hosted apps pages: the /v1/hosted API still enforces the plan and tenant gates.
+		"hostapps":    hostedApps,
+		"hostdeploy":  hostedApps,
+		"hostdomains": hostedApps,
+		"hostsecrets": hostedApps,
+		"hostlogs":    hostedApps,
 	}
 }

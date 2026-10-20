@@ -94,5 +94,32 @@
 #define REDX_OP_UPDATE_APP_ROLLBACK "updateAppRollback" /* POST /v1/updates/apps/{app}/rollback, dangerous */
 #define REDX_OP_UPDATE_PUBLISH "updatePublish" /* POST /v1/updates/apps/{app}/publish, dangerous */
 #define REDX_OP_UPDATE_GIT_HUB_WEBHOOK "updateGitHubWebhook" /* POST /v1/updates/github/webhook, write */
+#define REDX_OP_LIST_HOSTED_APPS "listHostedApps" /* GET /v1/hosted/apps, safe */
+#define REDX_OP_CREATE_HOSTED_APP "createHostedApp" /* POST /v1/hosted/apps, write */
+#define REDX_OP_GET_HOSTED_APP "getHostedApp" /* GET /v1/hosted/apps/{id}, safe */
+#define REDX_OP_DELETE_HOSTED_APP "deleteHostedApp" /* DELETE /v1/hosted/apps/{id}, dangerous */
+#define REDX_OP_DEPLOY_HOSTED_APP "deployHostedApp" /* POST /v1/hosted/apps/{id}/deploy, write */
+#define REDX_OP_UPLOAD_HOSTED_ARCHIVE "uploadHostedArchive" /* POST /v1/hosted/apps/{id}/archive, write */
+#define REDX_OP_LIST_HOSTED_DEPLOYS "listHostedDeploys" /* GET /v1/hosted/apps/{id}/deploys, safe */
+#define REDX_OP_GET_HOSTED_MANIFEST "getHostedManifest" /* GET /v1/hosted/apps/{id}/deploys/{deploy}/manifest, safe */
+#define REDX_OP_ROLLBACK_HOSTED_APP "rollbackHostedApp" /* POST /v1/hosted/apps/{id}/rollback, admin */
+#define REDX_OP_PROMOTE_HOSTED_APP "promoteHostedApp" /* POST /v1/hosted/apps/{id}/promote, admin */
+#define REDX_OP_START_HOSTED_APP "startHostedApp" /* POST /v1/hosted/apps/{id}/start, write */
+#define REDX_OP_STOP_HOSTED_APP "stopHostedApp" /* POST /v1/hosted/apps/{id}/stop, write */
+#define REDX_OP_LIST_HOSTED_DOMAINS "listHostedDomains" /* GET /v1/hosted/apps/{id}/domains, safe */
+#define REDX_OP_ADD_HOSTED_DOMAIN "addHostedDomain" /* POST /v1/hosted/apps/{id}/domains, write */
+#define REDX_OP_DELETE_HOSTED_DOMAIN "deleteHostedDomain" /* DELETE /v1/hosted/apps/{id}/domains/{domain}, write */
+#define REDX_OP_VERIFY_HOSTED_DOMAIN "verifyHostedDomain" /* POST /v1/hosted/apps/{id}/domains/{domain}/verify, write */
+#define REDX_OP_GET_HOSTED_ENV "getHostedEnv" /* GET /v1/hosted/apps/{id}/env, safe */
+#define REDX_OP_PUT_HOSTED_ENV "putHostedEnv" /* PUT /v1/hosted/apps/{id}/env, write */
+#define REDX_OP_LIST_HOSTED_SECRETS "listHostedSecrets" /* GET /v1/hosted/apps/{id}/secrets, safe */
+#define REDX_OP_PUT_HOSTED_SECRET "putHostedSecret" /* PUT /v1/hosted/apps/{id}/secrets/{name}, write */
+#define REDX_OP_DELETE_HOSTED_SECRET "deleteHostedSecret" /* DELETE /v1/hosted/apps/{id}/secrets/{name}, write */
+#define REDX_OP_GET_HOSTED_LOGS "getHostedLogs" /* GET /v1/hosted/apps/{id}/logs, safe */
+#define REDX_OP_DOWNLOAD_HOSTED_LOGS "downloadHostedLogs" /* GET /v1/hosted/apps/{id}/logs/download, safe */
+#define REDX_OP_GET_HOSTED_USAGE "getHostedUsage" /* GET /v1/hosted/apps/{id}/usage, safe */
+#define REDX_OP_GET_HOSTED_HEALTH "getHostedHealth" /* GET /v1/hosted/apps/{id}/health, safe */
+#define REDX_OP_HOSTED_T_L_S_ASK "hostedTLSAsk" /* GET /v1/hosted/tls/ask, safe */
+#define REDX_OP_HOSTED_CADDY "hostedCaddy" /* GET /v1/hosted/caddy, safe */
 
 #endif

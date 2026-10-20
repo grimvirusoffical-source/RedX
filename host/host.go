@@ -42,6 +42,7 @@ type Host struct {
 	billing     *billing.Service // RedX Hosted plans on Stripe (billing_api.go)
 	tenants     *tenantStore     // which hosted account owns which database (tenant.go)
 	activity    *activityLog     // per-tenant request counts (activity.go); never crosses accounts
+	apps        *appStore        // tenant-owned sites and containers (apps.go)
 	webSetup    bool             // an empty keystore may be set up from the browser (loopback only)
 	bootMu      sync.Mutex       // serialises the web bootstrap
 	runMu       sync.Mutex
@@ -136,6 +137,9 @@ func New(cfg Config, opener Opener, logf func(string, ...interface{})) (*Host, e
 		return fail(err)
 	}
 	if h.upd, err = openUpdater(h); err != nil {
+		return fail(err)
+	}
+	if h.apps, err = openApps(h); err != nil {
 		return fail(err)
 	}
 	h.KS.SetOnChange(func(r KeyRecord) {

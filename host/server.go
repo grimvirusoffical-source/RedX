@@ -126,7 +126,7 @@ func (h *Host) routes() http.Handler {
 		}()
 		h.reqs.Add(1)
 		lim := int64(h.Cfg.MaxBodyMB) << 20
-		if r.Method == "PUT" && (strings.Contains(r.URL.Path, "/pack/") || strings.Contains(r.URL.Path, "/media/")) {
+		if (r.Method == "PUT" || r.Method == "POST") && (strings.Contains(r.URL.Path, "/pack/") || strings.Contains(r.URL.Path, "/media/") || strings.HasPrefix(r.URL.Path, "/v1/hosted/")) {
 			lim = int64(h.Cfg.MaxUploadMB) << 20
 		}
 		r.Body = &bodyClock{ReadCloser: &countRC{ReadCloser: http.MaxBytesReader(w, r.Body, lim), m: meter}, mark: mark}
@@ -142,6 +142,9 @@ func (h *Host) routes() http.Handler {
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Cache-Control", "no-store")
+		if h.serveIfAppHost(w, r) {
+			return
+		}
 		p := r.URL.Path
 		// Dangerous operations confirm themselves after authentication and
 		// authorisation (401, then 403, then 428). See requireDangerConfirm.
@@ -188,6 +191,8 @@ func (h *Host) routes() http.Handler {
 			h.clusterRoute(w, r)
 		case p == "/v1/updates" || strings.HasPrefix(p, "/v1/updates/"):
 			h.updateRoute(w, r)
+		case p == "/v1/hosted" || strings.HasPrefix(p, "/v1/hosted/"):
+			h.hostedRoute(w, r)
 		default:
 			writeErr(w, 404, "not found")
 		}

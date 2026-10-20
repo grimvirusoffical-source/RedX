@@ -1133,6 +1133,322 @@
    "danger": "write",
    "summary": "GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest. No webhook secret configured is 404.",
    "response": "json"
+  },
+  {
+   "id": "listHostedApps",
+   "group": "hosted",
+   "method": "GET",
+   "path": "/v1/hosted/apps",
+   "auth": "key",
+   "danger": "safe",
+   "summary": "Hosted apps the caller may see. Tenants see their own. Owners and host-admin keys see every app.",
+   "response": "json"
+  },
+  {
+   "id": "createHostedApp",
+   "group": "hosted",
+   "method": "POST",
+   "path": "/v1/hosted/apps",
+   "auth": "key",
+   "danger": "write",
+   "summary": "Create a tenant app. kind is static, container or process. db is the tenant's logical database name.",
+   "response": "json",
+   "body": {
+    "name": "string",
+    "kind": "string",
+    "db": "string"
+   }
+  },
+  {
+   "id": "getHostedApp",
+   "group": "hosted",
+   "method": "GET",
+   "path": "/v1/hosted/apps/{id}",
+   "auth": "key",
+   "danger": "safe",
+   "summary": "One hosted app: deploys, domains, masked secrets, limits and the sandbox runtime spec.",
+   "response": "json"
+  },
+  {
+   "id": "deleteHostedApp",
+   "group": "hosted",
+   "method": "DELETE",
+   "path": "/v1/hosted/apps/{id}",
+   "auth": "key",
+   "danger": "dangerous",
+   "summary": "Delete a hosted app, its releases and its scoped database key.",
+   "response": "json",
+   "notes": "Server requires header X-RedX-Confirm: deleteHostedApp (or ?confirm=deleteHostedApp); HTTP 428 + code confirm_required otherwise."
+  },
+  {
+   "id": "deployHostedApp",
+   "group": "hosted",
+   "method": "POST",
+   "path": "/v1/hosted/apps/{id}/deploy",
+   "auth": "key",
+   "danger": "write",
+   "summary": "Deploy from github, image or dockerfile. strategy is direct, canary or blue_green.",
+   "response": "json",
+   "body": {
+    "source": "string",
+    "image": "string",
+    "repo": "string",
+    "ref": "string",
+    "dockerfile": "string",
+    "strategy": "string",
+    "canaryPct": "integer",
+    "command": "array"
+   }
+  },
+  {
+   "id": "uploadHostedArchive",
+   "group": "hosted",
+   "method": "POST",
+   "path": "/v1/hosted/apps/{id}/archive",
+   "auth": "key",
+   "danger": "write",
+   "summary": "Deploy a static site or build context from a zip, tar or tar.gz body.",
+   "response": "json",
+   "request": "binary",
+   "query": {
+    "strategy": "string",
+    "canaryPct": "string"
+   }
+  },
+  {
+   "id": "listHostedDeploys",
+   "group": "hosted",
+   "method": "GET",
+   "path": "/v1/hosted/apps/{id}/deploys",
+   "auth": "key",
+   "danger": "safe",
+   "summary": "Deploy history for one app.",
+   "response": "json"
+  },
+  {
+   "id": "getHostedManifest",
+   "group": "hosted",
+   "method": "GET",
+   "path": "/v1/hosted/apps/{id}/deploys/{deploy}/manifest",
+   "auth": "key",
+   "danger": "safe",
+   "summary": "Signed redx.update-manifest/v1 bytes for a deploy. X-RedX-Signature is ed25519 over those exact bytes.",
+   "response": "json"
+  },
+  {
+   "id": "rollbackHostedApp",
+   "group": "hosted",
+   "method": "POST",
+   "path": "/v1/hosted/apps/{id}/rollback",
+   "auth": "key",
+   "danger": "admin",
+   "summary": "Make a previous deploy current. Pass deploy or snapshot.",
+   "response": "json",
+   "body": {
+    "deploy": "string",
+    "snapshot": "string"
+   }
+  },
+  {
+   "id": "promoteHostedApp",
+   "group": "hosted",
+   "method": "POST",
+   "path": "/v1/hosted/apps/{id}/promote",
+   "auth": "key",
+   "danger": "admin",
+   "summary": "Promote the canary or blue-green standby to current.",
+   "response": "json"
+  },
+  {
+   "id": "startHostedApp",
+   "group": "hosted",
+   "method": "POST",
+   "path": "/v1/hosted/apps/{id}/start",
+   "auth": "key",
+   "danger": "write",
+   "summary": "Start an app. A state change counts as one host_switch_quota switch.",
+   "response": "json"
+  },
+  {
+   "id": "stopHostedApp",
+   "group": "hosted",
+   "method": "POST",
+   "path": "/v1/hosted/apps/{id}/stop",
+   "auth": "key",
+   "danger": "write",
+   "summary": "Stop an app. A state change counts as one host_switch_quota switch.",
+   "response": "json"
+  },
+  {
+   "id": "listHostedDomains",
+   "group": "hosted",
+   "method": "GET",
+   "path": "/v1/hosted/apps/{id}/domains",
+   "auth": "key",
+   "danger": "safe",
+   "summary": "Default hostname and custom domains, with the DNS records for unverified names.",
+   "response": "json"
+  },
+  {
+   "id": "addHostedDomain",
+   "group": "hosted",
+   "method": "POST",
+   "path": "/v1/hosted/apps/{id}/domains",
+   "auth": "key",
+   "danger": "write",
+   "summary": "Claim a custom domain. method is txt or http. A name another tenant holds is refused.",
+   "response": "json",
+   "body": {
+    "domain": "string",
+    "method": "string"
+   }
+  },
+  {
+   "id": "deleteHostedDomain",
+   "group": "hosted",
+   "method": "DELETE",
+   "path": "/v1/hosted/apps/{id}/domains/{domain}",
+   "auth": "key",
+   "danger": "write",
+   "summary": "Drop a custom domain. The default hostname cannot be dropped.",
+   "response": "json"
+  },
+  {
+   "id": "verifyHostedDomain",
+   "group": "hosted",
+   "method": "POST",
+   "path": "/v1/hosted/apps/{id}/domains/{domain}/verify",
+   "auth": "key",
+   "danger": "write",
+   "summary": "Check the TXT or HTTP challenge and mark the domain verified so it can be routed.",
+   "response": "json"
+  },
+  {
+   "id": "getHostedEnv",
+   "group": "hosted",
+   "method": "GET",
+   "path": "/v1/hosted/apps/{id}/env",
+   "auth": "key",
+   "danger": "safe",
+   "summary": "Non-secret environment variables. Secrets are not included.",
+   "response": "json"
+  },
+  {
+   "id": "putHostedEnv",
+   "group": "hosted",
+   "method": "PUT",
+   "path": "/v1/hosted/apps/{id}/env",
+   "auth": "key",
+   "danger": "write",
+   "summary": "Replace non-secret environment variables. REDX_KEY cannot be set here.",
+   "response": "json",
+   "body": {
+    "vars": "object"
+   }
+  },
+  {
+   "id": "listHostedSecrets",
+   "group": "hosted",
+   "method": "GET",
+   "path": "/v1/hosted/apps/{id}/secrets",
+   "auth": "key",
+   "danger": "safe",
+   "summary": "Secret names. Values are always masked and never returned.",
+   "response": "json"
+  },
+  {
+   "id": "putHostedSecret",
+   "group": "hosted",
+   "method": "PUT",
+   "path": "/v1/hosted/apps/{id}/secrets/{name}",
+   "auth": "key",
+   "danger": "write",
+   "summary": "Set a secret. The value is encrypted at rest and the response shows only a mask.",
+   "response": "json",
+   "body": {
+    "value": "string"
+   }
+  },
+  {
+   "id": "deleteHostedSecret",
+   "group": "hosted",
+   "method": "DELETE",
+   "path": "/v1/hosted/apps/{id}/secrets/{name}",
+   "auth": "key",
+   "danger": "write",
+   "summary": "Delete a secret.",
+   "response": "json"
+  },
+  {
+   "id": "getHostedLogs",
+   "group": "hosted",
+   "method": "GET",
+   "path": "/v1/hosted/apps/{id}/logs",
+   "auth": "key",
+   "danger": "safe",
+   "summary": "Runtime or access logs. q searches retained lines. stream=1 is a live tail, capped at 15 seconds, and is not opened by the console until asked.",
+   "response": "json",
+   "query": {
+    "kind": "string",
+    "stream": "string",
+    "q": "string"
+   }
+  },
+  {
+   "id": "downloadHostedLogs",
+   "group": "hosted",
+   "method": "GET",
+   "path": "/v1/hosted/apps/{id}/logs/download",
+   "auth": "key",
+   "danger": "safe",
+   "summary": "Download runtime or access logs as text. Retention follows the plan.",
+   "response": "text",
+   "query": {
+    "kind": "string"
+   }
+  },
+  {
+   "id": "getHostedUsage",
+   "group": "hosted",
+   "method": "GET",
+   "path": "/v1/hosted/apps/{id}/usage",
+   "auth": "key",
+   "danger": "safe",
+   "summary": "Disk used by one app and the tier limits that apply.",
+   "response": "json"
+  },
+  {
+   "id": "getHostedHealth",
+   "group": "hosted",
+   "method": "GET",
+   "path": "/v1/hosted/apps/{id}/health",
+   "auth": "key",
+   "danger": "safe",
+   "summary": "Probe the current release. A failed direct deploy is rolled back to the previous release.",
+   "response": "json"
+  },
+  {
+   "id": "hostedTLSAsk",
+   "group": "hosted",
+   "method": "GET",
+   "path": "/v1/hosted/tls/ask",
+   "auth": "none",
+   "danger": "safe",
+   "summary": "Caddy on-demand TLS ask. 200 only for a verified app domain, and only from loopback or with X-RedX-Caddy-Ask.",
+   "response": "json",
+   "query": {
+    "domain": "string"
+   }
+  },
+  {
+   "id": "hostedCaddy",
+   "group": "hosted",
+   "method": "GET",
+   "path": "/v1/hosted/caddy",
+   "auth": "key",
+   "danger": "safe",
+   "summary": "Caddyfile fragment for on-demand TLS. Owner or host-admin only.",
+   "response": "text"
   }
  ],
  "paramEncoding": {

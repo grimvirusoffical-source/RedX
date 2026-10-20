@@ -95,6 +95,33 @@ var Operations = map[string]Operation{
 	"updateAppRollback":     {ID: "updateAppRollback", Group: "updates", Method: "POST", Path: "/v1/updates/apps/{app}/rollback", Shorthand: "", Auth: "host-admin", Danger: DangerDangerous, Response: "json", Request: "json", HostConfirm: "", Summary: "Restore one snapshot for an app."},
 	"updatePublish":         {ID: "updatePublish", Group: "updates", Method: "POST", Path: "/v1/updates/apps/{app}/publish", Shorthand: "", Auth: "host-admin", Danger: DangerDangerous, Response: "json", Request: "json", HostConfirm: "", Summary: "Sign a host and/or github manifest for an app already in hosted_apps. A github target creates the release."},
 	"updateGitHubWebhook":   {ID: "updateGitHubWebhook", Group: "updates", Method: "POST", Path: "/v1/updates/github/webhook", Shorthand: "", Auth: "none", Danger: DangerWrite, Response: "json", Request: "", HostConfirm: "", Summary: "GitHub webhook. HMAC X-Hub-Signature-256, then SHA256SUMS, then a signed github-source manifest. No webhook secret configured is 404."},
+	"listHostedApps":        {ID: "listHostedApps", Group: "hosted", Method: "GET", Path: "/v1/hosted/apps", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Hosted apps the caller may see. Tenants see their own. Owners and host-admin keys see every app."},
+	"createHostedApp":       {ID: "createHostedApp", Group: "hosted", Method: "POST", Path: "/v1/hosted/apps", Shorthand: "", Auth: "key", Danger: DangerWrite, Response: "json", Request: "json", HostConfirm: "", Summary: "Create a tenant app. kind is static, container or process. db is the tenant's logical database name."},
+	"getHostedApp":          {ID: "getHostedApp", Group: "hosted", Method: "GET", Path: "/v1/hosted/apps/{id}", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "One hosted app: deploys, domains, masked secrets, limits and the sandbox runtime spec."},
+	"deleteHostedApp":       {ID: "deleteHostedApp", Group: "hosted", Method: "DELETE", Path: "/v1/hosted/apps/{id}", Shorthand: "", Auth: "key", Danger: DangerDangerous, Response: "json", Request: "", HostConfirm: "", Summary: "Delete a hosted app, its releases and its scoped database key."},
+	"deployHostedApp":       {ID: "deployHostedApp", Group: "hosted", Method: "POST", Path: "/v1/hosted/apps/{id}/deploy", Shorthand: "", Auth: "key", Danger: DangerWrite, Response: "json", Request: "json", HostConfirm: "", Summary: "Deploy from github, image or dockerfile. strategy is direct, canary or blue_green."},
+	"uploadHostedArchive":   {ID: "uploadHostedArchive", Group: "hosted", Method: "POST", Path: "/v1/hosted/apps/{id}/archive", Shorthand: "", Auth: "key", Danger: DangerWrite, Response: "json", Request: "binary", HostConfirm: "", Summary: "Deploy a static site or build context from a zip, tar or tar.gz body."},
+	"listHostedDeploys":     {ID: "listHostedDeploys", Group: "hosted", Method: "GET", Path: "/v1/hosted/apps/{id}/deploys", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Deploy history for one app."},
+	"getHostedManifest":     {ID: "getHostedManifest", Group: "hosted", Method: "GET", Path: "/v1/hosted/apps/{id}/deploys/{deploy}/manifest", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Signed redx.update-manifest/v1 bytes for a deploy. X-RedX-Signature is ed25519 over those exact bytes."},
+	"rollbackHostedApp":     {ID: "rollbackHostedApp", Group: "hosted", Method: "POST", Path: "/v1/hosted/apps/{id}/rollback", Shorthand: "", Auth: "key", Danger: DangerAdmin, Response: "json", Request: "json", HostConfirm: "", Summary: "Make a previous deploy current. Pass deploy or snapshot."},
+	"promoteHostedApp":      {ID: "promoteHostedApp", Group: "hosted", Method: "POST", Path: "/v1/hosted/apps/{id}/promote", Shorthand: "", Auth: "key", Danger: DangerAdmin, Response: "json", Request: "", HostConfirm: "", Summary: "Promote the canary or blue-green standby to current."},
+	"startHostedApp":        {ID: "startHostedApp", Group: "hosted", Method: "POST", Path: "/v1/hosted/apps/{id}/start", Shorthand: "", Auth: "key", Danger: DangerWrite, Response: "json", Request: "", HostConfirm: "", Summary: "Start an app. A state change counts as one host_switch_quota switch."},
+	"stopHostedApp":         {ID: "stopHostedApp", Group: "hosted", Method: "POST", Path: "/v1/hosted/apps/{id}/stop", Shorthand: "", Auth: "key", Danger: DangerWrite, Response: "json", Request: "", HostConfirm: "", Summary: "Stop an app. A state change counts as one host_switch_quota switch."},
+	"listHostedDomains":     {ID: "listHostedDomains", Group: "hosted", Method: "GET", Path: "/v1/hosted/apps/{id}/domains", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Default hostname and custom domains, with the DNS records for unverified names."},
+	"addHostedDomain":       {ID: "addHostedDomain", Group: "hosted", Method: "POST", Path: "/v1/hosted/apps/{id}/domains", Shorthand: "", Auth: "key", Danger: DangerWrite, Response: "json", Request: "json", HostConfirm: "", Summary: "Claim a custom domain. method is txt or http. A name another tenant holds is refused."},
+	"deleteHostedDomain":    {ID: "deleteHostedDomain", Group: "hosted", Method: "DELETE", Path: "/v1/hosted/apps/{id}/domains/{domain}", Shorthand: "", Auth: "key", Danger: DangerWrite, Response: "json", Request: "", HostConfirm: "", Summary: "Drop a custom domain. The default hostname cannot be dropped."},
+	"verifyHostedDomain":    {ID: "verifyHostedDomain", Group: "hosted", Method: "POST", Path: "/v1/hosted/apps/{id}/domains/{domain}/verify", Shorthand: "", Auth: "key", Danger: DangerWrite, Response: "json", Request: "", HostConfirm: "", Summary: "Check the TXT or HTTP challenge and mark the domain verified so it can be routed."},
+	"getHostedEnv":          {ID: "getHostedEnv", Group: "hosted", Method: "GET", Path: "/v1/hosted/apps/{id}/env", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Non-secret environment variables. Secrets are not included."},
+	"putHostedEnv":          {ID: "putHostedEnv", Group: "hosted", Method: "PUT", Path: "/v1/hosted/apps/{id}/env", Shorthand: "", Auth: "key", Danger: DangerWrite, Response: "json", Request: "json", HostConfirm: "", Summary: "Replace non-secret environment variables. REDX_KEY cannot be set here."},
+	"listHostedSecrets":     {ID: "listHostedSecrets", Group: "hosted", Method: "GET", Path: "/v1/hosted/apps/{id}/secrets", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Secret names. Values are always masked and never returned."},
+	"putHostedSecret":       {ID: "putHostedSecret", Group: "hosted", Method: "PUT", Path: "/v1/hosted/apps/{id}/secrets/{name}", Shorthand: "", Auth: "key", Danger: DangerWrite, Response: "json", Request: "json", HostConfirm: "", Summary: "Set a secret. The value is encrypted at rest and the response shows only a mask."},
+	"deleteHostedSecret":    {ID: "deleteHostedSecret", Group: "hosted", Method: "DELETE", Path: "/v1/hosted/apps/{id}/secrets/{name}", Shorthand: "", Auth: "key", Danger: DangerWrite, Response: "json", Request: "", HostConfirm: "", Summary: "Delete a secret."},
+	"getHostedLogs":         {ID: "getHostedLogs", Group: "hosted", Method: "GET", Path: "/v1/hosted/apps/{id}/logs", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Runtime or access logs. q searches retained lines. stream=1 is a live tail, capped at 15 seconds, and is not opened by the console until asked."},
+	"downloadHostedLogs":    {ID: "downloadHostedLogs", Group: "hosted", Method: "GET", Path: "/v1/hosted/apps/{id}/logs/download", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "text", Request: "", HostConfirm: "", Summary: "Download runtime or access logs as text. Retention follows the plan."},
+	"getHostedUsage":        {ID: "getHostedUsage", Group: "hosted", Method: "GET", Path: "/v1/hosted/apps/{id}/usage", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Disk used by one app and the tier limits that apply."},
+	"getHostedHealth":       {ID: "getHostedHealth", Group: "hosted", Method: "GET", Path: "/v1/hosted/apps/{id}/health", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Probe the current release. A failed direct deploy is rolled back to the previous release."},
+	"hostedTLSAsk":          {ID: "hostedTLSAsk", Group: "hosted", Method: "GET", Path: "/v1/hosted/tls/ask", Shorthand: "", Auth: "none", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Caddy on-demand TLS ask. 200 only for a verified app domain, and only from loopback or with X-RedX-Caddy-Ask."},
+	"hostedCaddy":           {ID: "hostedCaddy", Group: "hosted", Method: "GET", Path: "/v1/hosted/caddy", Shorthand: "", Auth: "key", Danger: DangerSafe, Response: "text", Request: "", HostConfirm: "", Summary: "Caddyfile fragment for on-demand TLS. Owner or host-admin only."},
 }
 
 // segmentParams are pack and media paths: each slash-separated segment is escaped, the slashes stay.
@@ -728,4 +755,216 @@ func (c *Client) UpdatePublish(ctx context.Context, app string, a Args) (*Result
 // POST /v1/updates/github/webhook, auth none, danger write.
 func (c *Client) UpdateGitHubWebhook(ctx context.Context, a Args) (*Result, error) {
 	return c.Call(ctx, "updateGitHubWebhook", a)
+}
+
+// ListHostedApps: Hosted apps the caller may see. Tenants see their own. Owners and host-admin keys see every app.
+//
+// GET /v1/hosted/apps, auth key, danger safe.
+func (c *Client) ListHostedApps(ctx context.Context, a Args) (*Result, error) {
+	return c.Call(ctx, "listHostedApps", a)
+}
+
+// CreateHostedApp: Create a tenant app. kind is static, container or process. db is the tenant's logical database name.
+//
+// POST /v1/hosted/apps, auth key, danger write.
+func (c *Client) CreateHostedApp(ctx context.Context, a Args) (*Result, error) {
+	return c.Call(ctx, "createHostedApp", a)
+}
+
+// GetHostedApp: One hosted app: deploys, domains, masked secrets, limits and the sandbox runtime spec.
+//
+// GET /v1/hosted/apps/{id}, auth key, danger safe.
+func (c *Client) GetHostedApp(ctx context.Context, id string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"id": id})
+	return c.Call(ctx, "getHostedApp", a)
+}
+
+// DeleteHostedApp: Delete a hosted app, its releases and its scoped database key.
+//
+// DELETE /v1/hosted/apps/{id}, auth key, danger dangerous.
+func (c *Client) DeleteHostedApp(ctx context.Context, id string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"id": id})
+	return c.Call(ctx, "deleteHostedApp", a)
+}
+
+// DeployHostedApp: Deploy from github, image or dockerfile. strategy is direct, canary or blue_green.
+//
+// POST /v1/hosted/apps/{id}/deploy, auth key, danger write.
+func (c *Client) DeployHostedApp(ctx context.Context, id string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"id": id})
+	return c.Call(ctx, "deployHostedApp", a)
+}
+
+// UploadHostedArchive: Deploy a static site or build context from a zip, tar or tar.gz body.
+//
+// POST /v1/hosted/apps/{id}/archive, auth key, danger write.
+func (c *Client) UploadHostedArchive(ctx context.Context, id string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"id": id})
+	return c.Call(ctx, "uploadHostedArchive", a)
+}
+
+// ListHostedDeploys: Deploy history for one app.
+//
+// GET /v1/hosted/apps/{id}/deploys, auth key, danger safe.
+func (c *Client) ListHostedDeploys(ctx context.Context, id string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"id": id})
+	return c.Call(ctx, "listHostedDeploys", a)
+}
+
+// GetHostedManifest: Signed redx.update-manifest/v1 bytes for a deploy. X-RedX-Signature is ed25519 over those exact bytes.
+//
+// GET /v1/hosted/apps/{id}/deploys/{deploy}/manifest, auth key, danger safe.
+func (c *Client) GetHostedManifest(ctx context.Context, id string, deploy string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"id": id, "deploy": deploy})
+	return c.Call(ctx, "getHostedManifest", a)
+}
+
+// RollbackHostedApp: Make a previous deploy current. Pass deploy or snapshot.
+//
+// POST /v1/hosted/apps/{id}/rollback, auth key, danger admin.
+func (c *Client) RollbackHostedApp(ctx context.Context, id string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"id": id})
+	return c.Call(ctx, "rollbackHostedApp", a)
+}
+
+// PromoteHostedApp: Promote the canary or blue-green standby to current.
+//
+// POST /v1/hosted/apps/{id}/promote, auth key, danger admin.
+func (c *Client) PromoteHostedApp(ctx context.Context, id string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"id": id})
+	return c.Call(ctx, "promoteHostedApp", a)
+}
+
+// StartHostedApp: Start an app. A state change counts as one host_switch_quota switch.
+//
+// POST /v1/hosted/apps/{id}/start, auth key, danger write.
+func (c *Client) StartHostedApp(ctx context.Context, id string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"id": id})
+	return c.Call(ctx, "startHostedApp", a)
+}
+
+// StopHostedApp: Stop an app. A state change counts as one host_switch_quota switch.
+//
+// POST /v1/hosted/apps/{id}/stop, auth key, danger write.
+func (c *Client) StopHostedApp(ctx context.Context, id string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"id": id})
+	return c.Call(ctx, "stopHostedApp", a)
+}
+
+// ListHostedDomains: Default hostname and custom domains, with the DNS records for unverified names.
+//
+// GET /v1/hosted/apps/{id}/domains, auth key, danger safe.
+func (c *Client) ListHostedDomains(ctx context.Context, id string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"id": id})
+	return c.Call(ctx, "listHostedDomains", a)
+}
+
+// AddHostedDomain: Claim a custom domain. method is txt or http. A name another tenant holds is refused.
+//
+// POST /v1/hosted/apps/{id}/domains, auth key, danger write.
+func (c *Client) AddHostedDomain(ctx context.Context, id string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"id": id})
+	return c.Call(ctx, "addHostedDomain", a)
+}
+
+// DeleteHostedDomain: Drop a custom domain. The default hostname cannot be dropped.
+//
+// DELETE /v1/hosted/apps/{id}/domains/{domain}, auth key, danger write.
+func (c *Client) DeleteHostedDomain(ctx context.Context, id string, domain string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"id": id, "domain": domain})
+	return c.Call(ctx, "deleteHostedDomain", a)
+}
+
+// VerifyHostedDomain: Check the TXT or HTTP challenge and mark the domain verified so it can be routed.
+//
+// POST /v1/hosted/apps/{id}/domains/{domain}/verify, auth key, danger write.
+func (c *Client) VerifyHostedDomain(ctx context.Context, id string, domain string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"id": id, "domain": domain})
+	return c.Call(ctx, "verifyHostedDomain", a)
+}
+
+// GetHostedEnv: Non-secret environment variables. Secrets are not included.
+//
+// GET /v1/hosted/apps/{id}/env, auth key, danger safe.
+func (c *Client) GetHostedEnv(ctx context.Context, id string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"id": id})
+	return c.Call(ctx, "getHostedEnv", a)
+}
+
+// PutHostedEnv: Replace non-secret environment variables. REDX_KEY cannot be set here.
+//
+// PUT /v1/hosted/apps/{id}/env, auth key, danger write.
+func (c *Client) PutHostedEnv(ctx context.Context, id string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"id": id})
+	return c.Call(ctx, "putHostedEnv", a)
+}
+
+// ListHostedSecrets: Secret names. Values are always masked and never returned.
+//
+// GET /v1/hosted/apps/{id}/secrets, auth key, danger safe.
+func (c *Client) ListHostedSecrets(ctx context.Context, id string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"id": id})
+	return c.Call(ctx, "listHostedSecrets", a)
+}
+
+// PutHostedSecret: Set a secret. The value is encrypted at rest and the response shows only a mask.
+//
+// PUT /v1/hosted/apps/{id}/secrets/{name}, auth key, danger write.
+func (c *Client) PutHostedSecret(ctx context.Context, id string, name string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"id": id, "name": name})
+	return c.Call(ctx, "putHostedSecret", a)
+}
+
+// DeleteHostedSecret: Delete a secret.
+//
+// DELETE /v1/hosted/apps/{id}/secrets/{name}, auth key, danger write.
+func (c *Client) DeleteHostedSecret(ctx context.Context, id string, name string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"id": id, "name": name})
+	return c.Call(ctx, "deleteHostedSecret", a)
+}
+
+// GetHostedLogs: Runtime or access logs. q searches retained lines. stream=1 is a live tail, capped at 15 seconds, and is not opened by the console until asked.
+//
+// GET /v1/hosted/apps/{id}/logs, auth key, danger safe.
+func (c *Client) GetHostedLogs(ctx context.Context, id string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"id": id})
+	return c.Call(ctx, "getHostedLogs", a)
+}
+
+// DownloadHostedLogs: Download runtime or access logs as text. Retention follows the plan.
+//
+// GET /v1/hosted/apps/{id}/logs/download, auth key, danger safe.
+func (c *Client) DownloadHostedLogs(ctx context.Context, id string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"id": id})
+	return c.Call(ctx, "downloadHostedLogs", a)
+}
+
+// GetHostedUsage: Disk used by one app and the tier limits that apply.
+//
+// GET /v1/hosted/apps/{id}/usage, auth key, danger safe.
+func (c *Client) GetHostedUsage(ctx context.Context, id string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"id": id})
+	return c.Call(ctx, "getHostedUsage", a)
+}
+
+// GetHostedHealth: Probe the current release. A failed direct deploy is rolled back to the previous release.
+//
+// GET /v1/hosted/apps/{id}/health, auth key, danger safe.
+func (c *Client) GetHostedHealth(ctx context.Context, id string, a Args) (*Result, error) {
+	a.Params = withParams(a.Params, map[string]string{"id": id})
+	return c.Call(ctx, "getHostedHealth", a)
+}
+
+// HostedTLSAsk: Caddy on-demand TLS ask. 200 only for a verified app domain, and only from loopback or with X-RedX-Caddy-Ask.
+//
+// GET /v1/hosted/tls/ask, auth none, danger safe.
+func (c *Client) HostedTLSAsk(ctx context.Context, a Args) (*Result, error) {
+	return c.Call(ctx, "hostedTLSAsk", a)
+}
+
+// HostedCaddy: Caddyfile fragment for on-demand TLS. Owner or host-admin only.
+//
+// GET /v1/hosted/caddy, auth key, danger safe.
+func (c *Client) HostedCaddy(ctx context.Context, a Args) (*Result, error) {
+	return c.Call(ctx, "hostedCaddy", a)
 }

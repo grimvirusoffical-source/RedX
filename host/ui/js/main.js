@@ -25,6 +25,11 @@ const NAV = [
   { mode: 'host', route: 'usage', label: 'Usage & quotas', icon: 'pulse', role: 'any' },
   { mode: 'host', route: 'updates', label: 'Updates', icon: 'refresh', role: 'admin' },
   { mode: 'host', route: 'logs', label: 'Logs', icon: 'list', role: 'any' },
+  { mode: 'host', route: 'hostapps', label: 'Apps', icon: 'rocket', role: 'any' },
+  { mode: 'host', route: 'hostdeploy', label: 'Deploy', icon: 'upload', role: 'any' },
+  { mode: 'host', route: 'hostdomains', label: 'Domains', icon: 'globe', role: 'any' },
+  { mode: 'host', route: 'hostsecrets', label: 'Env & Secrets', icon: 'lock', role: 'any' },
+  { mode: 'host', route: 'hostlogs', label: 'App logs', icon: 'list', role: 'any' },
   { mode: 'both', route: 'owner', label: 'Owner', icon: 'shield', role: 'owner' },
 ];
 const PAGES = new Set([...NAV.map((n) => n.route), 'join', 'wizard', 'connect']);

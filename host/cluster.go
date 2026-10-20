@@ -614,12 +614,18 @@ func (c *Cluster) followLoop(ctx context.Context, stop <-chan struct{}) {
 }
 
 func (c *Cluster) pullOnce(ctx context.Context, stop <-chan struct{}) error {
+	// Leader URL and client are one snapshot. Repoint replaces both under c.mu while a pull may
+	// already be in flight; reading c.client again below would race with that write.
 	c.mu.Lock()
 	leader := c.st.LeaderURL
 	replid := c.meta.ReplID
+	client := c.client
 	c.mu.Unlock()
 	if leader == "" {
 		return errors.New("no leader configured")
+	}
+	if client == nil {
+		return errors.New("no leader connection")
 	}
 	ctx2, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -634,7 +640,7 @@ func (c *Cluster) pullOnce(ctx context.Context, stop <-chan struct{}) error {
 	q := url.Values{"from": {strconv.FormatUint(next, 10)}, "replid": {replid}, "wait_ms": {strconv.Itoa(c.h.Cfg.Heartbeat * 1000)}, "limit": {"500"}}
 	req, _ := http.NewRequestWithContext(ctx2, "GET", leader+"/v1/cluster/log?"+q.Encode(), nil)
 	c.nodeHeaders(req)
-	resp, err := c.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -645,7 +651,7 @@ func (c *Cluster) pullOnce(ctx context.Context, stop <-chan struct{}) error {
 	switch {
 	case resp.StatusCode == http.StatusConflict && lr.NeedSnapshot:
 		c.h.Logf("replication: leader requires full snapshot (replid/offset not resumable)")
-		return c.installSnapshot(ctx2, leader)
+		return c.installSnapshot(ctx2, leader, client)
 	case resp.StatusCode != 200:
 		return fmt.Errorf("leader answered %d: %s", resp.StatusCode, lr.Error)
 	}
@@ -679,7 +685,7 @@ func (c *Cluster) pullOnce(ctx context.Context, stop <-chan struct{}) error {
 		if err != nil {
 			if errors.Is(err, ErrNeedResync) {
 				c.h.Logf("replication: backend asked for a full resync at seq %d", e.Seq)
-				return c.installSnapshot(ctx2, leader)
+				return c.installSnapshot(ctx2, leader, client)
 			}
 			return fmt.Errorf("apply seq %d: %w", e.Seq, err)
 		}

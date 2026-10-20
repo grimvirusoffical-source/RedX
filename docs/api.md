@@ -298,3 +298,37 @@ refusals stay the flat `{"error":"..."}` string used by the rest of the host.
 BoxQL is unchanged: updates are not a query language.
 The CLI is `redx update status|check|apply|promote|rollback|snapshots|restore|source`. Apply, promote,
 rollback and restore prompt, or take `--yes`.
+
+## Hosted apps (`/v1/hosted`)
+
+Tenant sites and containers. These are not the update-system app ids. A signed-in tenant, or an API key
+that tenant minted, sees only that account's apps. An owner session and a host-admin key see every app,
+and every owner request is audit-logged. Plan gates are the same as databases: no plan is `402 plan_required`
+on a write and `403` on the list; read-only is `402 plan_readonly`; a suspended known account can list
+(`suspended: true`) but writes and logs are `402 plan_required`. Over the app cap is `402` with
+`limit: "app_quota"`. Over the per-app disk cap is `limit: "app_disk_quota"`. Starting or stopping an app
+consumes one `host_switch_quota` switch only when the running state changes.
+
+Cross-tenant reads and writes are `404` (`app not found`, `database not found`, `domain not found`,
+`secret not found`) so a caller cannot tell that another tenant's name exists. A custom domain another
+tenant still holds (verified, or unverified and newer than 7 days) is `409 domain_taken`.
+
+`DELETE /v1/hosted/apps/{id}` is dangerous: `X-RedX-Confirm: deleteHostedApp` after auth, or `428`.
+Secret values are write-only. `GET` shows `••••••••` and never the plaintext. The value is encrypted at
+rest and injected through an env file the podman spec references with `--env-file`, not `--env`.
+
+`GET /v1/hosted/apps/{id}/deploys/{deploy}/manifest` returns the exact `redx.update-manifest/v1` bytes
+and `X-RedX-Signature: ed25519:…` over those bytes. Rollback and promote use the same snapshot schema as
+host updates (`redx.update-snapshot/v1`), stored under the app, not in the host updater's app table.
+
+`GET /v1/hosted/tls/ask?domain=` is the Caddy on-demand ask. `200` only when the name is a verified app
+domain. Anything else, including an unverified custom domain, is refused. With no
+`REDX_APPS_TLS_ASK_SECRET`, only a loopback socket may ask. With the secret set, the caller must send
+`X-RedX-Caddy-Ask`. `GET /v1/hosted/caddy` (owner or host-admin) prints the Caddyfile fragment.
+
+Public traffic for an app hostname is served by redxd itself (static files, or a reverse proxy to
+`127.0.0.1:<port>` for a running container). It does not enter `/v1`. A stopped app is `503`. A suspended
+plan is `402 plan_required`. The HTTP-01 path `/.well-known/redx-challenge/<token>` is served before the
+name is verified, so the check can succeed; the TLS ask still refuses that name until it is verified.
+
+The CLI is `redx app`. See [Hosting apps and sites](hosting-apps.md).
