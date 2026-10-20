@@ -606,62 +606,106 @@ func readOrMakeNodeID(dir string) string {
 
 // ---- backup / restore ----
 
+// backupKeysFromFlags: --passphrase-file, else REDX_BACKUP_PASSPHRASE, plus an optional --backup-key-file.
+func backupKeysFromFlags(passFile, keyFile string) host.BackupKeys {
+	var k host.BackupKeys
+	if passFile != "" {
+		b, err := os.ReadFile(passFile)
+		if err != nil {
+			die("%v", err)
+		}
+		k.Passphrase = strings.TrimRight(string(b), "\r\n")
+	} else {
+		k.Passphrase = os.Getenv("REDX_BACKUP_PASSPHRASE")
+	}
+	if k.Passphrase != "" && len(k.Passphrase) < 12 {
+		die("backup passphrase must be at least 12 characters")
+	}
+	if keyFile != "" {
+		b, err := host.ReadBackupKeyFile(keyFile)
+		if err != nil {
+			die("%v", err)
+		}
+		k.HostKey = b
+	}
+	return k
+}
+
 func cmdBackup(args []string) {
 	var g globals
 	fs := flag.NewFlagSet("backup", flag.ExitOnError)
 	g.bind(fs)
-	out := fs.String("out", "", "output file (.tgz)")
+	out := fs.String("out", "", "output file (.rxbk, encrypted)")
 	force := fs.Bool("force", false, "offline: if the running redxd does not answer, copy anyway (may be inconsistent)")
+	passFile := fs.String("passphrase-file", "", "file holding the backup passphrase (default: REDX_BACKUP_PASSPHRASE; without either, the host backup key <data>/backup.key is used)")
 	parse(fs, args)
 	if *out == "" {
-		*out = "redx-backup-" + time.Now().UTC().Format("20060102-150405") + ".tgz"
+		*out = "redx-backup-" + time.Now().UTC().Format("20060102-150405") + ".rxbk"
 	}
+	keys := backupKeysFromFlags(*passFile, "")
 	f, err := os.OpenFile(*out, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		die("%v", err)
 	}
 	defer f.Close()
+	mode := "the host backup key (<data>/backup.key). Keep a copy of that file somewhere other than this host: without it the backup cannot be restored"
+	if keys.Passphrase != "" {
+		mode = "your backup passphrase (Argon2id)"
+	}
 	if g.offline {
-		if err := host.OfflineBackup(g.dataDir, f, os.Getenv("REDX_KEYSTORE_PASSPHRASE"), *force); err != nil {
+		if err := host.OfflineBackup(g.dataDir, f, host.BackupOptions{KeystorePassphrase: os.Getenv("REDX_KEYSTORE_PASSPHRASE"), Keys: keys, Force: *force}); err != nil {
 			os.Remove(*out)
 			die("%v", err)
 		}
 	} else {
 		c, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
-		st, _, body, err := g.client().Raw(c, "GET", "/v1/admin/backup", nil, nil)
+		var hdr map[string]string
+		if keys.Passphrase != "" {
+			hdr = map[string]string{host.BackupPassphraseHeader: keys.Passphrase}
+		}
+		st, rh, body, err := g.client().Raw(c, "GET", "/v1/admin/backup", nil, hdr)
 		if err != nil || st != 200 {
 			os.Remove(*out)
 			die("online backup failed (status %d): %v %s", st, err, strings.TrimSpace(string(body)))
+		}
+		if rh != nil && rh.Get("X-Redx-Backup-Encryption") == "hostkey" {
+			mode = "the server's host backup key (<data>/backup.key on that host). Keep a copy of that file off the host"
 		}
 		if _, err := f.Write(body); err != nil {
 			die("%v", err)
 		}
 	}
 	fmt.Println("backup written to", *out)
+	fmt.Println("encrypted with", mode)
 }
 
 func cmdRestore(args []string) {
 	var g globals
 	fs := flag.NewFlagSet("restore", flag.ExitOnError)
 	g.bind(fs)
-	force := fs.Bool("force", false, "move existing databases aside and restore over them")
+	force := fs.Bool("force", false, "move existing databases, connect grants, hosted apps and the audit log aside and restore over them")
+	passFile := fs.String("passphrase-file", "", "file holding the backup passphrase (default: REDX_BACKUP_PASSPHRASE)")
+	keyFile := fs.String("backup-key-file", "", "host backup key (backup.key from the source host) for a backup taken without a passphrase")
 	pos := parse(fs, args)
 	if len(pos) != 1 {
-		die("usage: redx restore FILE [--data-dir DIR] [--force]   (stop redxd first)")
+		die("usage: redx restore FILE [--data-dir DIR] [--force] [--passphrase-file F | --backup-key-file F]   (stop redxd first)")
 	}
 	f, err := os.Open(pos[0])
 	if err != nil {
 		die("%v", err)
 	}
 	defer f.Close()
-	moved, err := host.OfflineRestore(g.dataDir, f, os.Getenv("REDX_KEYSTORE_PASSPHRASE"), *force)
+	res, err := host.OfflineRestore(g.dataDir, f, host.RestoreOptions{KeystorePassphrase: os.Getenv("REDX_KEYSTORE_PASSPHRASE"), Keys: backupKeysFromFlags(*passFile, *keyFile), Force: *force})
 	if err != nil {
 		die("%v", err)
 	}
+	for _, w := range res.Warnings {
+		fmt.Fprintln(os.Stderr, "WARNING:", w)
+	}
 	fmt.Println("restored into", g.dataDir)
-	if moved != "" {
-		fmt.Println("previous databases moved to", moved)
+	for _, m := range res.MovedAside {
+		fmt.Println("previous state moved to", m)
 	}
 	fmt.Println("Start redxd again. In a cluster, followers will full-resync from this node.")
 }

@@ -28,6 +28,23 @@ type Client struct {
 	HTTP *http.Client
 }
 
+// PinnedTLSConfig trusts exactly the certificate whose SHA-256 (hex, optional
+// "sha256:" prefix and colons) is pin. Chain verification is replaced by the pin.
+func PinnedTLSConfig(pin string) *tls.Config {
+	p := strings.ToLower(strings.ReplaceAll(strings.TrimPrefix(strings.TrimSpace(pin), "sha256:"), ":", ""))
+	return &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12,
+		VerifyPeerCertificate: func(raw [][]byte, _ [][]*x509.Certificate) error {
+			if len(raw) == 0 {
+				return errors.New("no certificate")
+			}
+			s := sha256.Sum256(raw[0])
+			if subtle.ConstantTimeCompare([]byte(hex.EncodeToString(s[:])), []byte(p)) != 1 {
+				return errors.New("server certificate does not match --pin")
+			}
+			return nil
+		}}
+}
+
 // New creates a client. pin (sha256 hex of the server certificate, optional) lets
 // you trust a self-signed certificate safely; insecure disables verification.
 func New(base, key, pin string, insecure bool) *Client {
@@ -38,18 +55,7 @@ func New(base, key, pin string, insecure bool) *Client {
 	tr := &http.Transport{TLSHandshakeTimeout: 10 * time.Second}
 	switch {
 	case pin != "":
-		p := strings.ToLower(strings.ReplaceAll(strings.TrimPrefix(pin, "sha256:"), ":", ""))
-		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12,
-			VerifyPeerCertificate: func(raw [][]byte, _ [][]*x509.Certificate) error {
-				if len(raw) == 0 {
-					return errors.New("no certificate")
-				}
-				s := sha256.Sum256(raw[0])
-				if subtle.ConstantTimeCompare([]byte(hex.EncodeToString(s[:])), []byte(p)) != 1 {
-					return errors.New("server certificate does not match --pin")
-				}
-				return nil
-			}}
+		tr.TLSClientConfig = PinnedTLSConfig(pin)
 	case insecure:
 		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	}

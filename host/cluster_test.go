@@ -2,6 +2,7 @@ package host_test
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"encoding/json"
@@ -403,13 +404,24 @@ func TestOfflineBackupRestore(t *testing.T) {
 	}
 	defer f.Close() // Windows cannot remove the temp dir while the file is open
 	// The daemon is running and there is no API key requirement: it pauses writes and answers.
-	if err := host.OfflineBackup(dir, f, "", false); err != nil {
+	if err := host.OfflineBackup(dir, f, host.BackupOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.Seek(0, 0); err != nil {
 		t.Fatal(err)
 	}
-	gz, err := gzip.NewReader(f)
+	raw, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.HasPrefix(raw, []byte{0x1f, 0x8b}) {
+		t.Fatal("offline backup must be encrypted, not a plain tar.gz")
+	}
+	pr, bh, err := host.OpenBackup(bytes.NewReader(raw), host.BackupKeys{HostKey: hostBackupKey(t, dir)})
+	if err != nil || bh == nil || bh.Mode != "hostkey" {
+		t.Fatalf("open backup: %v %+v", err, bh)
+	}
+	gz, err := gzip.NewReader(pr)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -445,7 +457,7 @@ func TestOfflineBackupRestore(t *testing.T) {
 	}
 	n.Stop()
 	dir2 := t.TempDir()
-	if _, err := host.OfflineRestore(dir2, f, "", false); err != nil {
+	if _, err := host.OfflineRestore(dir2, f, host.RestoreOptions{Keys: host.BackupKeys{HostKey: hostBackupKey(t, dir)}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(dir2, "updates", "signing.key")); err != nil {

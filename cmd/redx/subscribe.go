@@ -11,12 +11,15 @@ import (
 	"strings"
 
 	"github.com/gorilla/websocket"
+
+	"redx/host/client"
 )
 
-func subscribe(g globals, path string) {
+// dialSubscribe opens the subscription socket, honouring --pin and --insecure like every other command.
+func dialSubscribe(g globals, path string) (*websocket.Conn, *http.Response, error) {
 	u, err := url.Parse(g.addr)
 	if err != nil {
-		die("%v", err)
+		return nil, nil, err
 	}
 	if u.Scheme == "https" {
 		u.Scheme = "wss"
@@ -30,10 +33,17 @@ func subscribe(g globals, path string) {
 	}
 	u.RawQuery = url.Values{"path": {path}}.Encode()
 	d := *websocket.DefaultDialer
-	if g.insecure {
+	switch {
+	case g.pin != "":
+		d.TLSClientConfig = client.PinnedTLSConfig(g.pin)
+	case g.insecure:
 		d.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	}
-	conn, resp, err := d.Dial(u.String(), http.Header{"Authorization": {"Bearer " + g.key}})
+	return d.Dial(u.String(), http.Header{"Authorization": {"Bearer " + g.key}})
+}
+
+func subscribe(g globals, path string) {
+	conn, resp, err := dialSubscribe(g, path)
 	if err != nil {
 		if resp != nil {
 			die("subscribe refused: %s", resp.Status)
