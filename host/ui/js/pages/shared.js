@@ -25,7 +25,23 @@ export const KINDS = {
   db: 'Data', qs: 'Quick store', 'qs-ls': 'Quick store + journal', link: 'Links', pulse: 'Pulse rules', idx: 'Index', sec: 'Security', code: 'Code', pack: 'Pack', media: 'Media', journal: 'Journal', system: 'Engine',
 };
 export function typeChip(t) { return h('span', { class: 'chip ' + (t === 'db' || t === 'qs' || t === 'qs-ls' ? 'acc' : '') }, KINDS[t] || t); }
-export function apiMessage(e) { return e && e.message ? e.message : String(e); }
+export function apiMessage(e, fallback = 'Request failed') {
+  const b = e && e.body;
+  if (b && typeof b.message === 'string' && b.message) return b.message;
+  if (b && b.error && typeof b.error === 'object' && typeof b.error.message === 'string') return b.error.message;
+  if (b && typeof b.error === 'string' && b.error && !/^[a-z][a-z0-9_]*$/i.test(b.error)) return b.error;
+  if (e && typeof e.message === 'string' && e.message && !/^[a-z][a-z0-9_]*$/i.test(e.message)) return e.message;
+  if (b && typeof b.error === 'string' && b.error) return b.error;
+  if (e && e.message) return e.message;
+  return fallback;
+}
+export function apiCode(e) {
+  const b = e && e.body;
+  if (!b) return '';
+  if (typeof b.code === 'string') return b.code;
+  if (typeof b.error === 'string' && /^[a-z][a-z0-9_]*$/i.test(b.error)) return b.error;
+  return '';
+}
 
 /** Raw Box text of a record path. */
 export async function getBox(db, path) {

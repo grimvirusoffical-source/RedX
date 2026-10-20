@@ -140,5 +140,11 @@ func requireDangerConfirm(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func writeErrCode(w http.ResponseWriter, status int, code, msg string) {
+	if code == "" {
+		noteReason(w, msg)
+		code = errCodeFor(status)
+	} else {
+		noteReason(w, code)
+	}
 	writeAPIErr(w, status, msg, code, msg)
 }

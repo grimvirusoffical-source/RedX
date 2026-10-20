@@ -79,6 +79,17 @@ type statusCapture struct {
 	http.ResponseWriter
 	code    int
 	written int64
+	reason  string
+}
+
+func (s *statusCapture) setReason(msg string) {
+	if s == nil || s.reason != "" || msg == "" {
+		return
+	}
+	if len(msg) > 200 {
+		msg = msg[:200]
+	}
+	s.reason = msg
 }
 
 func (s *statusCapture) WriteHeader(code int) {

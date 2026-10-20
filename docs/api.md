@@ -274,8 +274,8 @@ The master accounts database is refused. This shared namespace is a known limita
 | Route | Auth | Purpose |
 |---|---|---|
 | `GET /v1/updates/apps`, `GET /v1/updates/apps/{app}` | host admin | hosted, source_pref, installed, available |
-| `GET .../manifests/{version}`, `.../{version}.sig`, `.../artifacts/{artifact_id}` | host admin | signed manifest, signature, artifact |
-| `PUT .../source` | host admin; owner while Accounts is on | `host`/`github`/`both`. `host` or `both` when the app is not hosted → `409 not_hosted` |
+| `GET .../manifests/{version}`, `.../{version}.sig`, `.../artifacts/{artifact_id}` | host admin | signed manifest, signature, artifact. With no `?source=`, the app's source preference is used; `github` does not fall back to a host manifest |
+| `PUT .../source` | host admin; owner while Accounts is on | `host`/`github`/`both`. `host` or `both` when the app is not hosted → `409 not_hosted`. `both` accepts a manifest from either source; sequence is one counter for the app (the same version keeps the sequence it was first signed with) and the signature rules do not change. A manifest from the source that is not selected is `409 not_hosted` |
 | `PUT .../policy` | host admin; owner while Accounts is on | auto-apply |
 | `POST .../apply` | host admin; owner while Accounts is on | app snapshot, then direct / canary / blue-green. Snapshot failure refuses the apply |
 | `GET /v1/updates/rollouts/{rollout_id}` | host admin | progress and health |
@@ -284,9 +284,13 @@ The master accounts database is refused. This shared namespace is a known limita
 | `POST .../rollback` | host admin; owner while Accounts is on | restore one snapshot for this app |
 | `GET .../history` | host admin | publish, apply, snapshot, rollback |
 | `POST .../publish` | host admin; owner while Accounts is on, and the app must be hosted | sign a host and/or GitHub manifest |
-| `POST /v1/updates/github/webhook` | HMAC `X-Hub-Signature-256` over the body | allowlisted repo, `X-GitHub-Delivery` dedupe, SHA256SUMS, then a signed github-source manifest. No webhook secret configured is `404 not_found` |
+| `POST /v1/updates/github/webhook` | HMAC `X-Hub-Signature-256` over the body | allowlisted repo, `X-GitHub-Delivery` dedupe, SHA256SUMS, then a signed github-source manifest. No webhook secret configured is `404 not_found`. While the source preference is `host`, a release is `409 not_hosted` and that delivery id is released so it can be replayed after the source is switched |
 | `GET /v1/updates/events` | host admin | WebSocket: `update.available`, `update.analysed`, `rollout.state`, `rollout.health`, `rollback.done` |
 | `GET /v1/apps/events` | Accounts client auth | Existing Accounts JSON poll. `update.*` events on that feed are forwarded to the WebSocket and do not end sessions |
+
+`GET /v1/hosting/activity` is for the signed-in account (or an API key minted for that account). It lists only that account's databases: request counts, error counts, and recent denied requests (status, method, path, reason). Anyone else gets `403 account_required`. It does not include another tenant's names.
+
+`GET /v1/owner/audit?event=&q=&limit=&offset=` is owner-only and is itself audit-logged as `owner.read`. `event` matches the event name, `q` matches event, actor, target, route, reason, detail, key id and database. `limit` defaults to 50 (max 200). The response is `{events, total, limit, offset}`, newest first.
 
 Errors are `{ "error": { "code", "message" } }` with `not_hosted`, `bad_signature`, `sequence_regression`,
 `snapshot_failed`, `rollout_conflict`, `not_found`, `forbidden`. Validation uses `invalid`. Owner-only
