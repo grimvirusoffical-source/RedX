@@ -18,7 +18,8 @@ import urllib.request
 import pytest
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-REDXD = os.environ.get("REDXD", os.path.join(ROOT, "bin", "redxd"))
+_FIXED = "/workspace/redx-e2e-bin/redxd"
+REDXD = os.environ.get("REDXD") or (_FIXED if os.path.isfile(_FIXED) else os.path.join(ROOT, "bin", "redxd"))
 KEY_RE = re.compile(r"rx_live_[A-Za-z0-9]{43}")
 
 

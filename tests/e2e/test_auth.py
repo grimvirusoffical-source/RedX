@@ -57,10 +57,8 @@ def test_parallel_wrong_keys_do_not_starve_valid_clients(fresh_host):
     with cf.ThreadPoolExecutor(32) as ex:
         codes = list(ex.map(bad, range(400)))
     assert set(codes) <= {401, 429}
-    # The per-IP failed-auth guard is check-then-record and not atomic, so concurrent
-    # requests overshoot the documented 20/min cap by a small, bounded factor before the
-    # counter catches up. Recorded as finding F1 (LOW). The overshoot stays well under 2x.
-    assert codes.count(401) <= 60, "throttle overshoot larger than expected: %d" % codes.count(401)
+    # F1 fixed: reserve-before-verify makes the 20/min/IP cap hard under concurrency.
+    assert codes.count(401) == 20, "expected exactly 20 failures before 429, got %d" % codes.count(401)
 
 
 def test_bootstrap_endpoints_closed_after_first_key(host):
