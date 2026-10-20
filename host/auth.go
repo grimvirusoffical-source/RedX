@@ -2,6 +2,7 @@ package host
 
 import (
 	"errors"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -205,25 +206,54 @@ func newFailTracker(max int, w time.Duration) *failTracker {
 	return &failTracker{max: max, window: w, m: map[string]*failEnt{}}
 }
 
+// failTrackerCap bounds the number of tracked buckets.
+const failTrackerCap = 20000
+
+// failBucket groups an address for failure counting: IPv4 per address, IPv6 per /64 (one
+// host usually controls a whole /64, so per-address counting would be trivially bypassed).
+func failBucket(addr string) string {
+	ip := net.ParseIP(addr)
+	if ip == nil || ip.To4() != nil {
+		return addr
+	}
+	return ip.Mask(net.CIDRMask(64, 128)).String() + "/64"
+}
+
+// entryLocked returns the live entry for bucket, creating it when there is room. It returns nil
+// when the table is full of live entries: the newcomer is not tracked, but the table is never
+// wiped, so an attacker cannot flush existing blocks by failing from many addresses.
+func (f *failTracker) entryLocked(bucket string, now time.Time) *failEnt {
+	e := f.m[bucket]
+	if e != nil && now.Sub(e.start) >= f.window {
+		delete(f.m, bucket)
+		e = nil
+	}
+	if e != nil {
+		return e
+	}
+	if len(f.m) >= failTrackerCap {
+		f.pruneLocked(now)
+		if len(f.m) >= failTrackerCap {
+			return nil
+		}
+	}
+	e = &failEnt{start: now}
+	f.m[bucket] = e
+	return e
+}
+
 // reserve atomically claims a failure slot for ip before the credential is checked. It returns
 // ok=false and the remaining wait when the window is already full. A caller that then succeeds
 // must call release so only failures count; a failing caller simply keeps the slot. Because the
 // check and the increment happen under one lock, concurrent attempts cannot overshoot max.
 func (f *failTracker) reserve(ip string) (time.Duration, bool) {
+	ip = failBucket(ip)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	now := time.Now()
-	e := f.m[ip]
-	if e != nil && now.Sub(e.start) >= f.window {
-		delete(f.m, ip)
-		e = nil
-	}
+	e := f.entryLocked(ip, now)
 	if e == nil {
-		if len(f.m) >= failTrackerMaxIPs {
-			f.pruneLocked(now)
-		}
-		e = &failEnt{start: now}
-		f.m[ip] = e
+		return 0, true
 	}
 	if e.n >= f.max {
 		return f.window - now.Sub(e.start), false
@@ -234,6 +264,7 @@ func (f *failTracker) reserve(ip string) (time.Duration, bool) {
 
 // release returns a slot taken by reserve after a successful authentication.
 func (f *failTracker) release(ip string) {
+	ip = failBucket(ip)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if e := f.m[ip]; e != nil && e.n > 0 {
@@ -241,16 +272,37 @@ func (f *failTracker) release(ip string) {
 	}
 }
 
-const failTrackerMaxIPs = 20000
+// record counts one failure for ip without a prior reserve.
+func (f *failTracker) record(ip string) {
+	ip = failBucket(ip)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if e := f.entryLocked(ip, time.Now()); e != nil {
+		e.n++
+	}
+}
 
-// pruneLocked drops expired entries; if the map is still full it is reset (bounded memory).
+// blocked reports how long ip must wait, or 0 when it may try.
+func (f *failTracker) blocked(ip string) time.Duration {
+	ip = failBucket(ip)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	now := time.Now()
+	e := f.m[ip]
+	if e == nil {
+		return 0
+	}
+	if rem := f.window - now.Sub(e.start); rem > 0 && e.n >= f.max {
+		return rem
+	}
+	return 0
+}
+
+// pruneLocked drops expired entries. It never drops live ones.
 func (f *failTracker) pruneLocked(now time.Time) {
 	for k, e := range f.m {
 		if now.Sub(e.start) >= f.window {
 			delete(f.m, k)
 		}
-	}
-	if len(f.m) >= failTrackerMaxIPs {
-		f.m = map[string]*failEnt{}
 	}
 }
