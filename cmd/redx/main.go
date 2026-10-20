@@ -104,6 +104,8 @@ func main() {
 		cmdPreset(args)
 	case "update":
 		cmdUpdate(args)
+	case "app":
+		cmdApp(args)
 	case "backup":
 		cmdBackup(args)
 	case "restore":
@@ -143,6 +145,13 @@ func usage() {
                                            settings profiles (Server, VPS, Website, App, Game, Edge, Dev, Cluster, Backup, All)
   redx update status [APP] | check | apply APP [--version V] [--source host|github] [--canary PERCENT]
   redx update promote ID | rollback ID | snapshots APP | restore APP SNAP | source APP host|github|both
+  redx app list | create NAME [--kind static|container|process] [--db NAME] | show ID
+  redx app deploy ID (--archive FILE | --github REPO --ref REF | --image IMG | --dockerfile REPO --ref REF) [--strategy direct|canary|blue_green] [--canary PERCENT]
+  redx app rollback ID (--deploy ID | --snapshot ID) | promote ID | start ID | stop ID | delete ID
+  redx app domain add ID NAME [--method txt|cname|http] | domain verify ID NAME | domain rm ID NAME
+  redx app env show ID | env set ID KEY=VALUE ...
+  redx app secret set ID NAME   (value on stdin) | secret rm ID NAME
+  redx app logs ID [--kind runtime|access] [--out FILE] | caddy
   redx backup --out FILE [--offline]      redx restore FILE [--force]
   redx doctor [--config FILE]
   redx version | --version
