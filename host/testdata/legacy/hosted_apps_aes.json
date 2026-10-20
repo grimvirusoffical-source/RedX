@@ -1,0 +1,27 @@
+{
+ "nextPort": 0,
+ "apps": {
+  "app1": {
+   "id": "app1",
+   "account": "acct1",
+   "name": "",
+   "kind": "",
+   "created": "0001-01-01T00:00:00Z",
+   "updated": "0001-01-01T00:00:00Z",
+   "running": false,
+   "hostPort": 0,
+   "secrets": [
+    {
+     "name": "API_TOKEN",
+     "nonce": "rSGZDtX1azP9fgHy",
+     "ct": "xMD54u0lyvsq3aQo6IoqmgyIkcbCuId7qZBr7+8=",
+     "updated": "2026-10-20T13:38:52.018893806Z"
+    }
+   ],
+   "domains": null,
+   "deploys": null,
+   "snaps": null,
+   "seq": 0
+  }
+ }
+}

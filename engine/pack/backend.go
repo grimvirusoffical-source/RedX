@@ -1,12 +1,12 @@
 package pack
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"redx/internal/rsx"
 	"sort"
 	"strings"
 	"sync"
@@ -52,13 +52,13 @@ func ValidID(s string) bool {
 
 // ChunkID returns the id of a chunk.
 func ChunkID(data []byte) string {
-	h := sha256.Sum256(data)
+	h := rsx.Sha256(data)
 	return hex.EncodeToString(h[:])
 }
 
 // FolderKey is the manifest key of a folder path ("" is the root).
 func FolderKey(folder string) string {
-	h := sha256.Sum256([]byte("redx-pack-folder\x00" + folder))
+	h := rsx.Sha256([]byte("redx-pack-folder\x00" + folder))
 	return hex.EncodeToString(h[:])
 }
 

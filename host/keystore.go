@@ -2,12 +2,6 @@ package host
 
 import (
 	"bytes"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/hmac"
-	"crypto/rand"
-	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -15,6 +9,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"redx/internal/rsx"
 	"regexp"
 	"sort"
 	"strconv"
@@ -23,7 +18,6 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
-	"golang.org/x/crypto/argon2"
 )
 
 // API key format: rx_live_<43 base62 chars> (32 random bytes ≈ 256 bits).
@@ -183,7 +177,16 @@ type keystoreFile struct {
 	Keys    []*KeyRecord `json:"keys"`
 }
 
-var encMagic = []byte("REDXKS1\n")
+// Encrypted keystore: encMagic | salt(16) | nonce(12) | ChaCha20-Poly1305(ct||tag),
+// key = Argon2id(passphrase, salt, t=2, m=19456 KiB, p=1), magic as additional data.
+// REDXKS1 (the old AES-GCM file) is refused, never decrypted.
+var (
+	encMagic       = []byte("REDXKS2\n")
+	legacyEncMagic = []byte("REDXKS1\n")
+)
+
+// ErrLegacyKeystore: keys.json is in the old AES-GCM encrypted format.
+var ErrLegacyKeystore = errors.New("keystore: unsupported legacy encrypted keystore (REDXKS1, AES-GCM); it is not read by this version: remove it and create the keys again, or restore them from a backup made with this version")
 
 // OpenKeystore opens or creates the keystore at path.
 func OpenKeystore(path string, o KeystoreOptions) (*Keystore, error) {
@@ -200,7 +203,9 @@ func OpenKeystore(path string, o KeystoreOptions) (*Keystore, error) {
 		return nil, err
 	}
 	ks := &Keystore{path: path, opts: o, lock: flock.New(path + ".lock"), recs: map[string]*KeyRecord{}, cache: map[[32]byte]cacheEnt{}}
-	_, _ = rand.Read(ks.cacheKey[:])
+	if err := rsx.Random(ks.cacheKey[:]); err != nil {
+		panic(err)
+	}
 	if err := ks.reloadLocked(true); err != nil {
 		return nil, err
 	}
@@ -218,6 +223,9 @@ func (ks *Keystore) readFile() ([]*KeyRecord, error) {
 		}
 		return nil, err
 	}
+	if bytes.HasPrefix(b, legacyEncMagic) {
+		return nil, ErrLegacyKeystore
+	}
 	if bytes.HasPrefix(b, encMagic) {
 		if ks.opts.Passphrase == "" {
 			return nil, errors.New("keystore is encrypted: set REDX_KEYSTORE_PASSPHRASE")
@@ -226,12 +234,13 @@ func (ks *Keystore) readFile() ([]*KeyRecord, error) {
 		if len(b) < 16+12+16 {
 			return nil, errors.New("keystore: truncated encrypted file")
 		}
-		salt, nonce, ct := b[:16], b[16:28], b[28:]
-		gcm, err := ks.gcm(salt)
+		salt, nonce, ct, tag := b[:16], b[16:28], b[28:len(b)-16], b[len(b)-16:]
+		k, err := ks.fileKey(salt)
 		if err != nil {
 			return nil, err
 		}
-		pt, err := gcm.Open(nil, nonce, ct, encMagic)
+		pt, err := rsx.AeadDecrypt(k, nonce, encMagic, ct, tag)
+		rsx.Wipe(k)
 		if err != nil {
 			return nil, errors.New("keystore: decryption failed (wrong passphrase or corrupted file)")
 		}
@@ -244,13 +253,8 @@ func (ks *Keystore) readFile() ([]*KeyRecord, error) {
 	return f.Keys, nil
 }
 
-func (ks *Keystore) gcm(salt []byte) (cipher.AEAD, error) {
-	k := argon2.IDKey([]byte(ks.opts.Passphrase), salt, 2, 19456, 1, 32)
-	blk, err := aes.NewCipher(k)
-	if err != nil {
-		return nil, err
-	}
-	return cipher.NewGCM(blk)
+func (ks *Keystore) fileKey(salt []byte) ([]byte, error) {
+	return rsx.Argon2id([]byte(ks.opts.Passphrase), salt, 2, 19456, 1, 32)
 }
 
 func (ks *Keystore) writeFile() error {
@@ -266,19 +270,28 @@ func (ks *Keystore) writeFile() error {
 		return err
 	}
 	if ks.opts.Passphrase != "" {
-		salt := make([]byte, 16)
-		nonce := make([]byte, 12)
-		_, _ = rand.Read(salt)
-		_, _ = rand.Read(nonce)
-		gcm, err := ks.gcm(salt)
+		salt, err := rsx.RandomBytes(16)
+		if err != nil {
+			return err
+		}
+		nonce, err := rsx.RandomBytes(12)
+		if err != nil {
+			return err
+		}
+		k, err := ks.fileKey(salt)
+		if err != nil {
+			return err
+		}
+		ct, tag, err := rsx.AeadEncrypt(k, nonce, encMagic, b)
+		rsx.Wipe(k)
 		if err != nil {
 			return err
 		}
 		out := append([]byte{}, encMagic...)
 		out = append(out, salt...)
 		out = append(out, nonce...)
-		out = gcm.Seal(out, nonce, b, encMagic)
-		b = out
+		out = append(out, ct...)
+		b = append(out, tag[:]...)
 	}
 	tmp := ks.path + ".tmp"
 	if err := os.WriteFile(tmp, b, 0o600); err != nil {
@@ -391,7 +404,9 @@ func (ks *Keystore) mutate(fn func() (*KeyRecord, error)) (*KeyRecord, error) {
 
 func randBase62(n int) string {
 	buf := make([]byte, 32)
-	_, _ = rand.Read(buf)
+	if err := rsx.Random(buf); err != nil {
+		panic(err)
+	}
 	s := new(big.Int).SetBytes(buf).Text(62)
 	// big.Int base62 alphabet is 0-9a-zA-Z.
 	for len(s) < n {
@@ -401,7 +416,11 @@ func randBase62(n int) string {
 }
 
 func hashKey(key string, salt []byte, mem, t uint32, p uint8) []byte {
-	return argon2.IDKey([]byte(key), salt, t, mem, p, 32)
+	h, err := rsx.Argon2id([]byte(key), salt, t, mem, uint32(p), 32)
+	if err != nil {
+		return nil // bad stored parameters: never matches
+	}
+	return h
 }
 
 // ParseTTL accepts Go durations plus d (days) and w (weeks) suffixes; "" or "0" or "never" = 0.
@@ -470,7 +489,9 @@ func (ks *Keystore) newRecordLocked(sp CreateSpec, rotatedFrom string) (string, 
 		}
 		key := KeyPrefix + body
 		salt := make([]byte, 16)
-		_, _ = rand.Read(salt)
+		if err := rsx.Random(salt); err != nil {
+			panic(err)
+		}
 		now := ks.opts.Now().UTC().Truncate(time.Second)
 		r := &KeyRecord{ID: body[:keyIDLen], Salt: base64.RawStdEncoding.EncodeToString(salt),
 			Mem: ks.opts.ArgonMem, Time: ks.opts.ArgonTime, Threads: 1,
@@ -523,7 +544,7 @@ func (ks *Keystore) Verify(key string) (*KeyRecord, error) {
 	}
 	ks.mu.RUnlock()
 
-	mac := hmac.New(sha256.New, ks.cacheKey[:])
+	mac := rsx.NewHMACSHA256(ks.cacheKey[:])
 	mac.Write([]byte(key))
 	var ck [32]byte
 	copy(ck[:], mac.Sum(nil))
@@ -546,7 +567,7 @@ func (ks *Keystore) Verify(key string) (*KeyRecord, error) {
 			return nil, ErrKeyBad
 		}
 		got := hashKey(key, salt, cp.Mem, cp.Time, cp.Threads)
-		if subtle.ConstantTimeCompare(got, want) != 1 {
+		if !rsx.CtEq(got, want) {
 			return nil, ErrKeyBad
 		}
 		ks.cmu.Lock()

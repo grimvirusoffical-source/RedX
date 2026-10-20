@@ -1,0 +1,17 @@
+{
+ "version": 1,
+ "keys": [
+  {
+   "id": "TEDFCL9a",
+   "hash": "SsuRSb5R34g+I5zqWOx86m+EzKTZW1D32Qd7uZ07esk",
+   "salt": "YIpkU6d4B0UtsN9a3S8FHQ",
+   "m": 19456,
+   "t": 2,
+   "p": 1,
+   "scope": "admin",
+   "db": "*",
+   "label": "fixture",
+   "created": "2026-10-20T13:37:35Z"
+  }
+ ]
+}

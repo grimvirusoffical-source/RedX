@@ -2,13 +2,13 @@ package client
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"redx/internal/rsx"
 	"strings"
 	"time"
 
@@ -206,7 +206,7 @@ func (c *Client) PackList(ctx context.Context, db string) ([]string, error) {
 
 // SHA256Hex hashes r.
 func SHA256Hex(r io.Reader) (string, int64, error) {
-	h := sha256.New()
+	h := rsx.NewSHA256()
 	n, err := io.Copy(h, r)
 	return hex.EncodeToString(h.Sum(nil)), n, err
 }

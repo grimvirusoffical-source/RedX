@@ -2,9 +2,9 @@ package pack
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/hex"
 	"math"
+	"redx/internal/rsx"
 	"sort"
 
 	"redx/box"
@@ -103,7 +103,7 @@ func (m *manifest) encode() []byte {
 	root := box.NewBox()
 	root.Put(box.NewEntry("Manifest", nil, box.BoxValue(b)))
 	text := box.Serialize(root)
-	h := sha256.Sum256([]byte(text))
+	h := rsx.Sha256([]byte(text))
 	return []byte(text + sealPrefix + hex.EncodeToString(h[:]) + "\";\n")
 }
 
@@ -116,7 +116,7 @@ func unseal(data []byte) (string, error) {
 	if len(rest) != 64+3 || string(rest[64:]) != "\";\n" {
 		return "", corruptf("manifest seal is malformed")
 	}
-	h := sha256.Sum256(data[:i])
+	h := rsx.Sha256(data[:i])
 	if hex.EncodeToString(h[:]) != string(rest[:64]) {
 		return "", corruptf("manifest checksum mismatch")
 	}

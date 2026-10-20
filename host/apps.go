@@ -5,11 +5,6 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
-	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
@@ -22,6 +17,8 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"redx/internal/rsx"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -157,8 +154,12 @@ func errDomainQuota(max int) error {
 		Message: fmt.Sprintf("This plan allows %d custom domain(s). Upgrade your plan at /ui/billing.html.", max)}
 }
 
+// hostedSecret values are ChaCha20-Poly1305 (Red-SecretsXAI) under the apps key,
+// Alg "rsx-chacha20poly1305-v2". Entries without Alg are from the old AES-GCM
+// format: they are refused at startup (ErrLegacyAppSecrets), never decrypted.
 type hostedSecret struct {
 	Name    string    `json:"name"`
+	Alg     string    `json:"alg,omitempty"`
 	Nonce   []byte    `json:"nonce"`
 	CT      []byte    `json:"ct"`
 	Updated time.Time `json:"updated"`
@@ -292,6 +293,18 @@ func openApps(h *Host) (*appStore, error) {
 		if f.Apps != nil {
 			s.apps = f.Apps
 		}
+		var old []string
+		for id, a := range s.apps {
+			for _, sec := range a.Secrets {
+				if sec.Alg != hostedSecretAlg {
+					old = append(old, id+"/"+sec.Name)
+				}
+			}
+		}
+		if len(old) > 0 {
+			sort.Strings(old)
+			return nil, fmt.Errorf("%w: %s in %s. Remove those entries (or the file) and set the secrets again with this version", ErrLegacyAppSecrets, strings.Join(old, ", "), s.path)
+		}
 		s.nextPort = f.NextPort
 	} else if err != nil && !os.IsNotExist(err) {
 		return nil, err
@@ -324,7 +337,7 @@ func loadAppsKey(cfg Config, root string) ([]byte, error) {
 		return nil, err
 	}
 	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
+	if err := rsx.Random(buf); err != nil {
 		return nil, err
 	}
 	enc := base64.StdEncoding.EncodeToString(buf)
@@ -367,41 +380,36 @@ func (s *appStore) saveLocked() error {
 	return os.Rename(tmp, s.path)
 }
 
+const hostedSecretAlg = "rsx-chacha20poly1305-v2"
+
+// ErrLegacyAppSecrets: hosted-app secrets in the old AES-GCM format were found.
+var ErrLegacyAppSecrets = errors.New("hosted apps: unsupported legacy (AES-GCM) app secrets")
+
 func (s *appStore) seal(account, appID, name string, plain []byte) (hostedSecret, error) {
-	block, err := aes.NewCipher(s.key)
+	nonce, err := rsx.RandomBytes(12)
 	if err != nil {
 		return hostedSecret{}, err
 	}
-	gcm, err := cipher.NewGCM(block)
+	ct, tag, err := rsx.AeadEncrypt(s.key, nonce, appsAAD(account, appID, name), plain)
 	if err != nil {
 		return hostedSecret{}, err
 	}
-	nonce := make([]byte, gcm.NonceSize())
-	if _, err := rand.Read(nonce); err != nil {
-		return hostedSecret{}, err
-	}
-	aad := appsAAD(account, appID, name)
-	ct := gcm.Seal(nil, nonce, plain, aad)
-	return hostedSecret{Name: name, Nonce: nonce, CT: ct, Updated: time.Now().UTC()}, nil
+	return hostedSecret{Name: name, Alg: hostedSecretAlg, Nonce: nonce, CT: append(ct, tag[:]...), Updated: time.Now().UTC()}, nil
 }
 
 func (s *appStore) open(account, appID string, sec hostedSecret) ([]byte, error) {
-	block, err := aes.NewCipher(s.key)
-	if err != nil {
-		return nil, err
+	if sec.Alg != hostedSecretAlg {
+		return nil, ErrLegacyAppSecrets
 	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, err
-	}
-	if len(sec.Nonce) != gcm.NonceSize() {
+	if len(sec.Nonce) != 12 || len(sec.CT) < 16 {
 		return nil, errors.New("bad secret")
 	}
-	return gcm.Open(nil, sec.Nonce, sec.CT, appsAAD(account, appID, sec.Name))
+	ct, tag := sec.CT[:len(sec.CT)-16], sec.CT[len(sec.CT)-16:]
+	return rsx.AeadDecrypt(s.key, sec.Nonce, appsAAD(account, appID, sec.Name), ct, tag)
 }
 
 func appsAAD(account, appID, name string) []byte {
-	return []byte("redx-hosted-secret/v1\x00" + account + "\x00" + appID + "\x00" + name)
+	return []byte("redx-hosted-secret/v2\x00" + account + "\x00" + appID + "\x00" + name)
 }
 
 func validAppName(name string) bool {
@@ -511,7 +519,7 @@ func tenantHostLabel(account string) string {
 	if account == "" {
 		account = "operator"
 	}
-	sum := sha256.Sum256([]byte("redx-tenant/v1\x00" + account))
+	sum := rsx.Sha256([]byte("redx-tenant/v1\x00" + account))
 	return hex.EncodeToString(sum[:5])
 }
 
@@ -775,7 +783,7 @@ func tenantUnixID(account string, base, span int) int {
 	if span <= 0 {
 		span = 20000
 	}
-	sum := sha256.Sum256([]byte("redx-app-uid/v1\x00" + account))
+	sum := rsx.Sha256([]byte("redx-app-uid/v1\x00" + account))
 	n := binary.BigEndian.Uint32(sum[:4]) % uint32(span)
 	return base + int(n)
 }
@@ -1076,7 +1084,7 @@ func (h *Host) snapshotRelease(app *hostedApp, deployID, version, dir string) (*
 	if err := os.WriteFile(filepath.Join(dest, id+".tgz"), blob, 0o600); err != nil {
 		return nil, err
 	}
-	sum := sha256.Sum256(blob)
+	sum := rsx.Sha256(blob)
 	return &hostedSnap{ID: id, DeployID: deployID, Version: version, Created: time.Now().UTC(), SHA256: hex.EncodeToString(sum[:]), Size: int64(len(blob))}, nil
 }
 
@@ -1226,5 +1234,5 @@ func secretEqual(a, b string) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+	return rsx.CtEq([]byte(a), []byte(b))
 }

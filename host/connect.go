@@ -1,10 +1,6 @@
 package host
 
 import (
-	"crypto/hmac"
-	"crypto/rand"
-	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -15,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"redx/internal/rsx"
 	"regexp"
 	"sort"
 	"strconv"
@@ -92,7 +89,7 @@ func AppWorkspaceName(appID string) string {
 	if len(base) > 40 {
 		base = base[:40]
 	}
-	s := sha256.Sum256([]byte(appID))
+	s := rsx.Sha256([]byte(appID))
 	return "ra-" + base + "-" + hex.EncodeToString(s[:])[:8]
 }
 
@@ -178,7 +175,9 @@ func openConnectStore(dataDir string) *connectStore {
 		s.key = b
 	} else {
 		s.key = make([]byte, 32)
-		_, _ = rand.Read(s.key)
+		if err := rsx.Random(s.key); err != nil {
+			panic(err)
+		}
 		if err := atomicWrite(kp, s.key); err != nil {
 			s.err = err
 		}
@@ -208,10 +207,10 @@ func (s *connectStore) saveLocked() error {
 	return os.Chmod(p, 0o600)
 }
 
-func sha(s string) string { x := sha256.Sum256([]byte(s)); return hex.EncodeToString(x[:]) }
+func sha(s string) string { x := rsx.Sha256([]byte(s)); return hex.EncodeToString(x[:]) }
 
 func (s *connectStore) requestID(provider, app, state string) string {
-	m := hmac.New(sha256.New, s.key)
+	m := rsx.NewHMACSHA256(s.key)
 	m.Write([]byte(provider + "\x00" + app + "\x00" + state))
 	return "rq_" + base64.RawURLEncoding.EncodeToString(m.Sum(nil))
 }
@@ -243,7 +242,7 @@ func (s *connectStore) expireLocked(now time.Time) bool {
 func (s *connectStore) byID(id string) *connectReq {
 	hs := sha(id)
 	for _, r := range s.f.Requests {
-		if subtle.ConstantTimeCompare([]byte(r.IDHash), []byte(hs)) == 1 {
+		if rsx.CtEq([]byte(r.IDHash), []byte(hs)) {
 			return r
 		}
 	}
@@ -844,7 +843,7 @@ func (h *Host) connectExchange(w http.ResponseWriter, r *http.Request) {
 	ch := sha(code)
 	var q *connectReq
 	for _, x := range s.f.Requests {
-		if x.CodeHash != "" && subtle.ConstantTimeCompare([]byte(x.CodeHash), []byte(ch)) == 1 {
+		if x.CodeHash != "" && rsx.CtEq([]byte(x.CodeHash), []byte(ch)) {
 			q = x
 		}
 	}
@@ -882,13 +881,13 @@ func (h *Host) connectExchange(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	bad := ""
-	if !reState.MatchString(in.State) || subtle.ConstantTimeCompare([]byte(sha(in.State)), []byte(q.StateHash)) != 1 {
+	if !reState.MatchString(in.State) || !rsx.CtEq([]byte(sha(in.State)), []byte(q.StateHash)) {
 		bad = "state_mismatch"
 	} else if !reVerifier.MatchString(in.PKCEVerifier) {
 		bad = "pkce_mismatch"
 	} else {
-		d := sha256.Sum256([]byte(in.PKCEVerifier))
-		if subtle.ConstantTimeCompare([]byte(base64.RawURLEncoding.EncodeToString(d[:])), []byte(q.Challenge)) != 1 {
+		d := rsx.Sha256([]byte(in.PKCEVerifier))
+		if !rsx.CtEq([]byte(base64.RawURLEncoding.EncodeToString(d[:])), []byte(q.Challenge)) {
 			bad = "pkce_mismatch"
 		}
 	}

@@ -1,10 +1,10 @@
 package idx
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"redx/internal/rsx"
 	"strings"
 
 	"redx/box"
@@ -84,7 +84,7 @@ func (d *Decl) Validate() error {
 // hash identifies the declaration; a snapshot built from another
 // declaration is never reused.
 func (d *Decl) hash() string {
-	h := sha256.Sum256([]byte(fmt.Sprintf("%q|%q|%q|%s|%t|%q", d.Name, d.File, d.Box, d.Kind, d.Fold, d.Fields)))
+	h := rsx.Sha256([]byte(fmt.Sprintf("%q|%q|%q|%s|%t|%q", d.Name, d.File, d.Box, d.Kind, d.Fold, d.Fields)))
 	return hex.EncodeToString(h[:])
 }
 

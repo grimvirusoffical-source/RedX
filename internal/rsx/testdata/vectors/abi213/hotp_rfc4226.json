@@ -1,0 +1,46 @@
+{
+ "source": "RFC 4226 Appendix D: key ASCII 12345678901234567890, 6 digits",
+ "key": "3132333435363738393031323334353637383930",
+ "vectors": [
+  {
+   "counter": 0,
+   "code": "755224"
+  },
+  {
+   "counter": 1,
+   "code": "287082"
+  },
+  {
+   "counter": 2,
+   "code": "359152"
+  },
+  {
+   "counter": 3,
+   "code": "969429"
+  },
+  {
+   "counter": 4,
+   "code": "338314"
+  },
+  {
+   "counter": 5,
+   "code": "254676"
+  },
+  {
+   "counter": 6,
+   "code": "287922"
+  },
+  {
+   "counter": 7,
+   "code": "162583"
+  },
+  {
+   "counter": 8,
+   "code": "399871"
+  },
+  {
+   "counter": 9,
+   "code": "520489"
+  }
+ ]
+}

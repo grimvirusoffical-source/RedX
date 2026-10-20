@@ -12,14 +12,13 @@ package redx
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"crypto/subtle"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/grimvirusoffical-source/RedX/sdk/go/internal/rsx"
 	"io"
 	"net/http"
 	"net/url"
@@ -200,8 +199,8 @@ func pinnedTLS(pin string) *tls.Config {
 			if len(raw) == 0 {
 				return errors.New("no peer certificate")
 			}
-			sum := sha256.Sum256(raw[0])
-			if subtle.ConstantTimeCompare([]byte(hex.EncodeToString(sum[:])), []byte(pin)) != 1 {
+			sum := rsx.Sha256(raw[0])
+			if !rsx.CtEq([]byte(hex.EncodeToString(sum[:])), []byte(pin)) {
 				return errors.New("peer certificate does not match the pinned fingerprint")
 			}
 			return nil
@@ -382,7 +381,7 @@ func (c *Client) Call(ctx context.Context, id string, a Args) (*Result, error) {
 			h.Set("Content-Type", "application/octet-stream")
 		}
 		if h.Get("X-Redx-SHA256") == "" {
-			sum := sha256.Sum256(a.Raw)
+			sum := rsx.Sha256(a.Raw)
 			h.Set("X-Redx-SHA256", hex.EncodeToString(sum[:]))
 		}
 	}

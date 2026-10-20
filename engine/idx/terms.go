@@ -1,9 +1,9 @@
 package idx
 
 import (
-	"crypto/sha256"
 	"encoding/binary"
 	"math"
+	"redx/internal/rsx"
 	"sort"
 	"strconv"
 	"strings"
@@ -174,7 +174,7 @@ func Tokenize(s string) []string {
 
 // recDigest checksums one record's contribution (address and terms).
 func recDigest(a Addr, terms []term) [32]byte {
-	h := sha256.New()
+	h := rsx.NewSHA256()
 	h.Write([]byte(a.String()))
 	h.Write([]byte{'\n'})
 	for _, t := range terms {

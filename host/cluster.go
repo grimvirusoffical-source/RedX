@@ -3,9 +3,6 @@ package host
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"crypto/subtle"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
@@ -18,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"redx/internal/rsx"
 	"sort"
 	"strconv"
 	"strings"
@@ -135,7 +133,9 @@ type Cluster struct {
 
 func randHex(n int) string {
 	b := make([]byte, n)
-	_, _ = rand.Read(b)
+	if err := rsx.Random(b); err != nil {
+		panic(err)
+	}
 	return hex.EncodeToString(b)
 }
 
@@ -227,8 +227,8 @@ func pinnedTLS(pin string) *tls.Config {
 			if len(raw) == 0 {
 				return errors.New("no peer certificate")
 			}
-			sum := sha256.Sum256(raw[0])
-			if subtle.ConstantTimeCompare([]byte(hex.EncodeToString(sum[:])), []byte(pin)) != 1 {
+			sum := rsx.Sha256(raw[0])
+			if !rsx.CtEq([]byte(hex.EncodeToString(sum[:])), []byte(pin)) {
 				return errors.New("peer certificate does not match pinned fingerprint")
 			}
 			return nil
@@ -798,16 +798,16 @@ func (c *Cluster) nodeAuth(w http.ResponseWriter, r *http.Request) (string, bool
 	id := r.Header.Get("X-Redx-Node")
 	ok := false
 	if tok != "" && id != "" && len(id) < 128 {
-		sum := sha256.Sum256([]byte(tok))
+		sum := rsx.Sha256([]byte(tok))
 		sh := hex.EncodeToString(sum[:])
 		c.mu.Lock()
 		for _, m := range c.members {
-			if m.SecretHash != "" && subtle.ConstantTimeCompare([]byte(m.SecretHash), []byte(sh)) == 1 && m.ID == id {
+			if m.SecretHash != "" && rsx.CtEq([]byte(m.SecretHash), []byte(sh)) && m.ID == id {
 				ok = true
 			}
 		}
 		c.mu.Unlock()
-		if !ok && c.h.Cfg.ClusterKey != "" && subtle.ConstantTimeCompare([]byte(tok), []byte(c.h.Cfg.ClusterKey)) == 1 {
+		if !ok && c.h.Cfg.ClusterKey != "" && rsx.CtEq([]byte(tok), []byte(c.h.Cfg.ClusterKey)) {
 			ok = true
 		}
 	}
@@ -965,7 +965,9 @@ func newPairCode() string {
 func randInt(n int) int {
 	var b [1]byte
 	for {
-		_, _ = rand.Read(b[:])
+		if err := rsx.Random(b[:]); err != nil {
+			panic(err)
+		}
 		// rejection sampling keeps the distribution uniform
 		if int(b[0]) < 256-256%n {
 			return int(b[0]) % n
@@ -1019,7 +1021,7 @@ func (c *Cluster) handleJoinToken(w http.ResponseWriter, r *http.Request, p *Pri
 	if body.Kind == "code" {
 		tok = newPairCode()
 	}
-	sum := sha256.Sum256([]byte(tok))
+	sum := rsx.Sha256([]byte(tok))
 	exp := time.Now().Add(ttl)
 	c.mu.Lock()
 	for k, v := range c.tokens {
@@ -1066,7 +1068,7 @@ func (c *Cluster) handleJoin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "token and node_id required")
 		return
 	}
-	sum := sha256.Sum256([]byte(NormalizeJoinSecret(jr.Token)))
+	sum := rsx.Sha256([]byte(NormalizeJoinSecret(jr.Token)))
 	c.mu.Lock()
 	exp, ok := c.tokens[sum]
 	if ok {
@@ -1084,7 +1086,7 @@ func (c *Cluster) handleJoin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	secret := "rxn_" + randBase62(43)
-	ssum := sha256.Sum256([]byte(secret))
+	ssum := rsx.Sha256([]byte(secret))
 	c.mu.Lock()
 	c.members[jr.NodeID] = &Member{ID: jr.NodeID, Addr: jr.Addr, Role: "follower", LastSeen: time.Now().UTC(), SecretHash: hex.EncodeToString(ssum[:]), Joined: time.Now().UTC()}
 	c.saveMembers()

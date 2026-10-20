@@ -2,7 +2,6 @@ package host
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -10,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"redx/billing"
+	"redx/internal/rsx"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -213,7 +213,9 @@ func loadOrCreateNodeID(dir string) (string, error) {
 		}
 	}
 	buf := make([]byte, 6)
-	_, _ = rand.Read(buf)
+	if err := rsx.Random(buf); err != nil {
+		panic(err)
+	}
 	id := "node-" + hex.EncodeToString(buf)
 	return id, os.WriteFile(p, []byte(id+"\n"), 0o600)
 }

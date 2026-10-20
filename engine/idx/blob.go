@@ -1,11 +1,11 @@
 package idx
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
+	"redx/internal/rsx"
 	"strings"
 	"sync"
 )
@@ -59,7 +59,7 @@ func (d DirBlob) fileName(name string) string {
 			break
 		}
 	}
-	h := sha256.Sum256([]byte(name))
+	h := rsx.Sha256([]byte(name))
 	return sb.String() + "-" + hex.EncodeToString(h[:4]) + ".idxsnap"
 }
 

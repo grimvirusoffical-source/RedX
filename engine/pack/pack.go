@@ -2,12 +2,12 @@ package pack
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"hash"
 	"io"
+	"redx/internal/rsx"
 	"sort"
 	"sync"
 )
@@ -245,7 +245,7 @@ func (p *Pack) Put(path string, r io.Reader) (Info, error) {
 
 	cs := p.cfg.ChunkSize
 	buf := make([]byte, cs)
-	whole := sha256.New()
+	whole := rsx.NewSHA256()
 	var size int64
 	var ids []string
 	for {
@@ -380,7 +380,7 @@ func (p *Pack) Get(path string) (io.ReadCloser, Info, error) {
 	if info.IsDir {
 		return nil, Info{}, fmt.Errorf("%w: %s", ErrIsDir, info.Path)
 	}
-	return &reader{p: p, info: info, whole: sha256.New()}, info, nil
+	return &reader{p: p, info: info, whole: rsx.NewSHA256()}, info, nil
 }
 
 type reader struct {

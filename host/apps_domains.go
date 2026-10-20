@@ -1,13 +1,13 @@
 package host
 
 import (
-	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
+	"redx/internal/rsx"
 	"strings"
 	"time"
 )
@@ -80,7 +80,9 @@ func (h *Host) hostedAddDomain(w http.ResponseWriter, r *http.Request, id string
 		return
 	}
 	buf := make([]byte, 16)
-	_, _ = rand.Read(buf)
+	if err := rsx.Random(buf); err != nil {
+		panic(err)
+	}
 	token := hex.EncodeToString(buf)
 	now := time.Now().UTC()
 	updated := false

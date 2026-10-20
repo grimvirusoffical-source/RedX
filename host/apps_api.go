@@ -1,7 +1,6 @@
 package host
 
 import (
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"redx/internal/rsx"
 	"strconv"
 	"strings"
 	"time"
@@ -1271,7 +1271,7 @@ func canaryHit(r *http.Request, pct int) bool {
 	if pct <= 0 {
 		return false
 	}
-	sum := sha256.Sum256([]byte(socketIP(r) + " " + r.URL.Path))
+	sum := rsx.Sha256([]byte(socketIP(r) + " " + r.URL.Path))
 	return int(sum[0])%100 < pct
 }
 

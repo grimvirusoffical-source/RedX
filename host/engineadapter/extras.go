@@ -3,13 +3,13 @@ package engineadapter
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"redx/internal/rsx"
 	"sort"
 	"strconv"
 	"strings"
@@ -850,7 +850,7 @@ func (r *rangeReader) Read(b []byte) (int, error) {
 		if ci == int64(len(r.info.Chunks))-1 {
 			want = r.info.Size - ci*cs
 		}
-		sum := sha256.Sum256(data)
+		sum := rsx.Sha256(data)
 		if int64(len(data)) != want || hex.EncodeToString(sum[:]) != id {
 			r.err = fmt.Errorf("%w: chunk %d failed its size/hash check", host.ErrCorrupt, ci)
 			return 0, r.err

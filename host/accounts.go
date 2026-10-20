@@ -13,8 +13,6 @@ package host
 // acting owner. Everyone else cannot tell that the master database exists.
 
 import (
-	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -22,6 +20,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"redx/internal/rsx"
 	"strings"
 	"sync"
 	"time"
@@ -257,11 +256,11 @@ func newAccountStore() *accountStore {
 		signups: map[string]*acctSignup{}, streams: map[string]map[int]func(){}, now: time.Now}
 }
 
-func tokHash(t string) string { s := sha256.Sum256([]byte(t)); return hex.EncodeToString(s[:]) }
+func tokHash(t string) string { s := rsx.Sha256([]byte(t)); return hex.EncodeToString(s[:]) }
 
 func randToken(prefix string) string {
 	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
+	if err := rsx.Random(b); err != nil {
 		panic(err)
 	}
 	return prefix + base64.RawURLEncoding.EncodeToString(b)

@@ -1,11 +1,11 @@
 package host
 
 import (
-	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
+	"redx/internal/rsx"
 	"time"
 )
 
@@ -25,7 +25,9 @@ type applyInput struct {
 
 func newUpdateID(prefix string) string {
 	buf := make([]byte, 8)
-	_, _ = rand.Read(buf)
+	if err := rsx.Random(buf); err != nil {
+		panic(err)
+	}
 	return prefix + hex.EncodeToString(buf)
 }
 

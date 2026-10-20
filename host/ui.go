@@ -1,7 +1,6 @@
 package host
 
 import (
-	"crypto/sha256"
 	"embed"
 	"encoding/hex"
 	"encoding/json"
@@ -12,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"redx/internal/rsx"
 	"strconv"
 	"strings"
 	"time"
@@ -43,7 +43,7 @@ func init() {
 			return nil
 		}
 		b, _ := uiFS.ReadFile(p)
-		sum := sha256.Sum256(b)
+		sum := rsx.Sha256(b)
 		uiFiles[strings.TrimPrefix(p, "ui/")] = uiAsset{data: b, etag: `"` + hex.EncodeToString(sum[:8]) + `"`, ctyp: uiContentType(p)}
 		return nil
 	})

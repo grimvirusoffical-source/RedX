@@ -3,11 +3,11 @@ package host
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"redx/internal/rsx"
 	"strconv"
 	"strings"
 	"time"
@@ -703,7 +703,7 @@ func (h *Host) mediaItem(w http.ResponseWriter, r *http.Request, db, lib, verb, 
 			}
 		}
 		h.pause.RLock()
-		sr := &sumReader{r: r.Body, h: sha256.New(), want: want}
+		sr := &sumReader{r: r.Body, h: rsx.NewSHA256(), want: want}
 		m, err := ex.MediaPut(lib, name, declared, sr)
 		h.pause.RUnlock()
 		if err != nil {

@@ -1,10 +1,9 @@
 package host
 
 import (
-	"crypto/rand"
-	"crypto/sha256"
 	"encoding/json"
 	"net/http"
+	"redx/internal/rsx"
 	"strings"
 	"sync"
 	"time"
@@ -53,7 +52,7 @@ func (p *pairStore) clock() time.Time {
 
 func newSignInCode() (string, error) {
 	b := make([]byte, 10)
-	if _, err := rand.Read(b); err != nil {
+	if err := rsx.Random(b); err != nil {
 		return "", err
 	}
 	out := make([]byte, 0, 13)
@@ -140,7 +139,7 @@ func (p *pairStore) issue(spec CreateSpec, by string) (string, time.Time, bool) 
 		return "", time.Time{}, false
 	}
 	e := pairEntry{spec: spec, by: by, expires: now.Add(pairTTL)}
-	p.pending[sha256.Sum256([]byte(code))] = e
+	p.pending[rsx.Sha256([]byte(code))] = e
 	return code, e.expires, true
 }
 
@@ -159,7 +158,7 @@ func (p *pairStore) redeem(code, client string) (pairEntry, pairResult) {
 	now := p.clock()
 	p.prune(now)
 	n := normPairCode(code)
-	ck := sha256.Sum256([]byte(n))
+	ck := rsx.Sha256([]byte(n))
 	if len(p.fails[client]) >= pairFailPerIP || (n != "" && len(p.codes[ck]) >= pairFailPerCode) || len(p.all) >= pairFailTotal {
 		return pairEntry{}, pairThrottled
 	}

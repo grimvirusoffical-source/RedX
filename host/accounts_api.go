@@ -2,11 +2,11 @@ package host
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
+	"redx/internal/rsx"
 	"strconv"
 	"strings"
 	"time"
@@ -178,7 +178,7 @@ func (h *Host) authCallback(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	state := q.Get("state")
 	c, err := r.Cookie(oidcCookie)
-	if state == "" || err != nil || subtle.ConstantTimeCompare([]byte(c.Value), []byte(state)) != 1 {
+	if state == "" || err != nil || !rsx.CtEq([]byte(c.Value), []byte(state)) {
 		h.Audit.Log(AuditEvent{Event: "account.signin.fail", Remote: remoteIP(r), Reason: "state missing or not from this browser"})
 		fail("state")
 		return

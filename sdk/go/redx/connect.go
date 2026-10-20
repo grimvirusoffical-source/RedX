@@ -2,11 +2,9 @@ package redx
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base64"
 	"errors"
+	"github.com/grimvirusoffical-source/RedX/sdk/go/internal/rsx"
 	"net/url"
 )
 
@@ -19,12 +17,12 @@ type ConnectRequest struct {
 // NewConnectRequest makes a fresh state (192 bits) and PKCE S256 pair.
 func NewConnectRequest() (ConnectRequest, error) {
 	b := make([]byte, 56)
-	if _, err := rand.Read(b); err != nil {
+	if err := rsx.Random(b); err != nil {
 		return ConnectRequest{}, err
 	}
 	enc := base64.RawURLEncoding
 	v := enc.EncodeToString(b[:32])
-	sum := sha256.Sum256([]byte(v))
+	sum := rsx.Sha256([]byte(v))
 	return ConnectRequest{State: enc.EncodeToString(b[32:]), Verifier: v, Challenge: enc.EncodeToString(sum[:])}, nil
 }
 
@@ -70,7 +68,7 @@ func ParseCallback(raw, expectedState string) (Callback, error) {
 	if cb.Code == "" {
 		return Callback{}, &Error{Code: "bad_callback", Message: "callback carries no code"}
 	}
-	if len(cb.State) != len(expectedState) || subtle.ConstantTimeCompare([]byte(cb.State), []byte(expectedState)) != 1 {
+	if len(cb.State) != len(expectedState) || !rsx.CtEq([]byte(cb.State), []byte(expectedState)) {
 		return Callback{}, &Error{Code: "state_mismatch", Message: "callback state does not match"}
 	}
 	return cb, nil

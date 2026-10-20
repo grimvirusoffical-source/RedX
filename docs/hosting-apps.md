@@ -104,9 +104,9 @@ listen address with `tls { on_demand }` and the ask URL above. Also proxy
 Non-secret variables are `PUT /v1/hosted/apps/{id}/env` with `{"vars":{...}}`. Names match
 `[A-Z_][A-Z0-9_]*`. `REDX_KEY` and `REDX_URL` cannot be set, and a value that is a loopback, private, `.internal`, `.local`, or port 7777/7780 URL is refused. Changing env or secrets after a deploy sets `needsRedeploy`. The console asks for a restart, which counts as one host switch and injects the new file.
 
-Secrets are `PUT /v1/hosted/apps/{id}/secrets/{name}` with `{"value":"..."}`. They are AES-256-GCM with
+Secrets are `PUT /v1/hosted/apps/{id}/secrets/{name}` with `{"value":"..."}`. They are ChaCha20-Poly1305 (Red-SecretsXAI) with
 the key from `REDX_APPS_SECRET_KEY` or `<data>/hosted/secret.key` (mode 0600, created once). The API,
-the console and the audit log show a mask, never the value. Changes are audit-logged as
+the console and the audit log show a mask, never the value. Secrets stored in the old AES-GCM format stop redxd at startup with a message naming them; remove them and set them again. Changes are audit-logged as
 `app.secret.set` / `app.secret.delete` with the name only. The runtime env file
 `<data>/hosted/apps/<id>/env` (mode 0600) holds the plaintext for podman and is not served by the API.
 

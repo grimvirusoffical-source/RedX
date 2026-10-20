@@ -20,7 +20,7 @@ The current version is 0.4.5.
 * Asynchronous leader/follower replication with offset resume and snapshot fallback; pairing codes to add nodes; manual promote that fences the old leader.
 * App connect: an app gets its own workspace and a scoped key after the owner approves it in the console.
 * Online and offline backup and restore.
-* Access policy documents, pack encryption (AES-256-GCM) and sandboxed scripts.
+* Access policy documents, pack encryption (ChaCha20-Poly1305, Red-SecretsXAI) and sandboxed scripts.
 * Installers for systemd, launchd and Windows services, a Dockerfile, and unsigned desktop installers (Windows setup, macOS `.dmg` / `.pkg`, Debian `.deb`).
 
 ## Install

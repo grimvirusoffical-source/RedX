@@ -4,9 +4,6 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -17,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"redx/internal/rsx"
 	"strconv"
 	"strings"
 	"time"
@@ -53,7 +51,7 @@ func (a *archiveWriter) addFile(name string, path string, fi os.FileInfo) error 
 		return err
 	}
 	defer f.Close()
-	h := sha256.New()
+	h := rsx.NewSHA256()
 	n, err := io.Copy(io.MultiWriter(a.tw, h), f)
 	if err != nil {
 		return err
@@ -72,7 +70,7 @@ func (a *archiveWriter) addBytes(name string, b []byte) error {
 	if _, err := a.tw.Write(b); err != nil {
 		return err
 	}
-	sum := sha256.Sum256(b)
+	sum := rsx.Sha256(b)
 	a.man[name] = manifestEntry{SHA256: hex.EncodeToString(sum[:]), Size: int64(len(b))}
 	return nil
 }
@@ -226,7 +224,7 @@ func hashedRead(tr io.Reader, limit int64, name string, seen map[string]manifest
 	if int64(len(b)) > limit {
 		return nil, fmt.Errorf("snapshot: %s is too large", name)
 	}
-	sum := sha256.Sum256(b)
+	sum := rsx.Sha256(b)
 	seen[name] = manifestEntry{SHA256: hex.EncodeToString(sum[:]), Size: int64(len(b))}
 	return b, nil
 }
@@ -336,7 +334,7 @@ func ExtractSnapshot(r io.Reader, destDBs string) (*SnapshotContents, error) {
 				if err != nil {
 					return nil, err
 				}
-				h := sha256.New()
+				h := rsx.NewSHA256()
 				n, err := io.Copy(io.MultiWriter(f, h), tr)
 				if err != nil {
 					f.Close()
@@ -594,7 +592,7 @@ func (h *Host) signingKeyMaterial() (key, meta []byte) {
 		priv := h.upd.priv
 		until := h.upd.notAfter
 		h.upd.mu.Unlock()
-		if len(priv) == ed25519.PrivateKeySize {
+		if len(priv) == edPrivateKeySize {
 			key = []byte(base64.StdEncoding.EncodeToString(priv.Seed()) + "\n")
 			b, err := json.Marshal(map[string]string{"not_after": until.UTC().Format(time.RFC3339)})
 			if err == nil {
@@ -692,14 +690,14 @@ func offlineCopy(dataDir string, w io.Writer, pass string) error {
 
 func requestLiveBackup(dataDir string, w io.Writer) error {
 	var buf [16]byte
-	if _, err := rand.Read(buf[:]); err != nil {
+	if err := rsx.Random(buf[:]); err != nil {
 		return err
 	}
 	id := hex.EncodeToString(buf[:])
 	// One-time key: the daemon encrypts its answer under it, so the archive is never
 	// written to disk in plaintext. Only the 0600 request file holds it, and it is removed.
 	ek := make([]byte, 32)
-	if _, err := rand.Read(ek); err != nil {
+	if err := rsx.Random(ek); err != nil {
 		return err
 	}
 	dir := filepath.Join(dataDir, "backup")

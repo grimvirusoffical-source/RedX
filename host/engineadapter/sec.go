@@ -1,12 +1,12 @@
 package engineadapter
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"redx/internal/rsx"
 	"regexp"
 	"sort"
 	"strings"
@@ -121,7 +121,7 @@ func (st *secState) principalFor(p host.SecPrincipal) (sec.Principal, error) {
 	if err != nil {
 		return sec.Principal{}, err
 	}
-	sum := sha256.Sum256([]byte(p.Prefix))
+	sum := rsx.Sha256([]byte(p.Prefix))
 	name := genScopePrefx + p.Scope + "." + hex.EncodeToString(sum[:4])
 	pr := sec.Principal{ID: p.KeyID, Roles: p.Roles, Scopes: []string{name}}
 	st.mu.Lock()

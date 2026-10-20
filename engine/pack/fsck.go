@@ -1,10 +1,10 @@
 package pack
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"redx/internal/rsx"
 	"sort"
 )
 
@@ -190,7 +190,7 @@ func (p *Pack) checkFile(rep *Report, f *Info, refs map[string]bool, deep bool) 
 		rep.Problems = append(rep.Problems, Problem{Path: f.Path, Chunk: i, ID: id,
 			Err: &ChunkError{Path: f.Path, Index: i, ID: id, Err: kind, Why: why}})
 	}
-	whole := sha256.New()
+	whole := rsx.NewSHA256()
 	clean := true
 	for i, id := range f.Chunks {
 		refs[id] = true

@@ -1,10 +1,9 @@
 package billing
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"redx/internal/rsx"
 	"strconv"
 	"strings"
 	"time"
@@ -39,13 +38,13 @@ func VerifySignature(payload []byte, header, secret string, now time.Time, toler
 	if d := now.Sub(time.Unix(ts, 0)); d > tolerance || d < -tolerance {
 		return ErrBadSignature
 	}
-	mac := hmac.New(sha256.New, []byte(secret))
+	mac := rsx.NewHMACSHA256([]byte(secret))
 	mac.Write([]byte(strconv.FormatInt(ts, 10) + "."))
 	mac.Write(payload)
 	want := mac.Sum(nil)
 	for _, s := range sigs {
 		got, err := hex.DecodeString(s)
-		if err == nil && hmac.Equal(got, want) {
+		if err == nil && rsx.CtEq(got, want) {
 			return nil
 		}
 	}
@@ -54,7 +53,7 @@ func VerifySignature(payload []byte, header, secret string, now time.Time, toler
 
 // Sign makes a Stripe-Signature header (tests and local tools).
 func Sign(payload []byte, secret string, t time.Time) string {
-	mac := hmac.New(sha256.New, []byte(secret))
+	mac := rsx.NewHMACSHA256([]byte(secret))
 	ts := strconv.FormatInt(t.Unix(), 10)
 	mac.Write([]byte(ts + "."))
 	mac.Write(payload)

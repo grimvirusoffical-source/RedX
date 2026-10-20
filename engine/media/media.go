@@ -2,11 +2,11 @@ package media
 
 import (
 	"bytes"
-	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"redx/internal/rsx"
 	"sort"
 	"strings"
 	"sync"
@@ -131,7 +131,7 @@ func (l *limitReader) Read(p []byte) (int, error) {
 
 func newToken() (string, error) {
 	var b [16]byte
-	if _, err := io.ReadFull(rand.Reader, b[:]); err != nil {
+	if err := rsx.Random(b[:]); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(b[:]), nil

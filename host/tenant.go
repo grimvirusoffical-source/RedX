@@ -1,13 +1,13 @@
 package host
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
+	"redx/internal/rsx"
 	"sort"
 	"strings"
 	"sync"
@@ -36,7 +36,7 @@ func TenantPhysicalName(account, logical string) (string, error) {
 	if account == "" || !ValidDBName(logical) || len(logical) > tenantNameMax {
 		return "", errors.New("invalid database name")
 	}
-	sum := sha256.Sum256([]byte("redx-tenant/v1\x00" + account))
+	sum := rsx.Sha256([]byte("redx-tenant/v1\x00" + account))
 	name := "t" + hex.EncodeToString(sum[:5]) + "_" + logical
 	if !ValidDBName(name) {
 		return "", errors.New("invalid database name")

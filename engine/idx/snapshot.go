@@ -2,9 +2,9 @@ package idx
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"redx/internal/rsx"
 	"sort"
 	"strconv"
 
@@ -28,7 +28,7 @@ const snapVersion = 1
 const sealPrefix = "{Seal[]} = \""
 
 func seal(body string) []byte {
-	h := sha256.Sum256([]byte(body))
+	h := rsx.Sha256([]byte(body))
 	return []byte(body + sealPrefix + hex.EncodeToString(h[:]) + "\";\n")
 }
 
@@ -41,7 +41,7 @@ func unseal(data []byte) (string, error) {
 	if len(rest) != 64+3 || string(rest[64:]) != "\";\n" {
 		return "", fmt.Errorf("%w: malformed seal", ErrCorrupt)
 	}
-	h := sha256.Sum256(data[:i])
+	h := rsx.Sha256(data[:i])
 	if hex.EncodeToString(h[:]) != string(rest[:64]) {
 		return "", fmt.Errorf("%w: checksum mismatch", ErrCorrupt)
 	}

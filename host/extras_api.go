@@ -2,8 +2,6 @@ package host
 
 import (
 	"bufio"
-	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -12,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"path"
+	"redx/internal/rsx"
 	"regexp"
 	"strconv"
 	"strings"
@@ -612,7 +611,7 @@ func (s *sumReader) Read(p []byte) (int, error) {
 	n, err := s.r.Read(p)
 	s.h.Write(p[:n])
 	if err == io.EOF && s.want != "" {
-		if subtle.ConstantTimeCompare([]byte(hex.EncodeToString(s.h.Sum(nil))), []byte(s.want)) != 1 {
+		if !rsx.CtEq([]byte(hex.EncodeToString(s.h.Sum(nil))), []byte(s.want)) {
 			return n, errChecksum
 		}
 	}
@@ -662,7 +661,7 @@ func (h *Host) packFile(w http.ResponseWriter, r *http.Request, db, pack, p, acl
 			return
 		}
 		h.pause.RLock()
-		sr := &sumReader{r: r.Body, h: sha256.New(), want: want}
+		sr := &sumReader{r: r.Body, h: rsx.NewSHA256(), want: want}
 		f, err := ex.PackPut(pack, p, sr)
 		h.pause.RUnlock()
 		if err != nil {

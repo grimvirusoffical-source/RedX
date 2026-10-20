@@ -3,8 +3,6 @@ package host
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -15,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"redx/internal/rsx"
 	"strings"
 	"time"
 )
@@ -715,14 +714,14 @@ func hubSigOK(secret, body []byte, header string) bool {
 	if !strings.HasPrefix(header, pfx) || len(secret) == 0 {
 		return false
 	}
-	mac := hmac.New(sha256.New, secret)
+	mac := rsx.NewHMACSHA256(secret)
 	mac.Write(body)
 	want := mac.Sum(nil)
 	got, err := hex.DecodeString(strings.TrimSpace(header[len(pfx):]))
 	if err != nil || len(got) != len(want) {
 		return false
 	}
-	return hmac.Equal(got, want)
+	return rsx.CtEq(got, want)
 }
 
 type gitHook struct {
@@ -830,7 +829,7 @@ func (u *updater) ingestRelease(ctx context.Context, base string, p gitHook) err
 		if err != nil {
 			return errBadSig
 		}
-		if !hmac.Equal([]byte(sha256Hex(b)), []byte(want)) {
+		if !rsx.CtEq([]byte(sha256Hex(b)), []byte(want)) {
 			return errBadSig
 		}
 		files[a.name] = b

@@ -6,7 +6,6 @@ import (
 	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/elliptic"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -15,6 +14,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/url"
+	"redx/internal/rsx"
 	"strings"
 	"sync"
 	"time"
@@ -281,7 +281,7 @@ func (c *oidcClient) verifyIDToken(ctx context.Context, raw, nonce string) (*idC
 	if err != nil {
 		return nil, err
 	}
-	sum := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
+	sum := rsx.Sha256([]byte(parts[0] + "." + parts[1]))
 	if !ecdsa.Verify(pk, sum[:], new(big.Int).SetBytes(sig[:32]), new(big.Int).SetBytes(sig[32:])) {
 		return nil, errors.New("ID token signature is not valid")
 	}
@@ -408,6 +408,6 @@ func (c *oidcClient) backChannel(ctx context.Context, method, path string) (int,
 }
 
 func pkceChallenge(verifier string) string {
-	s := sha256.Sum256([]byte(verifier))
+	s := rsx.Sha256([]byte(verifier))
 	return base64.RawURLEncoding.EncodeToString(s[:])
 }

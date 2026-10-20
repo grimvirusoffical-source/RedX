@@ -6,7 +6,7 @@ import (
 	"os"
 )
 
-// RSX3 format v2 (ver byte 4). Layout (see internal/format.md):
+// RSX3 format v2 (ver byte 4). Layout (see docs/spec/containers.md):
 //
 //	"RSX3" | hdr_body{ver=4, flags=1, wrap_nonce12, wdek_ct32, wdek_tag16, aad_len2, aad}
 //	| prefix8 | header_tag16 | chunks{len3, ct, tag16}*

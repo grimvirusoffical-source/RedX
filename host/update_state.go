@@ -1,9 +1,6 @@
 package host
 
 import (
-	"crypto/ed25519"
-	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -13,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"redx/internal/rsx"
 	"sort"
 	"strings"
 	"sync"
@@ -141,8 +139,8 @@ type updater struct {
 	mu       sync.Mutex
 	st       diskState
 	dir      string
-	priv     ed25519.PrivateKey
-	pub      ed25519.PublicKey
+	priv     edPrivateKey
+	pub      []byte
 	kid      string
 	notAfter time.Time
 
@@ -176,8 +174,8 @@ func openUpdater(h *Host) (*updater, error) {
 	if err != nil {
 		return nil, err
 	}
-	pub := priv.Public().(ed25519.PublicKey)
-	sum := sha256.Sum256(pub)
+	pub := priv.Public()
+	sum := rsx.Sha256(pub)
 	u := &updater{
 		h: h, dir: dir, priv: priv, pub: pub, notAfter: notAfter,
 		kid: hex.EncodeToString(sum[:8]),
@@ -276,7 +274,7 @@ func (u *updater) verify(body []byte, sig string) error {
 	return verifyManifestBytes(u.pub, body, sig)
 }
 
-func loadSigningKey(h *Host, dir string) (ed25519.PrivateKey, time.Time, error) {
+func loadSigningKey(h *Host, dir string) (edPrivateKey, time.Time, error) {
 	if s := strings.TrimSpace(os.Getenv("REDX_UPDATE_SIGNING_KEY")); s != "" {
 		k, err := parseSigningKey(s)
 		if err != nil {
@@ -295,7 +293,7 @@ func loadSigningKey(h *Host, dir string) (ed25519.PrivateKey, time.Time, error) 
 	if st, err := os.Stat(path); err == nil && !st.IsDir() {
 		return readSigningKeyFile(path, true)
 	}
-	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	priv, err := edGenerateKey()
 	if err != nil {
 		return nil, time.Time{}, err
 	}
@@ -309,7 +307,7 @@ func loadSigningKey(h *Host, dir string) (ed25519.PrivateKey, time.Time, error) 
 	return priv, notAfter, nil
 }
 
-func readSigningKeyFile(path string, checkMode bool) (ed25519.PrivateKey, time.Time, error) {
+func readSigningKeyFile(path string, checkMode bool) (edPrivateKey, time.Time, error) {
 	st, err := os.Stat(path)
 	if err != nil {
 		return nil, time.Time{}, err
@@ -339,7 +337,7 @@ func readSigningKeyFile(path string, checkMode bool) (ed25519.PrivateKey, time.T
 	return k, notAfter, nil
 }
 
-func parseSigningKey(s string) (ed25519.PrivateKey, error) {
+func parseSigningKey(s string) (edPrivateKey, error) {
 	s = strings.TrimSpace(s)
 	var raw []byte
 	if b, err := base64.StdEncoding.DecodeString(s); err == nil {
@@ -352,10 +350,15 @@ func parseSigningKey(s string) (ed25519.PrivateKey, error) {
 		return nil, errors.New("could not decode the signing key")
 	}
 	switch len(raw) {
-	case ed25519.SeedSize:
-		return ed25519.NewKeyFromSeed(raw), nil
-	case ed25519.PrivateKeySize:
-		return ed25519.PrivateKey(raw), nil
+	case edSeedSize:
+		return edKeyFromSeed(raw)
+	case edPrivateKeySize:
+		// seed || public: recompute from the seed so a mismatched public half is refused
+		k, err := edKeyFromSeed(raw[:edSeedSize])
+		if err != nil || !k.Equal(raw) {
+			return nil, errors.New("signing key: the public half does not match the seed")
+		}
+		return k, nil
 	default:
 		return nil, errors.New("signing key must be 32 or 64 bytes")
 	}

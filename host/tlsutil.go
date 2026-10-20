@@ -3,8 +3,6 @@ package host
 import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
-	"crypto/rand"
-	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -15,6 +13,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"redx/internal/rsx"
 	"time"
 )
 
@@ -28,7 +27,7 @@ func Fingerprint(certFile string) (string, error) {
 	if blk == nil {
 		return "", fmt.Errorf("no PEM block in %s", certFile)
 	}
-	sum := sha256.Sum256(blk.Bytes)
+	sum := rsx.Sha256(blk.Bytes)
 	return hex.EncodeToString(sum[:]), nil
 }
 
@@ -48,11 +47,15 @@ func EnsureSelfSigned(dir string, extraHosts []string) (certFile, keyFile string
 			}
 		}
 	}
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rsx.Reader)
 	if err != nil {
 		return
 	}
-	serial, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 120))
+	sb, err := rsx.RandomBytes(15) // 120-bit serial
+	if err != nil {
+		return
+	}
+	serial := new(big.Int).SetBytes(sb)
 	tpl := &x509.Certificate{
 		SerialNumber: serial, Subject: pkix.Name{CommonName: "redxd self-signed", Organization: []string{"RedX"}},
 		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(825 * 24 * time.Hour),
@@ -70,7 +73,7 @@ func EnsureSelfSigned(dir string, extraHosts []string) (certFile, keyFile string
 			tpl.DNSNames = append(tpl.DNSNames, h)
 		}
 	}
-	der, err := x509.CreateCertificate(rand.Reader, tpl, tpl, &key.PublicKey, key)
+	der, err := x509.CreateCertificate(rsx.Reader, tpl, tpl, &key.PublicKey, key)
 	if err != nil {
 		return
 	}

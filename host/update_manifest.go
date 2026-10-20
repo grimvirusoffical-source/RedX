@@ -1,14 +1,13 @@
 package host
 
 import (
-	"crypto/ed25519"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
+	"redx/internal/rsx"
 	"strconv"
 	"strings"
 	"time"
@@ -176,19 +175,22 @@ func marshalManifest(m *Manifest) ([]byte, error) {
 
 // signManifestBytes signs the exact body with Ed25519. The header value is
 // "ed25519:" plus standard base64 of the 64-byte signature.
-func signManifestBytes(priv ed25519.PrivateKey, body []byte) string {
-	sig := ed25519.Sign(priv, body)
+func signManifestBytes(priv []byte, body []byte) string {
+	sig, err := rsx.Ed25519Sign(priv, body)
+	if err != nil {
+		panic("update signing key: " + err.Error())
+	}
 	return "ed25519:" + base64.StdEncoding.EncodeToString(sig)
 }
 
 // verifyManifestBytes checks an Ed25519 signature over the exact body.
 // sigHeader is "ed25519:<base64>" or the raw base64.
-func verifyManifestBytes(pub ed25519.PublicKey, body []byte, sigHeader string) error {
+func verifyManifestBytes(pub []byte, body []byte, sigHeader string) error {
 	raw, err := decodeSig(sigHeader)
 	if err != nil {
 		return err
 	}
-	if !ed25519.Verify(pub, body, raw) {
+	if !rsx.Ed25519Verify(pub, body, raw) {
 		return errors.New("bad signature")
 	}
 	return nil
@@ -198,7 +200,7 @@ func decodeSig(s string) ([]byte, error) {
 	s = strings.TrimSpace(s)
 	s = strings.TrimPrefix(s, "ed25519:")
 	b, err := base64.StdEncoding.DecodeString(s)
-	if err != nil || len(b) != ed25519.SignatureSize {
+	if err != nil || len(b) != edSignatureSize {
 		return nil, errors.New("bad signature")
 	}
 	return b, nil
@@ -707,7 +709,7 @@ func validCommit(s string) bool {
 }
 
 func sha256Hex(b []byte) string {
-	sum := sha256.Sum256(b)
+	sum := rsx.Sha256(b)
 	return hex.EncodeToString(sum[:])
 }
 

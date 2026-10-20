@@ -1,11 +1,11 @@
 package engine
 
 import (
-	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
+	"redx/internal/rsx"
 	"regexp"
 	"sort"
 	"strings"
@@ -739,7 +739,9 @@ func (db *Database) loadHistory() {
 
 func (db *Database) newHistory() {
 	var b [8]byte
-	_, _ = rand.Read(b[:])
+	if err := rsx.Random(b[:]); err != nil {
+		panic(err)
+	}
 	id := hex.EncodeToString(b[:])
 	db.histMu.Lock()
 	db.history = id

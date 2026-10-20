@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
@@ -13,6 +12,7 @@ import (
 	"os/signal"
 	"path"
 	"path/filepath"
+	"redx/internal/rsx"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -303,7 +303,7 @@ func cmdPack(args []string) {
 			defer os.Remove(tmp.Name())
 			w = tmp
 		}
-		h := sha256.New()
+		h := rsx.NewSHA256()
 		n, err := io.Copy(io.MultiWriter(w, h), resp.Body)
 		if err == nil && resp.ContentLength >= 0 && n != resp.ContentLength {
 			err = fmt.Errorf("short transfer: got %d of %d bytes", n, resp.ContentLength)

@@ -148,7 +148,7 @@ func TestEncryptedAtRest(t *testing.T) {
 	}
 	key, rec, _ := ks.Create(host.CreateSpec{Scope: "admin", Label: "secret-label-xyz"})
 	raw, _ := os.ReadFile(p)
-	if strings.Contains(string(raw), "secret-label-xyz") || strings.Contains(string(raw), rec.ID) || !strings.HasPrefix(string(raw), "REDXKS1") {
+	if strings.Contains(string(raw), "secret-label-xyz") || strings.Contains(string(raw), rec.ID) || !strings.HasPrefix(string(raw), "REDXKS2\n") {
 		t.Fatal("keystore not encrypted")
 	}
 	ks2, err := host.OpenKeystore(p, o)

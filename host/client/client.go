@@ -4,8 +4,6 @@ package client
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"crypto/subtle"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
@@ -15,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"redx/internal/rsx"
 	"strings"
 	"time"
 
@@ -37,8 +36,8 @@ func PinnedTLSConfig(pin string) *tls.Config {
 			if len(raw) == 0 {
 				return errors.New("no certificate")
 			}
-			s := sha256.Sum256(raw[0])
-			if subtle.ConstantTimeCompare([]byte(hex.EncodeToString(s[:])), []byte(p)) != 1 {
+			s := rsx.Sha256(raw[0])
+			if !rsx.CtEq([]byte(hex.EncodeToString(s[:])), []byte(p)) {
 				return errors.New("server certificate does not match --pin")
 			}
 			return nil
