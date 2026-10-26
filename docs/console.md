@@ -10,6 +10,7 @@ The console is part of the `redxd` binary (`go:embed`). It is plain ES modules a
 build step, no CDN and no network access at runtime. It works offline, from a USB stick, on a Pi.
 
 * Open it: `redxd open` (opens the browser on this machine), or `redxd run --open`, or just type the address.
+* Another program such as red-xai-hub starts `redxd` and opens that same address. The console is already inside the binary; it is not framed. See the repository document `docs/hub.md`.
 * Disable the automatic first-run browser launch: `REDX_NO_OPEN=1` (it is also skipped on headless machines: no
   display, `CI`, SSH sessions, and for services).
 * Where is it? `/` and `/ui/` on the same port as the API.
@@ -227,7 +228,8 @@ Existing routes are reused as they are. The console needed a few more; all are c
 | `POST /v1/ui/validate` | key | parse Box text, BoxQL, or a policy document and return `line:col` errors |
 | `GET /v1/admin/status` `audit` `config` | host admin | dashboard data, audit tail, redacted effective config |
 | `GET /v1/admin/presets[/NAME]`, `POST .../apply` | host admin; owner while Accounts is on if the apply sets `join` or changes `role` or `advertise` | preset list, diff, write config file |
-| `GET /v1/db/{db}/files[/name]` | read | file list / file text for the raw editor |
+| `GET /v1/db/{db}/files[/name]` | admin | full file list / file text for the raw editor |
+| `GET /v1/db/{db}/files?kind=records` | read | record files only (Data Explorer). Does not list or rewrite packs or policies |
 | `GET /v1/db/{db}/secrets` | read | Red-SecretsXAI status (does not read stored ciphertext) |
 | `POST /v1/db/{db}/secrets/seal` | write | seal new text; does not write the record |
 | `POST /v1/db/{db}/secrets/open` | read | open an envelope the caller sent; does not write |

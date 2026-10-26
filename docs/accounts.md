@@ -92,6 +92,12 @@ when `sms_resend` is on in `/v1/auth/config` (forwards to `POST /v1/signup/resen
 
 A signed-in account that is not an owner can create databases and API keys only while its RedX Hosted plan is `active` or `trialing` (see [billing](billing.md) for the 3-day read-only grace and for what happens after it). The account sees and manages only its own databases. Names are stored namespaced, so two accounts may both choose `game`. Owners keep full visibility, and every owner request is an audit line. Owner emails are never written into the repository; set them with `REDXAI_OWNER_EMAILS` on the server.
 
+## Same account as the website
+
+Sign-in and the quick sign-up on the console (`Sign in with Red-XAI Account`, `Create a Red-XAI Account`) talk to the Red-XAI Accounts issuer in `accounts_issuer`. That is the same account database the Red-XAI website uses. RedX does not create a user table, does not copy passwords into its own store, and does not keep a second login list. A console session (`rxs_…`) is only a session on this host. API keys remain the way programs and the CLI call the API.
+
+The sign-up form posts to Accounts (`POST /v1/signup` on the issuer). Age, terms, and two-factor rules are Accounts rules. RedX checks the fields and forwards them.
+
 ## What stays local
 
 - Console session tokens (`rxs_…`) are hashed (SHA-256) in memory; Red-XAI tokens are kept only for owner

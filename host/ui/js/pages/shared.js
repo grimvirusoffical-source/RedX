@@ -13,6 +13,8 @@ export function bx(db, q, params, explain = false) {
   return api('POST', `/v1/db/${enc(db)}/bx`, { json: body });
 }
 export const listFiles = (db) => api('GET', `/v1/db/${enc(db)}/files`);
+/** Record files only. A read or write key can use this. Packs and policy files are not included. */
+export const listRecordFiles = (db) => api('GET', `/v1/db/${enc(db)}/files?kind=records`);
 
 /** Quote a string as a BoxQL string literal. */
 export const q = (s) => JSON.stringify(String(s));

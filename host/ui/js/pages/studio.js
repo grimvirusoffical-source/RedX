@@ -1,7 +1,7 @@
 import { h, icon, terminalPanel, chip, mount, toast, dialog, field, copy, download, table, emptyState } from '../util.js';
 import { api, enc } from '../api.js';
 import { state, gs } from '../state.js';
-import { pageHead, page, bx, listFiles, q as quote, parsePath } from './shared.js';
+import { pageHead, page, bx, listRecordFiles, q as quote, parsePath } from './shared.js';
 import { createEditor } from '../editor.js';
 import { VERBS, OPTIONS, FUNCTIONS, findParams, parseErrorPos } from '../tokenizers.js';
 import { fileStem } from '../state.js';
@@ -44,7 +44,7 @@ export default async function render(ctx) {
   let files = [];
   const boxCache = new Map();
   const colCache = new Map();
-  try { files = (await listFiles(db)).files.filter((f) => f.records === 'records'); } catch { /* limited key */ }
+  try { files = (await listRecordFiles(db)).files.filter((f) => f.records === 'records'); } catch { /* limited key */ }
   let last = null;
   let view = 'table';
 

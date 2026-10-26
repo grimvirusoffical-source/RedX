@@ -187,7 +187,11 @@
    "auth": "admin",
    "danger": "safe",
    "summary": "Files of a database with type and size.",
-   "response": "json"
+   "response": "json",
+   "query": {
+    "kind": "string"
+   },
+   "notes": "The full list and raw file text need admin. ?kind=records needs read and returns only record files the key prefix allows. It does not list packs, policies, or other sealed files, and it does not read or rewrite them."
   },
   {
    "id": "listKeys",

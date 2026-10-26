@@ -22,7 +22,10 @@ export function secretsPanel(db) {
     const k = r.kdf || {};
     status.textContent = 'Password seal is available on this host (' + (k.profile || 'interactive') + ' Argon2id, t=' + (k.t ?? '') + ', m=' + (k.m_kib ?? '') + ' KiB, p=' + (k.p ?? '') + '). Seal and Open act on the editor only.';
     const items = (r.notes || []).map((n) => h('li', null, n));
-    mount(extra, items.length ? h('ul', { class: 'muted small' }, items) : null);
+    mount(extra, items.length ? h('ul', { class: 'muted small' }, items) : null,
+      h('p', { class: 'muted small' }, 'To hand the sealed text to someone as a red-X PNG, follow the convert steps on the ',
+        h('a', { href: '#/help/secrets' }, 'Red-SecretsXAI help page'),
+        '. This console stays in password mode and does not convert or rewrite those files.'));
   }).catch((e) => {
     status.textContent = 'Red-SecretsXAI status is unavailable (' + (e && e.message ? e.message : 'request failed') + '). You can still edit records. Nothing was changed.';
   });

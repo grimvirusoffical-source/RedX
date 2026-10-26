@@ -595,6 +595,27 @@ func TestFilesAndRawEndpoints(t *testing.T) {
 			t.Fatalf("raw read of %q must be refused", p)
 		}
 	}
+	// Website keys (read/write, and a prefix key) can list record files only.
+	os.MkdirAll(filepath.Join(db, "vault.red-xai-pack"), 0o755)
+	st, b, _ = do(t, "GET", n.URL+"/v1/db/default/files?kind=records", wk, "")
+	if st != 200 || !strings.Contains(b, "players.red-xai.db") || strings.Contains(b, "policy") || strings.Contains(b, "vault") || strings.Contains(b, "wal") {
+		t.Fatalf("write key record list: %d %s", st, b)
+	}
+	pref, _ := mkKey(t, n, map[string]interface{}{"scope": "write", "db": "default", "prefix": "players.red-xai.db:Player"})
+	os.WriteFile(filepath.Join(db, "other.red-xai.db"), []byte("x"), 0o644)
+	st, b, _ = do(t, "GET", n.URL+"/v1/db/default/files?kind=records", pref, "")
+	if st != 200 || !strings.Contains(b, "players.red-xai.db") || strings.Contains(b, "other.red-xai.db") || strings.Contains(b, "policy") {
+		t.Fatalf("prefix record list: %d %s", st, b)
+	}
+	// Listing does not rewrite the placeholder bytes in the record file.
+	before, _ := os.ReadFile(filepath.Join(db, "players.red-xai.db"))
+	if st, _, _ = do(t, "GET", n.URL+"/v1/db/default/files?kind=records", wk, ""); st != 200 {
+		t.Fatal("second list")
+	}
+	after, _ := os.ReadFile(filepath.Join(db, "players.red-xai.db"))
+	if string(before) != string(after) {
+		t.Fatal("record file bytes changed during list")
+	}
 }
 
 func TestDropDatabase(t *testing.T) {

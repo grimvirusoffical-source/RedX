@@ -72,6 +72,7 @@ Values are passed as `$name` parameters and are never parsed as command text. Th
 | [Hosting](docs/hosting.md) | platforms, services, Docker, troubleshooting, building |
 | [Installers](docs/installers.md) | desktop installers (unsigned) |
 | [Connecting apps](docs/connect.md) | app connect handshake and Connected apps |
+| [red-xai-hub](docs/hub.md) | spawn or embed `redxd` and open the console |
 | [Configuration](docs/configuration.md) | `redx.toml`, environment variables, defaults |
 | [API reference](docs/api.md) | REST and WebSocket routes |
 | [Security](docs/security.md) | keys, TLS, policy, encryption |

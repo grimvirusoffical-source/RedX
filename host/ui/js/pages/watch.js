@@ -1,7 +1,7 @@
 import { h, icon, terminalPanel, chip, mount, toast, emptyState, copy, download } from '../util.js';
 import { wsURL, enc } from '../api.js';
 import { state } from '../state.js';
-import { pageHead, page, listFiles } from './shared.js';
+import { pageHead, page, listRecordFiles } from './shared.js';
 import { createEditor } from '../editor.js';
 import { fileStem } from '../state.js';
 
@@ -18,7 +18,7 @@ export default async function render() {
   let timer;
   const events = [];
   let files = [];
-  try { files = (await listFiles(db)).files.filter((f) => f.records === 'records'); } catch { /* limited key */ }
+  try { files = (await listRecordFiles(db)).files.filter((f) => f.records === 'records'); } catch { /* limited key */ }
   const pre = sessionStorage.getItem('redx.watch.q');
   sessionStorage.removeItem('redx.watch.q');
   const first = files[0];

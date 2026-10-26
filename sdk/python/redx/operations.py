@@ -157,9 +157,9 @@ class Operations:
         """Online backup of all databases and keys as one archive (contains everything: store it safely). (GET /v1/admin/backup; auth host-admin; danger admin)"""
         return self.call("backup", confirm=confirm, headers=headers)
 
-    def list_files(self, *, db: Optional[str] = None, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+    def list_files(self, *, db: Optional[str] = None, query: Optional[Dict[str, Any]] = None, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
         """Files of a database with type and size. (GET /v1/db/{db}/files; auth admin; danger safe)"""
-        return self.call("listFiles", db=db, confirm=confirm, headers=headers)
+        return self.call("listFiles", db=db, query=query, confirm=confirm, headers=headers)
 
     def list_keys(self, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
         """Keys (ids, scopes, status; never the secrets). (GET /v1/keys; auth admin; danger safe)"""

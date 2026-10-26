@@ -179,8 +179,8 @@ namespace RedX
             CallAsync("backup", null, null, null, null, null, false, ct);
 
         /// <summary>Files of a database with type and size. (GET /v1/db/{db}/files; auth admin; danger safe)</summary>
-        public Task<RedXResult> ListFilesAsync(string? db = null, CancellationToken ct = default) =>
-            CallAsync("listFiles", null, db, null, null, null, false, ct);
+        public Task<RedXResult> ListFilesAsync(string? db = null, IDictionary<string, object?>? query = null, CancellationToken ct = default) =>
+            CallAsync("listFiles", null, db, null, null, query, false, ct);
 
         /// <summary>Keys (ids, scopes, status; never the secrets). (GET /v1/keys; auth admin; danger safe)</summary>
         public Task<RedXResult> ListKeysAsync(CancellationToken ct = default) =>

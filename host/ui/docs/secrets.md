@@ -61,3 +61,9 @@ Changing the profile applies to the **next** seal only. It does not re-wrap enve
 * Pack `Encrypt` rules stay AES-256-GCM. See [Policy and encryption](policy-and-encryption.md).
 
 Existing encrypted-at-rest content is not migrated by this feature.
+
+## Delivering sealed text as a red-X PNG
+
+Password mode in this console is how a record is sealed and opened. To hand that sealed text to someone as a picture, use the red-X PNG convert steps in the [Red-SecretsXAI wiki](https://github.com/grimvirusoffical-source/Red-SecretsXAI/wiki).
+
+RedX does not convert, embed, or rewrite those PNG files. It does not change a PNG that already exists, and it does not turn an existing envelope into a different format. Copy the sealed Box text out of the editor after you have saved it, then follow the wiki. The wiki is the place for that delivery step. This document does not describe how the picture is built.

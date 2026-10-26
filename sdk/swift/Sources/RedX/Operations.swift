@@ -191,8 +191,8 @@ extension RedXClient {
 
     /// Files of a database with type and size. (GET /v1/db/{db}/files; auth admin; danger safe)
     @discardableResult
-    public func listFiles(db: String? = nil) async throws -> RedXResult {
-        try await call("listFiles", params: [:], db: db)
+    public func listFiles(db: String? = nil, query: [String: Any]? = nil) async throws -> RedXResult {
+        try await call("listFiles", params: [:], db: db, query: query)
     }
 
     /// Keys (ids, scopes, status; never the secrets). (GET /v1/keys; auth admin; danger safe)

@@ -44,7 +44,7 @@ export interface RedXOperations {
   /** Online backup of all databases and keys as one archive (contains everything: store it safely). (GET /v1/admin/backup; auth host-admin; danger admin) */
   backup(opts?: { headers?: Record<string, string> }): Promise<Buffer>;
   /** Files of a database with type and size. (GET /v1/db/{db}/files; auth admin; danger safe) */
-  listFiles(opts?: { db?: string; headers?: Record<string, string> }): Promise<any>;
+  listFiles(opts?: { db?: string; query?: { kind?: string }; headers?: Record<string, string> }): Promise<any>;
   /** Keys (ids, scopes, status; never the secrets). (GET /v1/keys; auth admin; danger safe) */
   listKeys(opts?: { headers?: Record<string, string> }): Promise<any>;
   /** One key's details. (GET /v1/keys/{id}; auth admin; danger safe) */

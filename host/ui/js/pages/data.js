@@ -1,7 +1,7 @@
 import { h, icon, terminalPanel, chip, errorBox, spinner, mount, toast, confirmDialog, emptyState, table, field, dialog, debounce, copy } from '../util.js';
 import { api, enc, pathURL } from '../api.js';
 import { state, fileStem, gs, setDb } from '../state.js';
-import { pageHead, page, bx, listFiles, parsePath, q, typeChip, getBox } from './shared.js';
+import { pageHead, page, bx, listRecordFiles, parsePath, q, typeChip, getBox } from './shared.js';
 import { createEditor } from '../editor.js';
 import { parseErrorPos } from '../tokenizers.js';
 import { looksSealed, secretsPanel, sealPlaintext, openPlaintext } from '../secrets.js';
@@ -39,7 +39,7 @@ export default async function render(ctx) {
   async function loadFiles() {
     mount(treeEl, spinner());
     try {
-      const r = await listFiles(db);
+      const r = await listRecordFiles(db);
       files.length = 0;
       files.push(...r.files.filter((f) => f.records === 'records'));
       paintTree();
@@ -47,7 +47,7 @@ export default async function render(ctx) {
       else if (ctx.query.file) { const f = files.find((x) => x.name === ctx.query.file); if (f) await expand(f); }
       else mount(view, h('div', { class: 'empty' }, h('h3', null, 'Pick a file on the left'), h('p', { class: 'muted' }, 'Expand a file to see its boxes, then pick a box to see its records.')));
     } catch (e) {
-      mount(treeEl, errorBox(e.status === 403 ? 'The Data Explorer needs an admin key for this database (it lists the files).' : e.message, loadFiles));
+      mount(treeEl, errorBox(e.status === 403 ? 'This key cannot list record files in this database.' : e.message, loadFiles));
     }
   }
   function paintTree() {
@@ -65,7 +65,7 @@ export default async function render(ctx) {
   }
   function collapse(f) { open.delete(f.name); paintTree(); }
   async function refreshFilesOnly() {
-    const r = await listFiles(db);
+    const r = await listRecordFiles(db);
     files.length = 0;
     files.push(...r.files.filter((f) => f.records === 'records'));
     paintTree();
@@ -172,6 +172,7 @@ export default async function render(ctx) {
       text = '[\n    {Name[]} = "",\n    {Value[]} = 0\n]';
       if (needsTTL) ttl = '3600';
     }
+    const heading = h('h3', { style: { margin: 0 } }, isNew ? 'New record' : 'Record');
     const msg = h('div', { class: 'form-err', hidden: true });
     const modeSel = h('div', { class: 'seg' }, ['box', 'json'].map((m) => h('span', { class: 'seg-opt' + (m === mode ? ' on' : ''), onclick: () => switchMode(m) }, m === 'box' ? 'Box text' : 'JSON')));
     editor = createEditor({ language: 'box', value: text, height: '260px', onSave: save, onChange: debounce(validate, 450) });
@@ -216,6 +217,7 @@ export default async function render(ctx) {
         gs.set('record');
         text = editor.getValue();
         isNew = false;
+        heading.textContent = 'Record';
         delBtn.hidden = false;
         await refreshFilesOnly();
         const f = files.find((x) => x.name === fileName);
@@ -248,7 +250,7 @@ export default async function render(ctx) {
       try { await api('DELETE', pathURL(db, path)); toast('Deleted', 'ok'); mount(pane); await loadFiles(); const f = files.find((x) => x.name === sel.file); if (f) { open.delete(f.name); await expand(f); if (sel.box) showBox(); } } catch (e) { toast(e.message, 'error'); }
     }
     mount(pane, h('div', { class: 'card', style: { marginTop: '8px' } },
-      h('div', { class: 'row gap wrap', style: { marginBottom: '10px' } }, h('h3', { style: { margin: 0 } }, isNew ? 'New record' : 'Record'), h('code', null, path), h('div', { class: 'grow' }), modeSel),
+      h('div', { class: 'row gap wrap', style: { marginBottom: '10px' } }, heading, h('code', null, path), h('div', { class: 'grow' }), modeSel),
       editor.el, msg,
       h('div', { class: 'row gap wrap', style: { marginTop: '10px' } },
         h('label', { class: 'row gap' }, h('span', { class: 'muted small' }, 'Expires after'), ttlIn, needsTTL ? chip('required for this file', 'warn') : h('span', { class: 'muted small' }, 'optional')),
