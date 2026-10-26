@@ -1,7 +1,7 @@
 import { h, icon, terminalPanel, chip, mount, toast, dialog, field, copy, download, table, emptyState } from '../util.js';
 import { api, enc } from '../api.js';
 import { state, gs } from '../state.js';
-import { pageHead, page, bx, listFiles, q as quote, parsePath } from './shared.js';
+import { pageHead, page, bx, listRecordFiles, q as quote, parsePath } from './shared.js';
 import { createEditor } from '../editor.js';
 import { VERBS, OPTIONS, FUNCTIONS, findParams, parseErrorPos } from '../tokenizers.js';
 import { fileStem } from '../state.js';
@@ -44,7 +44,7 @@ export default async function render(ctx) {
   let files = [];
   const boxCache = new Map();
   const colCache = new Map();
-  try { files = (await listFiles(db)).files.filter((f) => f.records === 'records'); } catch { /* limited key */ }
+  try { files = (await listRecordFiles(db)).files.filter((f) => f.records === 'records'); } catch { /* limited key */ }
   let last = null;
   let view = 'table';
 
@@ -221,7 +221,8 @@ export default async function render(ctx) {
     side.hidden = false;
   }
 
-  root.append(pageHead('BoxQL Studio', 'Write BoxQL, run it against ' + db + '. Ctrl+Enter runs, Ctrl+Space completes.',
+  root.append(h('div', { class: 'callout info' }, icon('lock'), h('div', null, h('b', null, 'Record seals live on the Data Explorer. '), 'Studio does not encrypt a query, and it does not re-wrap packs or existing Red-SecretsXAI envelopes. Open the record, use Seal or Open, then Save only if you want to keep that one value.')),
+    pageHead('BoxQL Studio', 'Write BoxQL, run it against ' + db + '. Ctrl+Enter runs, Ctrl+Space completes.',
     h('button', { class: 'btn', onclick: showSnippets }, icon('book', 16), ' Snippets'), h('button', { class: 'btn', onclick: showHistory }, icon('clock', 16), ' History'), h('button', { class: 'btn', onclick: showSaved }, icon('bookmark', 16), ' Saved')),
     h('div', { class: 'studio' }, h('div', { class: 'studio-main' },
       editor.el, paramsBox,

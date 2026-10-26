@@ -233,6 +233,7 @@ var envKeys = map[string]string{
 	"REDX_ACCOUNTS_ISSUER": "accounts_issuer", "REDX_ACCOUNTS_CLIENT_ID": "accounts_client_id", "REDX_ACCOUNTS_REDIRECT_URL": "accounts_redirect_url",
 	"REDX_ACCOUNTS_MASTER_DB": "accounts_master_db", "REDXAI_OWNER_EMAILS": "owner_emails",
 	"REDX_TRUSTED_PROXIES": "trusted_proxies",
+	"REDX_SECRETS_KDF":     "secrets_kdf",
 }
 
 // envOverrides lists settings currently pinned by environment variables (they beat the config file).
@@ -525,9 +526,59 @@ func dirSize(p string) (n int64, mod time.Time) {
 	return
 }
 
+// recordFiles lists only record files (db, qs, qs-ls) for a read or write key.
+// It does not open those files and does not list packs, policies, or other sealed material.
+func (h *Host) recordFiles(w http.ResponseWriter, r *http.Request, db string) {
+	pr, ok := h.authzScope(w, r, ScopeRead, db)
+	if !ok {
+		return
+	}
+	if !h.Reg.Exists(db) {
+		writeErr(w, 404, "database not found")
+		return
+	}
+	dir := filepath.Join(h.Reg.Root(), db)
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		h.mapErr(w, err)
+		return
+	}
+	out := []FileInfo{}
+	for _, e := range ents {
+		typ, label, rec, note := classifyFile(e.Name(), e.IsDir())
+		if rec != "records" || !recordFileVisible(e.Name(), pr.Key.Prefix) {
+			continue
+		}
+		fi, err := e.Info()
+		if err != nil {
+			continue
+		}
+		out = append(out, FileInfo{Name: e.Name(), Type: typ, Label: label, Size: fi.Size(), Modified: fi.ModTime().UTC(), Records: rec, Note: note})
+	}
+	writeJSON(w, 200, map[string]interface{}{"db": db, "files": out, "kind": "records"})
+}
+
+// recordFileVisible reports whether a prefix-restricted key may see this record file name.
+func recordFileVisible(name, prefix string) bool {
+	if prefix == "" || strings.Contains(prefix, "*") {
+		return true
+	}
+	file := prefix
+	if i := strings.IndexAny(prefix, ":/"); i >= 0 {
+		file = prefix[:i]
+	}
+	return file == name
+}
+
 func (h *Host) filesRoute(w http.ResponseWriter, r *http.Request, db, rest string) {
 	if r.Method != "GET" {
 		writeErr(w, 405, "method not allowed")
+		return
+	}
+	// Data Explorer and BoxQL Studio ask for record files only. That list is
+	// read-scoped and never includes policy, pack, media, or other files.
+	if rest == "" && r.URL.Query().Get("kind") == "records" {
+		h.recordFiles(w, r, db)
 		return
 	}
 	if _, ok := h.authz(w, r, ScopeAdmin, db, "", false); !ok {

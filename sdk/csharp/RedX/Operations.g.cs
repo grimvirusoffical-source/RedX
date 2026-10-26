@@ -59,6 +59,9 @@ namespace RedX
             ["deletePath"] = new Operation { Id = "deletePath", Group = "database", Method = "DELETE", Path = "/v1/db/{db}/path/{path}", Shorthand = "/v1/path/{path}", Auth = "write", Response = "json", Request = "", HostConfirm = "", Summary = "Delete the value at a path.", Danger = DangerLevel.Write },
             ["pathQuery"] = new Operation { Id = "pathQuery", Group = "database", Method = "POST", Path = "/v1/db/{db}/query", Shorthand = "/v1/query", Auth = "read", Response = "json", Request = "json", HostConfirm = "", Summary = "Path-pattern query, e.g. file:Box[ID=*].Name.", Danger = DangerLevel.Safe },
             ["bx"] = new Operation { Id = "bx", Group = "database", Method = "POST", Path = "/v1/db/{db}/bx", Shorthand = "/v1/bx", Auth = "read", Response = "json", Request = "json", HostConfirm = "", Summary = "Run one BoxQL command or {Tx[]} transaction with $params.", Danger = DangerLevel.Write },
+            ["secretsInfo"] = new Operation { Id = "secretsInfo", Group = "database", Method = "GET", Path = "/v1/db/{db}/secrets", Shorthand = "", Auth = "read", Response = "json", Request = "", HostConfirm = "", Summary = "Status of Red-SecretsXAI password seal. Does not read or rewrite stored ciphertext.", Danger = DangerLevel.Safe },
+            ["secretsSeal"] = new Operation { Id = "secretsSeal", Group = "database", Method = "POST", Path = "/v1/db/{db}/secrets/seal", Shorthand = "", Auth = "write", Response = "json", Request = "json", HostConfirm = "", Summary = "Seal new text with a Red-SecretsXAI password. Does not write the record.", Danger = DangerLevel.Write },
+            ["secretsOpen"] = new Operation { Id = "secretsOpen", Group = "database", Method = "POST", Path = "/v1/db/{db}/secrets/open", Shorthand = "", Auth = "read", Response = "json", Request = "json", HostConfirm = "", Summary = "Open a Red-SecretsXAI envelope the caller sent. Does not write.", Danger = DangerLevel.Safe },
             ["bxWatch"] = new Operation { Id = "bxWatch", Group = "database", Method = "GET", Path = "/v1/db/{db}/bx/watch", Shorthand = "/v1/bx/watch", Auth = "read", Response = "websocket", Request = "", HostConfirm = "", Summary = "WebSocket: stream changes matching a {Watch[]} command.", Danger = DangerLevel.Safe },
             ["subscribe"] = new Operation { Id = "subscribe", Group = "database", Method = "GET", Path = "/v1/db/{db}/subscribe", Shorthand = "/v1/subscribe", Auth = "read", Response = "websocket", Request = "", HostConfirm = "", Summary = "WebSocket: stream changes under a path prefix.", Danger = DangerLevel.Safe },
             ["listPacks"] = new Operation { Id = "listPacks", Group = "files", Method = "GET", Path = "/v1/db/{db}/pack", Shorthand = "", Auth = "read", Response = "json", Request = "", HostConfirm = "", Summary = "File packs of a database.", Danger = DangerLevel.Safe },
@@ -176,8 +179,8 @@ namespace RedX
             CallAsync("backup", null, null, null, null, null, false, ct);
 
         /// <summary>Files of a database with type and size. (GET /v1/db/{db}/files; auth admin; danger safe)</summary>
-        public Task<RedXResult> ListFilesAsync(string? db = null, CancellationToken ct = default) =>
-            CallAsync("listFiles", null, db, null, null, null, false, ct);
+        public Task<RedXResult> ListFilesAsync(string? db = null, IDictionary<string, object?>? query = null, CancellationToken ct = default) =>
+            CallAsync("listFiles", null, db, null, null, query, false, ct);
 
         /// <summary>Keys (ids, scopes, status; never the secrets). (GET /v1/keys; auth admin; danger safe)</summary>
         public Task<RedXResult> ListKeysAsync(CancellationToken ct = default) =>
@@ -226,6 +229,18 @@ namespace RedX
         /// <summary>Path-pattern query, e.g. file:Box[ID=*].Name. (POST /v1/db/{db}/query; auth read; danger safe)</summary>
         public Task<RedXResult> PathQueryAsync(string? db = null, object? body = null, CancellationToken ct = default) =>
             CallAsync("pathQuery", null, db, body, null, null, false, ct);
+
+        /// <summary>Status of Red-SecretsXAI password seal. Does not read or rewrite stored ciphertext. (GET /v1/db/{db}/secrets; auth read; danger safe)</summary>
+        public Task<RedXResult> SecretsInfoAsync(string? db = null, CancellationToken ct = default) =>
+            CallAsync("secretsInfo", null, db, null, null, null, false, ct);
+
+        /// <summary>Seal new text with a Red-SecretsXAI password. Does not write the record. (POST /v1/db/{db}/secrets/seal; auth write; danger write)</summary>
+        public Task<RedXResult> SecretsSealAsync(string? db = null, object? body = null, CancellationToken ct = default) =>
+            CallAsync("secretsSeal", null, db, body, null, null, false, ct);
+
+        /// <summary>Open a Red-SecretsXAI envelope the caller sent. Does not write. (POST /v1/db/{db}/secrets/open; auth read; danger safe)</summary>
+        public Task<RedXResult> SecretsOpenAsync(string? db = null, object? body = null, CancellationToken ct = default) =>
+            CallAsync("secretsOpen", null, db, body, null, null, false, ct);
 
         /// <summary>File packs of a database. (GET /v1/db/{db}/pack; auth read; danger safe)</summary>
         public Task<RedXResult> ListPacksAsync(string? db = null, CancellationToken ct = default) =>

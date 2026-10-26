@@ -1,0 +1,37 @@
+Red-SecretsXAI pure-Go library sources, vendored from sdk/go/rsx.
+commit 77f81c9abc5e09fb4015ebc5b8a752c31ea190e2
+branch go-port
+
+The Red-SecretsXAI repository was not readable from this tree. These files match the
+copy already recorded on this repo's host-integration branch at that commit. Test
+vectors and package tests were not imported. Do not edit the .go files here.
+
+This library is used only to seal and open new record text from the console API.
+It must not be used to read, re-wrap, migrate, or rewrite existing pack ciphertext,
+RXSEC payloads, keystores, or any other sealed file.
+
+files (sha256):
+6dcd36a8a06c9405758d2eaa56f65a995b520e5c152c23aefa26e80991803d61  argon2.go
+6878a33a2a2231175708b962da078869cda919d3840639bdbccc6a5f6a4afac8  atomic.go
+ec11d8b4a15e0582f95b5c521ef4ad22bb1187c91d9f9ef15e6fa0010d181b4d  cancel.go
+3d69b657e7a205e9bd264000d69e4b033c58da85448e0eeee6453f8dc4ec5ffa  chacha.go
+6a7f4db625af7d94d3f94c7b30227bf6d0d75b4fbed39b326b8d23a233a10cf8  compat.go
+cf319e06194d887fab8419a48f8151fa0f5deeb745041a17390b3c244663066c  container.go
+7e12b62e9344e3183c5cb4f11f37dbc752d2336b86081fd2a4df739419b6c972  doc.go
+93c6b980d16d687caabae5584b928d443e51ddbcad9d19f6ac3a20b0e05ec738  ed25519.go
+fa10616ef63f69428905b64634608d160d7111c697cbab720ad19548be4e924c  errors.go
+7fe4c489a8f490c2aeb4858d1efc96594b9f0a92729581d05f9e20475048c25f  hash.go
+f561c420ad3c7398a6c1a032929f92199a8909ef1eee43afe31297a06147e1be  mac.go
+2608ee94c988d91f06f8a625cd9614c61e10e42f3f5f0b43a793f43b12df6080  mem_linux.go
+97a18815939e1f7e4502c1a9610154d6ab9f96fe54a98b51e5b1d15d43e08bac  mem_other.go
+f313bfe409c1eb7dc519088dafd50ae84933059c7a9e25b6d2a2c81302cc1ba6  phc.go
+62954d3f47c726bb245bafd0d61424fe43ca6f85ac96b1a21ef5618085edd6a9  random.go
+0d63e5c7033b7aed33e696bcc56d09e480a8a4fbac0d552a5e049df6181c7ba9  random_linux.go
+edf69ef86db371e9256d7c084f87bd09789128d9a9fa9f1c8b7be392cd52b4c6  random_other.go
+b6e66bbf3e1d94b976f331453478cd50eabb2c0847d44425b2121fdd1d056818  random_unix.go
+389f909775f08666e42f65d6a96a0b6faad9202e3ace0412d62cca6595915065  random_windows.go
+b64bf9d6f7b66058c39bf04aeb10d30ec21bb928b5b1feb389e36107467b9d91  ratchet.go
+32f247b79700e7e57b11080d8bcf920d8295f2557e1951403f719afff1391c8f  session.go
+a44e3a82c7f538fd3357e0f1dc72c77bd0ddc2fa9a907ba6951e1e0fd2109dd6  shamir.go
+b43a07bf101f16a52e12022f54458dcf70217534837196981eecf2fdc99c0932  stream.go
+5a4fe2021959f10c8d75cf6ae9bbb283201b6b60ed7fc5835d45c8d3526126bf  util.go

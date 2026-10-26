@@ -35,6 +35,7 @@ $REDX_KEY)" and `--join` "(currently set from $REDX_JOIN or redx.toml)".
 | `repl_log_max`, `heartbeat_seconds`, `max_body_mb` | | 1,000,000 · 3 · 16 |
 | `max_upload_mb` (largest single pack upload) | | 1024 |
 | `master_key_file` | `REDX_MASTER_KEY_FILE` (a path) | `<data>/master.key` if present; must be mode 0600 (POSIX) |
+| `secrets_kdf` (`interactive`/`librsx`) | `REDX_SECRETS_KDF`, flag `--secrets-kdf` | `interactive` (new record seals only; does not re-wrap existing data). See [secrets.md](secrets.md) |
 | `code_allowed_boxes` (list of `file:Box` globs) | `REDX_CODE_ALLOWED_BOXES` | empty = scripts touch no record |
 | `grpc_listen` | `REDX_GRPC_LISTEN` | reserved, ignored |
 | `preset` | `REDX_PRESET` | none (flag `--preset NAME`) |

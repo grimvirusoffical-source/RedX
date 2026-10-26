@@ -48,6 +48,13 @@ type Config struct {
 	// the PATH may be configured; the key itself is never read from the environment or flags.
 	// Default <data_dir>/master.key (loaded when it exists). Must not be group/world accessible.
 	MasterKeyFile string `toml:"master_key_file"`
+	// SecretsKDF selects the Argon2id cost for new Red-SecretsXAI password seals
+	// ("interactive" or "librsx"). It does not re-wrap packs, keystores, or any
+	// existing envelope. See docs/secrets.md.
+	SecretsKDF string `toml:"secrets_kdf"`
+	// SecretsKDFOverride, when non-nil, replaces SecretsKDF for new seals. It is
+	// not read from TOML or the environment. Tests use a small cost.
+	SecretsKDFOverride *SecretsKDFCost `toml:"-"`
 	// CodeAllowedBoxes limits which boxes .red-xai-code scripts may touch at all, as
 	// "file:Box" globs ("players.red-xai.db:Player", "*.red-xai.db:Quest*"). Empty = scripts
 	// cannot read or write any record. This is on top of the key's scope and the .red-xai-sec policy.
@@ -163,6 +170,7 @@ func DefaultConfig() Config {
 		LogLevel:  "info",
 		Heartbeat: 3,
 		MaxBodyMB: 16, MaxUploadMB: 1024,
+		SecretsKDF: "interactive",
 	}
 }
 
@@ -181,6 +189,7 @@ func (c *Config) RegisterFlags(fs *flag.FlagSet) {
 	fs.StringVar(&c.DefaultDB, "default-db", c.DefaultDB, "database served by /v1/path/...")
 	fs.BoolVar(&c.KeystoreEnc, "keystore-encrypt", c.KeystoreEnc, "encrypt keystore at rest (REDX_KEYSTORE_PASSPHRASE)")
 	fs.StringVar(&c.MasterKeyFile, "master-key-file", c.MasterKeyFile, "file with the .red-xai-sec master key (default <data-dir>/master.key if present)")
+	fs.StringVar(&c.SecretsKDF, "secrets-kdf", c.SecretsKDF, "Argon2id profile for new Red-SecretsXAI record seals: interactive|librsx (does not re-wrap existing data)")
 	fs.Var((*csv)(&c.CodeAllowedBoxes), "code-allowed-boxes", "comma separated file:Box globs scripts may touch")
 	fs.StringVar(&c.LogLevel, "log-level", c.LogLevel, "info|debug|quiet")
 	fs.StringVar(&c.Preset, "preset", c.Preset, "settings profile: "+strings.Join(PresetNames(), "|"))
@@ -250,6 +259,7 @@ func (c *Config) ApplyEnv(get func(string) string) error {
 	s("REDX_GRPC_LISTEN", &c.GRPCListen)
 	s("REDX_ENGINE_DURABILITY", &c.EngineDurability)
 	s("REDX_MASTER_KEY_FILE", &c.MasterKeyFile) // a path, never the key
+	s("REDX_SECRETS_KDF", &c.SecretsKDF)        // interactive|librsx; new seals only
 	s("REDX_PRESET", &c.Preset)
 	s("REDX_BOOTSTRAP", &c.Bootstrap)
 	s("REDX_JOIN", &c.Join)
@@ -396,6 +406,14 @@ func (c *Config) Validate() error {
 	}
 	if c.AuditLog == "" {
 		c.AuditLog = filepath.Join(c.DataDir, "audit.log")
+	}
+	switch strings.ToLower(strings.TrimSpace(c.SecretsKDF)) {
+	case "", "interactive":
+		c.SecretsKDF = "interactive"
+	case "librsx":
+		c.SecretsKDF = "librsx"
+	default:
+		return fmt.Errorf("secrets_kdf must be interactive|librsx, got %q", c.SecretsKDF)
 	}
 	if c.ArgonMemKiB == 0 {
 		c.ArgonMemKiB = 19456

@@ -34,6 +34,9 @@ OPERATIONS: Dict[str, Dict[str, Any]] = {
     "deletePath": {"id": "deletePath", "group": "database", "method": "DELETE", "path": "/v1/db/{db}/path/{path}", "shorthand": "/v1/path/{path}", "auth": "write", "danger": "write", "danger_level": 1, "response": "json", "request": "", "host_confirm": "", "summary": "Delete the value at a path."},
     "pathQuery": {"id": "pathQuery", "group": "database", "method": "POST", "path": "/v1/db/{db}/query", "shorthand": "/v1/query", "auth": "read", "danger": "safe", "danger_level": 0, "response": "json", "request": "json", "host_confirm": "", "summary": "Path-pattern query, e.g. file:Box[ID=*].Name."},
     "bx": {"id": "bx", "group": "database", "method": "POST", "path": "/v1/db/{db}/bx", "shorthand": "/v1/bx", "auth": "read", "danger": "write", "danger_level": 1, "response": "json", "request": "json", "host_confirm": "", "summary": "Run one BoxQL command or {Tx[]} transaction with $params."},
+    "secretsInfo": {"id": "secretsInfo", "group": "database", "method": "GET", "path": "/v1/db/{db}/secrets", "shorthand": "", "auth": "read", "danger": "safe", "danger_level": 0, "response": "json", "request": "", "host_confirm": "", "summary": "Status of Red-SecretsXAI password seal. Does not read or rewrite stored ciphertext."},
+    "secretsSeal": {"id": "secretsSeal", "group": "database", "method": "POST", "path": "/v1/db/{db}/secrets/seal", "shorthand": "", "auth": "write", "danger": "write", "danger_level": 1, "response": "json", "request": "json", "host_confirm": "", "summary": "Seal new text with a Red-SecretsXAI password. Does not write the record."},
+    "secretsOpen": {"id": "secretsOpen", "group": "database", "method": "POST", "path": "/v1/db/{db}/secrets/open", "shorthand": "", "auth": "read", "danger": "safe", "danger_level": 0, "response": "json", "request": "json", "host_confirm": "", "summary": "Open a Red-SecretsXAI envelope the caller sent. Does not write."},
     "bxWatch": {"id": "bxWatch", "group": "database", "method": "GET", "path": "/v1/db/{db}/bx/watch", "shorthand": "/v1/bx/watch", "auth": "read", "danger": "safe", "danger_level": 0, "response": "websocket", "request": "", "host_confirm": "", "summary": "WebSocket: stream changes matching a {Watch[]} command."},
     "subscribe": {"id": "subscribe", "group": "database", "method": "GET", "path": "/v1/db/{db}/subscribe", "shorthand": "/v1/subscribe", "auth": "read", "danger": "safe", "danger_level": 0, "response": "websocket", "request": "", "host_confirm": "", "summary": "WebSocket: stream changes under a path prefix."},
     "listPacks": {"id": "listPacks", "group": "files", "method": "GET", "path": "/v1/db/{db}/pack", "shorthand": "", "auth": "read", "danger": "safe", "danger_level": 0, "response": "json", "request": "", "host_confirm": "", "summary": "File packs of a database."},
@@ -154,9 +157,9 @@ class Operations:
         """Online backup of all databases and keys as one archive (contains everything: store it safely). (GET /v1/admin/backup; auth host-admin; danger admin)"""
         return self.call("backup", confirm=confirm, headers=headers)
 
-    def list_files(self, *, db: Optional[str] = None, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+    def list_files(self, *, db: Optional[str] = None, query: Optional[Dict[str, Any]] = None, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
         """Files of a database with type and size. (GET /v1/db/{db}/files; auth admin; danger safe)"""
-        return self.call("listFiles", db=db, confirm=confirm, headers=headers)
+        return self.call("listFiles", db=db, query=query, confirm=confirm, headers=headers)
 
     def list_keys(self, *, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
         """Keys (ids, scopes, status; never the secrets). (GET /v1/keys; auth admin; danger safe)"""
@@ -209,6 +212,18 @@ class Operations:
     def bx(self, *, db: Optional[str] = None, body: Any = None, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
         """Run one BoxQL command or {Tx[]} transaction with $params. (POST /v1/db/{db}/bx; auth read; danger write)"""
         return self.call("bx", db=db, body=body, confirm=confirm, headers=headers)
+
+    def secrets_info(self, *, db: Optional[str] = None, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Status of Red-SecretsXAI password seal. Does not read or rewrite stored ciphertext. (GET /v1/db/{db}/secrets; auth read; danger safe)"""
+        return self.call("secretsInfo", db=db, confirm=confirm, headers=headers)
+
+    def secrets_seal(self, *, db: Optional[str] = None, body: Any = None, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Seal new text with a Red-SecretsXAI password. Does not write the record. (POST /v1/db/{db}/secrets/seal; auth write; danger write)"""
+        return self.call("secretsSeal", db=db, body=body, confirm=confirm, headers=headers)
+
+    def secrets_open(self, *, db: Optional[str] = None, body: Any = None, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
+        """Open a Red-SecretsXAI envelope the caller sent. Does not write. (POST /v1/db/{db}/secrets/open; auth read; danger safe)"""
+        return self.call("secretsOpen", db=db, body=body, confirm=confirm, headers=headers)
 
     def list_packs(self, *, db: Optional[str] = None, confirm: bool = False, headers: Optional[Dict[str, str]] = None) -> Any:
         """File packs of a database. (GET /v1/db/{db}/pack; auth read; danger safe)"""

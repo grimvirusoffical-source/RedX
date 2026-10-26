@@ -35,6 +35,8 @@ default_db = "default"                # database served by /v1/path/...
 # --- .red-xai-sec encryption and .red-xai-code scripts (0.2.0) ---
 # master_key_file = "/etc/redx/master.key"   # create with `redxd keygen --out FILE`; must be mode 0600; the key is
 #                                            # never read from env or flags. Default: <data_dir>/master.key if present.
+# secrets_kdf = "interactive"       # interactive (64 MiB) | librsx (256 MiB). New record seals only.
+#                                   # Does not re-wrap packs or existing Red-SecretsXAI payloads. See docs/secrets.md.
 # code_allowed_boxes = ["players.red-xai.db:Player"]   # file:Box globs scripts may touch; empty = none
 
 # --- Red-XAI Accounts sign-in for the web console (0.5) ---  see docs/accounts.md

@@ -1106,12 +1106,20 @@
   },
   "/v1/db/{db}/files": {
    "get": {
+    "description": "The full list and raw file text need admin. ?kind=records needs read and returns only record files the key prefix allows. It does not list packs, policies, or other sealed files, and it does not read or rewrite them.",
     "operationId": "listFiles",
     "parameters": [
      {
       "in": "path",
       "name": "db",
       "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "kind",
       "schema": {
        "type": "string"
       }
@@ -2746,6 +2754,163 @@
     "x-redx-danger": "dangerous",
     "x-redx-danger-level": 3,
     "x-rottenapple-level": "developer-tool"
+   }
+  },
+  "/v1/db/{db}/secrets": {
+   "get": {
+    "description": "Reports the pure-Go binding and the Argon2id profile for new seals. migrates and touches_existing are false.",
+    "operationId": "secretsInfo",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "db",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Status of Red-SecretsXAI password seal. Does not read or rewrite stored ciphertext.",
+    "tags": [
+     "database"
+    ],
+    "x-redx-auth": "read",
+    "x-redx-danger": "safe",
+    "x-redx-danger-level": 0,
+    "x-rottenapple-level": "L1"
+   }
+  },
+  "/v1/db/{db}/secrets/open": {
+   "post": {
+    "description": "Wrong password is 422, not 401. Does not modify packs or other sealed data.",
+    "operationId": "secretsOpen",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "db",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "box": {
+          "type": "string"
+         },
+         "password": {
+          "type": "string"
+         },
+         "path": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Open a Red-SecretsXAI envelope the caller sent. Does not write.",
+    "tags": [
+     "database"
+    ],
+    "x-redx-auth": "read",
+    "x-redx-danger": "safe",
+    "x-redx-danger-level": 0,
+    "x-rottenapple-level": "L1"
+   }
+  },
+  "/v1/db/{db}/secrets/seal": {
+   "post": {
+    "description": "Returns Box text and stored=false. Does not re-wrap existing ciphertext. Saving the record is a separate PUT.",
+    "operationId": "secretsSeal",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "db",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "password": {
+          "type": "string"
+         },
+         "path": {
+          "type": "string"
+         },
+         "plaintext": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK"
+     },
+     "default": {
+      "$ref": "#/components/responses/Error"
+     }
+    },
+    "summary": "Seal new text with a Red-SecretsXAI password. Does not write the record.",
+    "tags": [
+     "database"
+    ],
+    "x-redx-auth": "write",
+    "x-redx-danger": "write",
+    "x-redx-danger-level": 1,
+    "x-rottenapple-level": "L1"
    }
   },
   "/v1/db/{db}/stats": {

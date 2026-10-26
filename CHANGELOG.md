@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+* Console: Data Explorer can seal and open one record value with Red-SecretsXAI password mode (`GET/POST /v1/db/{db}/secrets…`). Seal and Open do not write; Save stores that one record. Pack AES-256-GCM and any existing sealed payload are not migrated or rewritten. See [secrets](docs/secrets.md).
+* Data Explorer, BoxQL Studio, and Live Watch list record files with `GET /v1/db/{db}/files?kind=records` (read or write key). The full file list stays admin. Existing pack and policy bytes are not read or rewritten by that list.
+* `scripts/build.sh` still cross-compiles unsigned `redxd` archives for linux, darwin, and windows. See [hub](docs/hub.md) for spawning the host and opening the console.
 * Hosted tenants: an API key minted for an account follows the plan gate. After the plan is read-only or suspended, that key gets the same `402` as the console session, and quota checks still apply. Host-admin keys and owner sessions are unchanged.
 * Hosted tenants: a signed-in non-owner with an active or trialing RedX Hosted plan creates and uses only its own databases and API keys. Names are namespaced. Quotas (traffic, on-disk storage, host switches) are enforced. A lapsed plan becomes read-only for 3 days after period end, then suspended; databases are kept. See [billing](docs/billing.md) and [API](docs/api.md).
 * `trusted_proxies` / `REDX_TRUSTED_PROXIES`: when the direct peer is listed, client IP for rate limits and audit comes from `X-Forwarded-For` (rightmost untrusted hop) or `X-Real-IP`. Other peers cannot spoof it.

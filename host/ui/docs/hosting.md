@@ -36,6 +36,8 @@ Related documents: [Getting started](getting-started.md) · [Configuration](conf
 Download the archive for your platform from the [releases page](https://github.com/grimvirusoffical-source/RedX/releases), or build from source (any machine with Go 1.22 or newer): `scripts/build.sh` (or `make dist`) writes `dist/redx-<ver>-<os>-<arch>/` and the matching archives.
 Targets: linux amd64 / arm64 / armv7, darwin amd64 / arm64, windows amd64 / arm64. Verify a download with `sha256sum -c SHA256SUMS`.
 
+Those archives and the `redxd` binaries inside them are **unsigned**. There is no Authenticode signature and no Apple notarization. macOS Gatekeeper and Windows SmartScreen warn on first run. See [Installers](installers.md).
+
 Desktop installers (Windows setup `.exe`, macOS `.dmg` / `.pkg`, Debian `.deb`) start the host and open the console with one click; they are **unsigned**. See [Installers](installers.md).
 
 ### Linux (systemd), including Raspberry Pi OS (arm64 / armv7)

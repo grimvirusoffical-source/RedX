@@ -69,4 +69,5 @@ for t in "${TARGETS[@]}"; do
 done
 (cd dist && { ls *.tar.gz *.zip 2>/dev/null | xargs -r sha256sum; } > SHA256SUMS || true)
 echo "done: dist/"
+echo "note: these redxd/redx binaries and archives are unsigned (no Authenticode, no Apple notarization)."
 if [ -n "${FAILED:-}" ]; then echo "failed targets:$FAILED" >&2; exit 1; fi

@@ -35,6 +35,9 @@
 #define REDX_OP_DELETE_PATH "deletePath" /* DELETE /v1/db/{db}/path/{path}, write */
 #define REDX_OP_PATH_QUERY "pathQuery" /* POST /v1/db/{db}/query, safe */
 #define REDX_OP_BX "bx" /* POST /v1/db/{db}/bx, write */
+#define REDX_OP_SECRETS_INFO "secretsInfo" /* GET /v1/db/{db}/secrets, safe */
+#define REDX_OP_SECRETS_SEAL "secretsSeal" /* POST /v1/db/{db}/secrets/seal, write */
+#define REDX_OP_SECRETS_OPEN "secretsOpen" /* POST /v1/db/{db}/secrets/open, safe */
 #define REDX_OP_LIST_PACKS "listPacks" /* GET /v1/db/{db}/pack, safe */
 #define REDX_OP_PACK_LIST "packList" /* GET /v1/db/{db}/pack/{pack}/ls/{folder}, safe */
 #define REDX_OP_PACK_STAT "packStat" /* GET /v1/db/{db}/pack/{pack}/stat/{file}, safe */

@@ -29,7 +29,7 @@ export function accountButtons(cfg, onSignup) {
     h('div', { class: 'or-sep' }, h('span', null, 'or')),
     h('a', { class: 'btn primary big', id: 'acct-signin', href: '/v1/auth/login' }, icon('user', 18), ' Sign in with Red-XAI Account'),
     h('button', { class: 'btn big', id: 'acct-signup', type: 'button', onclick: onSignup }, 'Create a Red-XAI Account'),
-    h('p', { class: 'muted small' }, 'One Red-XAI Account works in every Red-XAI app. ', h('a', { href: cfg.forgot_password, rel: 'noopener' }, 'Forgot your password?')));
+    h('p', { class: 'muted small' }, 'One Red-XAI Account works in every Red-XAI app, including the website. RedX does not keep a separate user list. ', h('a', { href: cfg.forgot_password, rel: 'noopener' }, 'Forgot your password?')));
 }
 
 // ---------- rules (mirror of the Red-XAI Accounts v1 contract; the server checks again) ----------

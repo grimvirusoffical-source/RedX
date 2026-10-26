@@ -48,6 +48,6 @@ No candidate → deny. Invalid input (unknown action, empty file, control charac
 * There is no automatic rotation driver; the caller iterates over files and calls `Rewrap`.
 * `Rewrap` does not change the data key. Someone who held the old master key and a copy of the old header can still decrypt old data, so recovering from a key compromise requires a full re-encrypt.
 * The policy decision carries the rule name only; there is no per-decision audit log.
-* `Encrypt` rules apply to packs only. Database files are not encrypted by RedX; use disk encryption.
+* `Encrypt` rules apply to packs only. Database files are not encrypted by RedX; use disk encryption. The console can seal one new record value with Red-SecretsXAI ([secrets.md](secrets.md)). That path does not change pack AES and does not rewrite existing ciphertext.
 * The master key is read from a key file with strict permissions (see [Security](security.md#master-key-and-encrypted-packs)). Other sources such as a KMS are not supported.
 * Hand-placed `.red-xai-sec` files are read when the database opens.
