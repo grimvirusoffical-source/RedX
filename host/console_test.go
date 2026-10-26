@@ -174,7 +174,7 @@ func TestConsoleAssetsComplete(t *testing.T) {
 }
 
 func TestConsoleDocsInSync(t *testing.T) {
-	for _, f := range []string{"console", "boxql", "box-grammar", "hosting", "clustering", "connect"} {
+	for _, f := range []string{"console", "boxql", "box-grammar", "hosting", "clustering", "connect", "secrets"} {
 		want, err := os.ReadFile(filepath.Join("..", "docs", f+".md"))
 		if err != nil {
 			t.Fatal(err)

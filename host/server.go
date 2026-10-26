@@ -266,6 +266,8 @@ func (h *Host) dbRoute(w http.ResponseWriter, r *http.Request, db, sub string) {
 		h.dropDBHandler(w, r, db)
 	case sub == "files" || strings.HasPrefix(sub, "files/"):
 		h.filesRoute(w, r, db, strings.TrimPrefix(strings.TrimPrefix(sub, "files"), "/"))
+	case sub == "secrets" || strings.HasPrefix(sub, "secrets/"):
+		h.secretsRoute(w, r, db, strings.Trim(strings.TrimPrefix(sub, "secrets"), "/"))
 	default:
 		if !h.extrasRoute(w, r, db, sub) {
 			writeErr(w, 404, "not found")

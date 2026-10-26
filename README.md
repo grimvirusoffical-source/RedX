@@ -100,7 +100,7 @@ Release binaries for every platform are cross-compiled from Linux. Only the Linu
 * Failover is manual (`redx node promote`). There is no automatic election, quorum write or multi-leader mode. A promoted node fences the old leader as soon as it can reach it; a partitioned old leader can keep accepting writes until then.
 * Index, pack and media contents are not replicated; their definitions are.
 * Pulse rule timers are held in memory and are lost on restart or failover.
-* Database files are not encrypted by RedX; use disk encryption. Pack encryption is available through policy rules.
+* Database files are not encrypted by RedX; use disk encryption. Pack encryption (AES-256-GCM) is available through policy rules and is unchanged. The console can seal individual new record text with Red-SecretsXAI ([docs/secrets.md](docs/secrets.md)) without encrypting the file or re-wrapping existing packs or payloads.
 * Binaries are unsigned. macOS Gatekeeper and Windows SmartScreen will show a warning on first run.
 * The Windows, macOS, ARM and Docker paths, and the service installers, have not been run on those platforms.
 * gRPC is not implemented. `grpc_listen` is accepted and ignored.

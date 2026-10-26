@@ -71,6 +71,12 @@ export interface RedXOperations {
   pathQuery(opts?: { db?: string; body?: { q?: string }; headers?: Record<string, string> }): Promise<any>;
   /** Run one BoxQL command or {Tx[]} transaction with $params. (POST /v1/db/{db}/bx; auth read; danger write) */
   bx(opts?: { db?: string; body?: { explain?: boolean; params?: Record<string, unknown>; q?: string }; headers?: Record<string, string> }): Promise<any>;
+  /** Status of Red-SecretsXAI password seal. Does not read or rewrite stored ciphertext. (GET /v1/db/{db}/secrets; auth read; danger safe) */
+  secretsInfo(opts?: { db?: string; headers?: Record<string, string> }): Promise<any>;
+  /** Seal new text with a Red-SecretsXAI password. Does not write the record. (POST /v1/db/{db}/secrets/seal; auth write; danger write) */
+  secretsSeal(opts?: { db?: string; body?: { password?: string; path?: string; plaintext?: string }; headers?: Record<string, string> }): Promise<any>;
+  /** Open a Red-SecretsXAI envelope the caller sent. Does not write. (POST /v1/db/{db}/secrets/open; auth read; danger safe) */
+  secretsOpen(opts?: { db?: string; body?: { box?: string; password?: string; path?: string }; headers?: Record<string, string> }): Promise<any>;
   /** File packs of a database. (GET /v1/db/{db}/pack; auth read; danger safe) */
   listPacks(opts?: { db?: string; headers?: Record<string, string> }): Promise<any>;
   /** List a folder of a pack. (GET /v1/db/{db}/pack/{pack}/ls/{folder}; auth read; danger safe) */

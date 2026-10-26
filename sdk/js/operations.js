@@ -32,6 +32,9 @@ const OPERATIONS = Object.freeze({
   deletePath: Object.freeze({ id: "deletePath", group: "database", method: "DELETE", path: "/v1/db/{db}/path/{path}", shorthand: "/v1/path/{path}", auth: "write", danger: "write", dangerLevel: 1, response: "json", request: "", hostConfirm: "", summary: "Delete the value at a path." }),
   pathQuery: Object.freeze({ id: "pathQuery", group: "database", method: "POST", path: "/v1/db/{db}/query", shorthand: "/v1/query", auth: "read", danger: "safe", dangerLevel: 0, response: "json", request: "json", hostConfirm: "", summary: "Path-pattern query, e.g. file:Box[ID=*].Name." }),
   bx: Object.freeze({ id: "bx", group: "database", method: "POST", path: "/v1/db/{db}/bx", shorthand: "/v1/bx", auth: "read", danger: "write", dangerLevel: 1, response: "json", request: "json", hostConfirm: "", summary: "Run one BoxQL command or {Tx[]} transaction with $params." }),
+  secretsInfo: Object.freeze({ id: "secretsInfo", group: "database", method: "GET", path: "/v1/db/{db}/secrets", shorthand: "", auth: "read", danger: "safe", dangerLevel: 0, response: "json", request: "", hostConfirm: "", summary: "Status of Red-SecretsXAI password seal. Does not read or rewrite stored ciphertext." }),
+  secretsSeal: Object.freeze({ id: "secretsSeal", group: "database", method: "POST", path: "/v1/db/{db}/secrets/seal", shorthand: "", auth: "write", danger: "write", dangerLevel: 1, response: "json", request: "json", hostConfirm: "", summary: "Seal new text with a Red-SecretsXAI password. Does not write the record." }),
+  secretsOpen: Object.freeze({ id: "secretsOpen", group: "database", method: "POST", path: "/v1/db/{db}/secrets/open", shorthand: "", auth: "read", danger: "safe", dangerLevel: 0, response: "json", request: "json", hostConfirm: "", summary: "Open a Red-SecretsXAI envelope the caller sent. Does not write." }),
   bxWatch: Object.freeze({ id: "bxWatch", group: "database", method: "GET", path: "/v1/db/{db}/bx/watch", shorthand: "/v1/bx/watch", auth: "read", danger: "safe", dangerLevel: 0, response: "websocket", request: "", hostConfirm: "", summary: "WebSocket: stream changes matching a {Watch[]} command." }),
   subscribe: Object.freeze({ id: "subscribe", group: "database", method: "GET", path: "/v1/db/{db}/subscribe", shorthand: "/v1/subscribe", auth: "read", danger: "safe", dangerLevel: 0, response: "websocket", request: "", hostConfirm: "", summary: "WebSocket: stream changes under a path prefix." }),
   listPacks: Object.freeze({ id: "listPacks", group: "files", method: "GET", path: "/v1/db/{db}/pack", shorthand: "", auth: "read", danger: "safe", dangerLevel: 0, response: "json", request: "", hostConfirm: "", summary: "File packs of a database." }),
@@ -125,6 +128,9 @@ function install(proto) {
   if (!proto.deletePath) proto.deletePath = function (opts = {}) { return this.call("deletePath", opts); };
   if (!proto.pathQuery) proto.pathQuery = function (opts = {}) { return this.call("pathQuery", opts); };
   if (!proto.bx) proto.bx = function (opts = {}) { return this.call("bx", opts); };
+  if (!proto.secretsInfo) proto.secretsInfo = function (opts = {}) { return this.call("secretsInfo", opts); };
+  if (!proto.secretsSeal) proto.secretsSeal = function (opts = {}) { return this.call("secretsSeal", opts); };
+  if (!proto.secretsOpen) proto.secretsOpen = function (opts = {}) { return this.call("secretsOpen", opts); };
   if (!proto.listPacks) proto.listPacks = function (opts = {}) { return this.call("listPacks", opts); };
   if (!proto.packList) proto.packList = function (opts = {}) { return this.call("packList", opts); };
   if (!proto.packStat) proto.packStat = function (opts = {}) { return this.call("packStat", opts); };

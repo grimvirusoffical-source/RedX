@@ -376,6 +376,49 @@
    "notes": "Get/Require/Explain need read; Add/Set/Delete and a Tx containing one need write."
   },
   {
+   "id": "secretsInfo",
+   "group": "database",
+   "method": "GET",
+   "path": "/v1/db/{db}/secrets",
+   "auth": "read",
+   "danger": "safe",
+   "summary": "Status of Red-SecretsXAI password seal. Does not read or rewrite stored ciphertext.",
+   "response": "json",
+   "notes": "Reports the pure-Go binding and the Argon2id profile for new seals. migrates and touches_existing are false."
+  },
+  {
+   "id": "secretsSeal",
+   "group": "database",
+   "method": "POST",
+   "path": "/v1/db/{db}/secrets/seal",
+   "auth": "write",
+   "danger": "write",
+   "summary": "Seal new text with a Red-SecretsXAI password. Does not write the record.",
+   "response": "json",
+   "body": {
+    "password": "string",
+    "plaintext": "string",
+    "path": "string"
+   },
+   "notes": "Returns Box text and stored=false. Does not re-wrap existing ciphertext. Saving the record is a separate PUT."
+  },
+  {
+   "id": "secretsOpen",
+   "group": "database",
+   "method": "POST",
+   "path": "/v1/db/{db}/secrets/open",
+   "auth": "read",
+   "danger": "safe",
+   "summary": "Open a Red-SecretsXAI envelope the caller sent. Does not write.",
+   "response": "json",
+   "body": {
+    "password": "string",
+    "box": "string",
+    "path": "string"
+   },
+   "notes": "Wrong password is 422, not 401. Does not modify packs or other sealed data."
+  },
+  {
    "id": "bxWatch",
    "group": "database",
    "method": "GET",

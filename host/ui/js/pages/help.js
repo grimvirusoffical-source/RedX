@@ -11,6 +11,7 @@ export const DOCS = [
   ['hosting', 'Hosting guide', 'Install, run as a service, TLS, troubleshooting.'],
   ['clustering', 'Clustering', 'Adding nodes, pairing codes, failover, fencing and repoint.'],
   ['connect', 'Connecting apps', 'How apps such as Rotten Apple get their own workspace and key.'],
+  ['secrets', 'Red-SecretsXAI', 'Seal or open one record value with a password. Does not rewrite packs or existing ciphertext.'],
 ];
 
 export default async function render(ctx) {
@@ -24,7 +25,8 @@ export default async function render(ctx) {
           h('dt', null, 'Where is my admin key?'), h('dd', null, 'It was shown once when you created it. If it is lost, an admin on the host can make a new one with ', h('code', null, 'redx key create --offline --db "*" --scope admin'), '.'),
           h('dt', null, 'What is BoxQL?'), h('dd', null, 'RedX\'s own query language. ', h('a', { href: '#/help/boxql' }, 'Read the guide'), ' or open the ', h('a', { href: '#/studio' }, 'BoxQL Studio'), ' and try the snippets.'),
           h('dt', null, 'Do I need a terminal?'), h('dd', null, 'No. Every page shows the terminal equivalent in a collapsible panel if you want it.'),
-          h('dt', null, 'Is my data sent anywhere?'), h('dd', null, 'No. The console talks only to this host. It loads no fonts, scripts or images from the internet.'))),
+          h('dt', null, 'Is my data sent anywhere?'), h('dd', null, 'No. The console talks only to this host. It loads no fonts, scripts or images from the internet.'),
+          h('dt', null, 'How do I encrypt a record?'), h('dd', null, 'Open the record in the ', h('a', { href: '#/data' }, 'Data Explorer'), ', switch to Box text, and press Seal. That uses a Red-SecretsXAI password, not your account password, and nothing is stored until you press Save. Pack files stay on their existing AES policy. See ', h('a', { href: '#/help/secrets' }, 'Red-SecretsXAI'), '.'))),
       h('div', { class: 'card', id: 'about', style: { marginTop: '16px' } }, h('h3', null, 'About RedX'), h('p', { class: 'about-copy' }, ABOUT)),
       terminalPanel([{ label: 'Open this console', cmd: 'redxd open' }, { label: 'Check your setup', cmd: 'redxd doctor' }]));
     return root;

@@ -72,7 +72,7 @@ See *Appearance* below.
 |---|---|---|
 | **Dashboard** | live requests/s and latency sparklines, databases, keys, uptime, cluster role, recent audit events, *Get started* checklist | `redx stats`, `redx doctor`, `curl .../v1/admin/status` |
 | **Databases** | create (name validated), list files per database, delete with typed-name confirmation (`DELETE /v1/db/{name}?confirm=name`) | `redx db create`, `redx db list` (dropping is `curl -X DELETE ...?confirm=NAME`) |
-| **Data Explorer** | file/box tree with counts, paginated table, filter builder that **writes the BoxQL for you**, record editor (Box text or JSON), TTL and sliding TTL, new record (next free ID), delete, *Open in Studio* | `redx get/set/del`, `redx bx` |
+| **Data Explorer** | file/box tree with counts, paginated table, filter builder that **writes the BoxQL for you**, record editor (Box text or JSON), TTL and sliding TTL, new record (next free ID), delete, *Open in Studio*. **Seal** and **Open** run Red-SecretsXAI on the Box text in the editor and do not write until you press Save. See [Red-SecretsXAI](secrets.md). | `redx get/set/del`, `redx bx` |
 | **BoxQL Studio** | own editor with syntax highlighting, context-aware autocomplete (verbs, files, boxes, fields, options), `$param` inputs, `Ctrl+Enter`, **Explain**, Table / JSON / Box-text results, history, saved queries, cheat-sheet, snippets, errors with `line:col` squiggles | `redx bx '...' --param/--sparam` |
 | **Live Watch** *(Advanced)* | WebSocket to `bx/watch` or a topic, pause, clear, download, 500-event cap, auto-reconnect | `redx bx '{Watch[]} = ...'` / `websocat` |
 | **API Keys** | list, create (label, database, scope, expiry, advanced prefix/roles/rate), **rotate** with a grace period, revoke with confirmation. A new key is shown once with Copy, Download, a ready-made `curl` example and a sign-in QR | `redx key create/list/rotate/revoke` |
@@ -81,7 +81,7 @@ See *Appearance* below.
 | **Settings** | theme, simple/advanced, sign out, reset the checklist, clear saved queries, service-worker status, the effective configuration (redacted, grouped, with env-var overrides marked), TLS fingerprint | `redx doctor` |
 | **Connected apps** | apps that got a workspace through *Connect* (Rotten Apple, Gendragoon, ...): workspace, access, status, **Revoke**; open requests with *Deny* | `curl .../v1/connect/apps` |
 | **Connect an app** (opened by an app's link, `#/connect?...`) | consent page: the app's name from RedX's own list, the access in plain words, the workspace name, **Approve** / **Deny**. See [Connecting apps](connect.md) | |
-| **Help** | the console, BoxQL, Box grammar, hosting, clustering and connect guides rendered in the console (embedded copies, table of contents) | |
+| **Help** | the console, BoxQL, Box grammar, hosting, clustering, connect and Red-SecretsXAI guides rendered in the console (embedded copies, table of contents) | |
 | **Raw editor** *(Advanced)* | open a file of a database as text, validate it with the server's parser, save | `redx` / `curl` per file type |
 | **Security · Rules · Code** *(Advanced)* | readable summaries of the access policy (`sec`), pulse rules, scripts (`code`) and search indexes (`idx`); links into the raw editor | `redx pulse/idx ...` |
 | **Cluster & nodes** *(Advanced)* | role, members, lag, heartbeat; **promote** with typed confirmation and warnings (lost writes, divergence); join help | `redx node status/promote` |
@@ -99,6 +99,7 @@ All pages talk to the real `/v1` API of the running host; nothing in the console
   There is no free-disk-space readout, only the size of the data folder.
 * **Cluster**: shows and promotes; it cannot start another machine for you. Failover is manual: there is no
   automatic election (see [Clustering](clustering.md)).
+* **Data Explorer seals**: Seal and Open change the editor only. Saving stores that one record. The page refuses to seal text that is already a `red-xai-encrypt/rsxc1` envelope. Pack files and other sealed payloads are not rewritten. Studio does not seal queries.
 * **Watch**: events stream while the tab is open; nothing is stored.
 * **Presets**: write the configuration file; **a restart of `redxd` is required** for them to take effect.
   Settings that come from environment variables win over the file and are flagged. A preset cannot set the
@@ -227,6 +228,9 @@ Existing routes are reused as they are. The console needed a few more; all are c
 | `GET /v1/admin/status` `audit` `config` | host admin | dashboard data, audit tail, redacted effective config |
 | `GET /v1/admin/presets[/NAME]`, `POST .../apply` | host admin; owner while Accounts is on if the apply sets `join` or changes `role` or `advertise` | preset list, diff, write config file |
 | `GET /v1/db/{db}/files[/name]` | read | file list / file text for the raw editor |
+| `GET /v1/db/{db}/secrets` | read | Red-SecretsXAI status (does not read stored ciphertext) |
+| `POST /v1/db/{db}/secrets/seal` | write | seal new text; does not write the record |
+| `POST /v1/db/{db}/secrets/open` | read | open an envelope the caller sent; does not write |
 | `DELETE /v1/db/{db}?confirm=name` | host admin | drop a database |
 | `POST /v1/cluster/join` (code form) | join code | the join-code flow used by `redxd join` |
 | `/v1/connect/*` | see [Connecting apps](connect.md) | app connect handshake, Connected apps, revoke |

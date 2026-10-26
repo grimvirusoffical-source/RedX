@@ -52,6 +52,9 @@ type Host struct {
 	diskAt      time.Time
 	diskBytes   int64
 
+	secretsMu   sync.Mutex
+	secretsFail map[string][]time.Time // recent failed opens, per key id (not the password)
+
 	upd *updater // host update manifests, rollouts, snapshots
 
 	started       time.Time

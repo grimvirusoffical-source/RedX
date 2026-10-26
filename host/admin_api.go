@@ -233,6 +233,7 @@ var envKeys = map[string]string{
 	"REDX_ACCOUNTS_ISSUER": "accounts_issuer", "REDX_ACCOUNTS_CLIENT_ID": "accounts_client_id", "REDX_ACCOUNTS_REDIRECT_URL": "accounts_redirect_url",
 	"REDX_ACCOUNTS_MASTER_DB": "accounts_master_db", "REDXAI_OWNER_EMAILS": "owner_emails",
 	"REDX_TRUSTED_PROXIES": "trusted_proxies",
+	"REDX_SECRETS_KDF":     "secrets_kdf",
 }
 
 // envOverrides lists settings currently pinned by environment variables (they beat the config file).

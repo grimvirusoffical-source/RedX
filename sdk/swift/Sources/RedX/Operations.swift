@@ -48,6 +48,9 @@ public let operations: [String: Operation] = [
     "deletePath": Operation(id: "deletePath", group: "database", method: "DELETE", path: "/v1/db/{db}/path/{path}", shorthand: "/v1/path/{path}", auth: "write", response: "json", request: "", hostConfirm: "", summary: "Delete the value at a path.", danger: .write),
     "pathQuery": Operation(id: "pathQuery", group: "database", method: "POST", path: "/v1/db/{db}/query", shorthand: "/v1/query", auth: "read", response: "json", request: "json", hostConfirm: "", summary: "Path-pattern query, e.g. file:Box[ID=*].Name.", danger: .safe),
     "bx": Operation(id: "bx", group: "database", method: "POST", path: "/v1/db/{db}/bx", shorthand: "/v1/bx", auth: "read", response: "json", request: "json", hostConfirm: "", summary: "Run one BoxQL command or {Tx[]} transaction with $params.", danger: .write),
+    "secretsInfo": Operation(id: "secretsInfo", group: "database", method: "GET", path: "/v1/db/{db}/secrets", shorthand: "", auth: "read", response: "json", request: "", hostConfirm: "", summary: "Status of Red-SecretsXAI password seal. Does not read or rewrite stored ciphertext.", danger: .safe),
+    "secretsSeal": Operation(id: "secretsSeal", group: "database", method: "POST", path: "/v1/db/{db}/secrets/seal", shorthand: "", auth: "write", response: "json", request: "json", hostConfirm: "", summary: "Seal new text with a Red-SecretsXAI password. Does not write the record.", danger: .write),
+    "secretsOpen": Operation(id: "secretsOpen", group: "database", method: "POST", path: "/v1/db/{db}/secrets/open", shorthand: "", auth: "read", response: "json", request: "json", hostConfirm: "", summary: "Open a Red-SecretsXAI envelope the caller sent. Does not write.", danger: .safe),
     "bxWatch": Operation(id: "bxWatch", group: "database", method: "GET", path: "/v1/db/{db}/bx/watch", shorthand: "/v1/bx/watch", auth: "read", response: "websocket", request: "", hostConfirm: "", summary: "WebSocket: stream changes matching a {Watch[]} command.", danger: .safe),
     "subscribe": Operation(id: "subscribe", group: "database", method: "GET", path: "/v1/db/{db}/subscribe", shorthand: "/v1/subscribe", auth: "read", response: "websocket", request: "", hostConfirm: "", summary: "WebSocket: stream changes under a path prefix.", danger: .safe),
     "listPacks": Operation(id: "listPacks", group: "files", method: "GET", path: "/v1/db/{db}/pack", shorthand: "", auth: "read", response: "json", request: "", hostConfirm: "", summary: "File packs of a database.", danger: .safe),
@@ -268,6 +271,24 @@ extension RedXClient {
     @discardableResult
     public func bx(db: String? = nil, body: [String: Any]? = nil) async throws -> RedXResult {
         try await call("bx", params: [:], db: db, body: body)
+    }
+
+    /// Status of Red-SecretsXAI password seal. Does not read or rewrite stored ciphertext. (GET /v1/db/{db}/secrets; auth read; danger safe)
+    @discardableResult
+    public func secretsInfo(db: String? = nil) async throws -> RedXResult {
+        try await call("secretsInfo", params: [:], db: db)
+    }
+
+    /// Seal new text with a Red-SecretsXAI password. Does not write the record. (POST /v1/db/{db}/secrets/seal; auth write; danger write)
+    @discardableResult
+    public func secretsSeal(db: String? = nil, body: [String: Any]? = nil) async throws -> RedXResult {
+        try await call("secretsSeal", params: [:], db: db, body: body)
+    }
+
+    /// Open a Red-SecretsXAI envelope the caller sent. Does not write. (POST /v1/db/{db}/secrets/open; auth read; danger safe)
+    @discardableResult
+    public func secretsOpen(db: String? = nil, body: [String: Any]? = nil) async throws -> RedXResult {
+        try await call("secretsOpen", params: [:], db: db, body: body)
     }
 
     /// File packs of a database. (GET /v1/db/{db}/pack; auth read; danger safe)

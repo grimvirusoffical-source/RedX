@@ -32,6 +32,9 @@ var Operations = map[string]Operation{
 	"deletePath":            {ID: "deletePath", Group: "database", Method: "DELETE", Path: "/v1/db/{db}/path/{path}", Shorthand: "/v1/path/{path}", Auth: "write", Danger: DangerWrite, Response: "json", Request: "", HostConfirm: "", Summary: "Delete the value at a path."},
 	"pathQuery":             {ID: "pathQuery", Group: "database", Method: "POST", Path: "/v1/db/{db}/query", Shorthand: "/v1/query", Auth: "read", Danger: DangerSafe, Response: "json", Request: "json", HostConfirm: "", Summary: "Path-pattern query, e.g. file:Box[ID=*].Name."},
 	"bx":                    {ID: "bx", Group: "database", Method: "POST", Path: "/v1/db/{db}/bx", Shorthand: "/v1/bx", Auth: "read", Danger: DangerWrite, Response: "json", Request: "json", HostConfirm: "", Summary: "Run one BoxQL command or {Tx[]} transaction with $params."},
+	"secretsInfo":           {ID: "secretsInfo", Group: "database", Method: "GET", Path: "/v1/db/{db}/secrets", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "Status of Red-SecretsXAI password seal. Does not read or rewrite stored ciphertext."},
+	"secretsSeal":           {ID: "secretsSeal", Group: "database", Method: "POST", Path: "/v1/db/{db}/secrets/seal", Shorthand: "", Auth: "write", Danger: DangerWrite, Response: "json", Request: "json", HostConfirm: "", Summary: "Seal new text with a Red-SecretsXAI password. Does not write the record."},
+	"secretsOpen":           {ID: "secretsOpen", Group: "database", Method: "POST", Path: "/v1/db/{db}/secrets/open", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "json", Request: "json", HostConfirm: "", Summary: "Open a Red-SecretsXAI envelope the caller sent. Does not write."},
 	"bxWatch":               {ID: "bxWatch", Group: "database", Method: "GET", Path: "/v1/db/{db}/bx/watch", Shorthand: "/v1/bx/watch", Auth: "read", Danger: DangerSafe, Response: "websocket", Request: "", HostConfirm: "", Summary: "WebSocket: stream changes matching a {Watch[]} command."},
 	"subscribe":             {ID: "subscribe", Group: "database", Method: "GET", Path: "/v1/db/{db}/subscribe", Shorthand: "/v1/subscribe", Auth: "read", Danger: DangerSafe, Response: "websocket", Request: "", HostConfirm: "", Summary: "WebSocket: stream changes under a path prefix."},
 	"listPacks":             {ID: "listPacks", Group: "files", Method: "GET", Path: "/v1/db/{db}/pack", Shorthand: "", Auth: "read", Danger: DangerSafe, Response: "json", Request: "", HostConfirm: "", Summary: "File packs of a database."},
@@ -280,6 +283,27 @@ func (c *Client) DeletePath(ctx context.Context, path string, a Args) (*Result, 
 // POST /v1/db/{db}/query, auth read, danger safe.
 func (c *Client) PathQuery(ctx context.Context, a Args) (*Result, error) {
 	return c.Call(ctx, "pathQuery", a)
+}
+
+// SecretsInfo: Status of Red-SecretsXAI password seal. Does not read or rewrite stored ciphertext.
+//
+// GET /v1/db/{db}/secrets, auth read, danger safe.
+func (c *Client) SecretsInfo(ctx context.Context, a Args) (*Result, error) {
+	return c.Call(ctx, "secretsInfo", a)
+}
+
+// SecretsSeal: Seal new text with a Red-SecretsXAI password. Does not write the record.
+//
+// POST /v1/db/{db}/secrets/seal, auth write, danger write.
+func (c *Client) SecretsSeal(ctx context.Context, a Args) (*Result, error) {
+	return c.Call(ctx, "secretsSeal", a)
+}
+
+// SecretsOpen: Open a Red-SecretsXAI envelope the caller sent. Does not write.
+//
+// POST /v1/db/{db}/secrets/open, auth read, danger safe.
+func (c *Client) SecretsOpen(ctx context.Context, a Args) (*Result, error) {
+	return c.Call(ctx, "secretsOpen", a)
 }
 
 // ListPacks: File packs of a database.

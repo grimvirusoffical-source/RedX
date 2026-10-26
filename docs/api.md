@@ -193,6 +193,8 @@ against the running key's grant, and against the policy. The allow-list is defin
 There is no persistent state between runs. Hand-placed `*.red-xai-code` files load when the db opens.
 
 
+**Red-SecretsXAI (record text).** `GET /v1/db/{db}/secrets` (read) reports the password-mode binding. `POST …/secrets/seal` (write) and `POST …/secrets/open` (read) take JSON (`password`, plus `plaintext` or `box`, and `path`) and return text. Both set `stored: false`. They do not read or rewrite packs, RXSEC payloads, or envelopes already on disk. A wrong password is 422. See [Red-SecretsXAI](secrets.md).
+
 **Hand-placed files and the cluster.** On start `redxd` opens every `.red-xai*` file found in `<data>/dbs/<name>/` (cold/qs/qs-ls data, `.red-xai-db-link`, `.red-xai-db-pulse`,
 `.red-xai-db-idx`, `.red-xai-sec`, `.red-xai-code`; packs and media libraries are folders created on first use). Definitions made through the API
 (idx, pulse, sec, code) replicate to followers as one log op; **pack, media and index contents do not** (leader-local, like pack contents); BoxQL writes

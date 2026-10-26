@@ -4,6 +4,7 @@ import { state, fileStem, gs, setDb } from '../state.js';
 import { pageHead, page, bx, listFiles, parsePath, q, typeChip, getBox } from './shared.js';
 import { createEditor } from '../editor.js';
 import { parseErrorPos } from '../tokenizers.js';
+import { looksSealed, secretsPanel, sealPlaintext, openPlaintext } from '../secrets.js';
 
 const PAGE = 25;
 const OPS = ['=', '!=', '<', '<=', '>', '>=', 'starts', 'has'];
@@ -31,8 +32,9 @@ export default async function render(ctx) {
   let sig = 0;
 
   root.append(pageHead('Data Explorer', 'Browse files, boxes and records. Edit with a form or as text.', h('button', { class: 'btn primary', onclick: () => newRecord() }, icon('plus', 16), ' New record')),
+    secretsPanel(db),
     h('div', { class: 'split' }, treeEl, view),
-    terminalPanel([{ label: 'Read a record', cmd: "redx get 'players.red-xai.db:Player[ID=1]'" }, { label: 'Write a record', cmd: "redx set 'players.red-xai.db:Player[ID=1]' '[ {Name[]} = \"Ann\", {Level[]} = 7 ]'" }, { label: 'Delete', cmd: "redx delete 'players.red-xai.db:Player[ID=1]'" }, { label: 'List records (BoxQL)', cmd: "redx bx '{Get[]} = players:Player[ID=*] -> *, Limit = 25'" }], 'The console uses the same API. Native paths look like file:Box[ID=n].'));
+    terminalPanel([{ label: 'Read a record', cmd: "redx get 'players.red-xai.db:Player[ID=1]'" }, { label: 'Write a record', cmd: "redx set 'players.red-xai.db:Player[ID=1]' '[ {Name[]} = \"Ann\", {Level[]} = 7 ]'" }, { label: 'Delete', cmd: "redx delete 'players.red-xai.db:Player[ID=1]'" }, { label: 'List records (BoxQL)', cmd: "redx bx '{Get[]} = players:Player[ID=*] -> *, Limit = 25'" }, { label: 'Seal this value (does not write)', cmd: 'curl -sS -H "Authorization: Bearer $REDX_KEY" -H "Content-Type: application/json" -d \'{"password":"$REDX_SECRETS_PASSWORD","plaintext":"<box text>","path":"players.red-xai.db:Player[ID=1]"}\' "$REDX_ADDR/v1/db/default/secrets/seal"' }], 'The console uses the same API. Native paths look like file:Box[ID=n]. $REDX_SECRETS_PASSWORD is a data password, not your account password, and it is not stored.'));
 
   async function loadFiles() {
     mount(treeEl, spinner());
@@ -62,7 +64,13 @@ export default async function render(ctx) {
     }));
   }
   function collapse(f) { open.delete(f.name); paintTree(); }
-  async function expand(f) {
+  async function refreshFilesOnly() {
+    const r = await listFiles(db);
+    files.length = 0;
+    files.push(...r.files.filter((f) => f.records === 'records'));
+    paintTree();
+  }
+  async function expand(f, opts) {
     open.set(f.name, 'loading');
     sel.file = f.name;
     paintTree();
@@ -81,6 +89,7 @@ export default async function render(ctx) {
       } catch (e2) { open.delete(f.name); toast(e2.message, 'error'); }
     }
     paintTree();
+    if (opts && opts.quiet) return;
     const st = open.get(f.name);
     if (st && st !== 'loading' && st.boxes.size === 1) pick(f, [...st.boxes.keys()][0]);
   }
@@ -206,9 +215,11 @@ export default async function render(ctx) {
         toast('Saved ' + path, 'ok');
         gs.set('record');
         text = editor.getValue();
-        await loadFiles();
-        if (isNew) { const f = files.find((x) => x.name === fileName); if (f) { open.delete(fileName); await expand(f); pick(f, box); } }
-        else showBox();
+        isNew = false;
+        delBtn.hidden = false;
+        await refreshFilesOnly();
+        const f = files.find((x) => x.name === fileName);
+        if (f) await expand(f, { quiet: true });
       } catch (e) {
         msg.textContent = e.message;
         msg.hidden = false;
@@ -216,6 +227,22 @@ export default async function render(ctx) {
         if (p && mode === 'box') editor.setDiagnostics([{ line: p.line, col: p.col, message: e.message }]);
       }
     }
+    async function seal() {
+      if (mode !== 'box') { toast('Switch to Box text to seal this record.', 'info'); return; }
+      const boxText = await sealPlaintext(db, path, editor.getValue());
+      if (!boxText) return;
+      editor.setValue(boxText);
+      toast('Sealed in the editor. Nothing was written. Press Save to store this envelope on this record only.', 'ok');
+    }
+    async function openSeal() {
+      if (mode !== 'box') { toast('Switch to Box text to open a seal.', 'info'); return; }
+      if (!looksSealed(editor.getValue())) { toast('This record is not a Red-SecretsXAI envelope.', 'info'); return; }
+      const pt = await openPlaintext(db, path, editor.getValue());
+      if (pt == null) return;
+      editor.setValue(pt);
+      toast('Opened in the editor. Nothing was written. Save would store this plaintext for this record only. Other sealed data was not modified.', 'ok');
+    }
+    const delBtn = h('button', { class: 'btn danger', hidden: isNew || undefined, onclick: del }, icon('trash', 15), ' Delete');
     async function del() {
       if (!(await confirmDialog('Delete this record?', path, { danger: true, ok: 'Delete' }))) return;
       try { await api('DELETE', pathURL(db, path)); toast('Deleted', 'ok'); mount(pane); await loadFiles(); const f = files.find((x) => x.name === sel.file); if (f) { open.delete(f.name); await expand(f); if (sel.box) showBox(); } } catch (e) { toast(e.message, 'error'); }
@@ -226,9 +253,12 @@ export default async function render(ctx) {
       h('div', { class: 'row gap wrap', style: { marginTop: '10px' } },
         h('label', { class: 'row gap' }, h('span', { class: 'muted small' }, 'Expires after'), ttlIn, needsTTL ? chip('required for this file', 'warn') : h('span', { class: 'muted small' }, 'optional')),
         h('label', { class: 'check', style: { margin: 0 } }, slide, ' sliding (reset on read)'),
-        h('div', { class: 'grow' }), !isNew ? h('button', { class: 'btn danger', onclick: del }, icon('trash', 15), ' Delete') : null,
+        h('div', { class: 'grow' }),
+        h('button', { class: 'btn', onclick: seal, title: 'Seal the Box text in the editor. Does not write.' }, icon('lock', 15), ' Seal'),
+        h('button', { class: 'btn', onclick: openSeal, title: 'Open a Red-SecretsXAI envelope in the editor. Does not write.' }, 'Open'),
+        delBtn,
         h('button', { class: 'btn', onclick: () => copy(path, 'Path copied') }, 'Copy path'), h('button', { class: 'btn primary', onclick: save }, 'Save ', h('kbd', null, 'Ctrl+S'))),
-      terminalPanel([{ cmd: `redx get '${path}'` }, { cmd: `redx set '${path}' '<box text>'${ttl ? ' --ttl ' + ttl : ''}` }, { cmd: `redx delete '${path}'` }])));
+      terminalPanel([{ cmd: `redx get '${path}'` }, { cmd: `redx set '${path}' '<box text>'${ttl ? ' --ttl ' + ttl : ''}` }, { cmd: `redx delete '${path}'` }, { label: 'Seal (does not write)', cmd: `curl -sS -H "Authorization: Bearer $REDX_KEY" -H "Content-Type: application/json" -d '{"password":"$REDX_SECRETS_PASSWORD","plaintext":"<box text>","path":"${path}"}' "$REDX_ADDR/v1/db/${db}/secrets/seal"` }], '$REDX_SECRETS_PASSWORD is a placeholder for the data password. It is not your account password and it is not stored.')));
     pane.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     if (!isNew) validate();
   }

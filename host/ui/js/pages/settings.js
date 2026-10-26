@@ -6,7 +6,7 @@ import { pageHead, page } from './shared.js';
 const GROUPS = [
   ['Network', ['listen', 'tls', 'advertise', 'role', 'peers', 'heartbeat_seconds', 'repl_log_max']],
   ['Storage', ['data_dir', 'default_db', 'engine_durability', 'engine_default_ttl', 'argon_memory_kib']],
-  ['Security', ['keystore_encrypt', 'bootstrap', 'rate_limit_rps', 'rate_limit_burst', 'audit_success', 'audit_log', 'code_allowed_boxes']],
+  ['Security', ['keystore_encrypt', 'bootstrap', 'rate_limit_rps', 'rate_limit_burst', 'audit_success', 'audit_log', 'code_allowed_boxes', 'secrets_kdf']],
   ['Limits & logging', ['max_body_mb', 'max_upload_mb', 'log_level']],
 ];
 
@@ -30,7 +30,7 @@ export default async function render() {
           h('button', { class: 'btn', onclick: () => { gs.reset(); localStorage.removeItem('redx.gs.dismissed'); localStorage.removeItem('redx.wizard'); toast('Get-started checklist reset', 'ok'); } }, 'Reset Get-started'),
           h('button', { class: 'btn', onclick: () => { ['redx.hist', 'redx.saved', 'redx.studio.draft'].forEach((k) => localStorage.removeItem(k)); toast('Saved queries and history cleared', 'ok'); } }, 'Clear saved queries'))),
       h('div', { class: 'card' }, h('h3', null, 'Documentation'),
-        ['box-grammar:Box file grammar', 'boxql:BoxQL guide', 'hosting:Hosting guide', 'clustering:Clustering', 'connect:Connecting apps', 'console:This console'].map((x) => { const [id, t] = x.split(':'); return h('div', null, h('a', { href: '#/help/' + id }, icon('book', 14), ' ', t)); }),
+        ['box-grammar:Box file grammar', 'boxql:BoxQL guide', 'hosting:Hosting guide', 'clustering:Clustering', 'connect:Connecting apps', 'console:This console', 'secrets:Red-SecretsXAI'].map((x) => { const [id, t] = x.split(':'); return h('div', null, h('a', { href: '#/help/' + id }, icon('book', 14), ' ', t)); }),
         h('p', { class: 'muted small' }, 'Everything is built into the host, so it works offline.'))),
     hostedPlanCard(),
     cfgBox,
