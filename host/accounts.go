@@ -227,7 +227,7 @@ type acctTokens struct {
 type acctPending struct {
 	verifier, nonce, redirect, ret string
 	// Hub chooses only a fixed relative callback destination: no open redirects.
-	hub bool
+	hub     bool
 	created time.Time
 }
 
