@@ -553,7 +553,7 @@ func qaIDVariants() []qaVar {
 		{"neg index1 secret", "", p(68, "Bag"), "?resolve=1", "hunt", h("text/plain")},
 		{"neg index1 depth4", "", p(68, "Bag"), "?resolve=1&depth=4", "hunt", nil},
 		{"inner neg steal", "", p(69, "Bag"), "?resolve=1&depth=4", "hunt", h("text/plain")},
-		{"inner neg steal child", "", p(69, "Bag.Steal"), "?resolve=1&depth=4", "hunt", nil},
+		{"inner neg steal child", "", p(69, "Bag.Steal"), "?resolve=1&depth=4", "spot", nil},
 		{"both neg wrap bag", "", p(70, "Wrap.Bag"), "?resolve=1&depth=4", "hunt", nil},
 		{"both neg wrap parent", "", p(70, "Wrap"), "?resolve=1&depth=4", "hunt", nil},
 		{"both neg named", "", p(70, "Wrap[ID=-28].Bag[ID=-29]"), "?resolve=1&depth=4", "hunt", nil},
