@@ -181,7 +181,9 @@ function buildShell() {
   });
   const side = h('aside', { class: 'side' },
     h('a', { class: 'brand', href: '#/dashboard', title: 'Red-XAI Home' },
-      h('img', { src: './icons/redx-128.png', width: 44, height: 44, alt: '' }),
+      h('img', { src: location.pathname.startsWith('/v1/console/')
+        ? '/v1/console/icons/redx-128.png' : '/ui/icons/redx-128.png',
+        width: 44, height: 44, alt: '' }),
       h('span', null, h('b', null, 'RED-XAI'), h('small', null, 'YOUR DEVELOPMENT HUB'))),
     h('div', { class: 'hub-side-search' }, icon('search', 15), navSearch),
     nav,
