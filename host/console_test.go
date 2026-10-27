@@ -132,6 +132,12 @@ func TestConsoleAssetsComplete(t *testing.T) {
 			// the checkout page (and only it, see billingCSP) loads Stripe.js
 			src = strings.ReplaceAll(src, "https://js.stripe.com/", "")
 		}
+		// Customer console links to exactly these two existing first-party
+		// product pages. No arbitrary off-origin scripts, APIs or redirects
+		// may be introduced; the static URL audit still rejects other domains.
+		// Do not add more destinations here without security review.
+		src = strings.ReplaceAll(src, "https://red-xai.com/hosting", "")
+		src = strings.ReplaceAll(src, "https://red-xai.com/store", "")
 		if regexp.MustCompile(`https?://[a-z0-9.-]+\.[a-z]{2,}`).MatchString(strings.ReplaceAll(strings.ReplaceAll(src, "http://www.w3.org", ""), "https://127", "")) {
 			if !strings.HasSuffix(name, "help.js") && !strings.HasSuffix(name, "devices.js") {
 				// examples such as "https://leader:7777" have no TLD dot; a real public host would match here

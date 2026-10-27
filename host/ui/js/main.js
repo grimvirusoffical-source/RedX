@@ -1,6 +1,6 @@
 import { h, icon, mount, toast, $, clear } from './util.js';
 import { api, session, setUnauthorizedHandler, exchangePairingCode } from './api.js';
-import { state, subscribe, setMode, setTheme, setDb, applyTheme, loadWho, loadDbs, isHostAdmin, wizard } from './state.js';
+import { state, subscribe, setMode, setTheme, setDb, applyTheme, loadWho, loadDbs, isHostAdmin, dbDisplayName, wizard } from './state.js';
 
 const NAV = [
   { id: 'dashboard', title: 'Dashboard', icon: 'home' },
@@ -13,6 +13,10 @@ const NAV = [
   { id: 'backups', title: 'Backups', icon: 'backup' },
   { id: 'settings', title: 'Settings', icon: 'gear' },
   { id: 'help', title: 'Help', icon: 'book' },
+  // These are customer destinations, not owner routes. The actual Host
+  // service independently authenticates each request.
+  { id: 'redxai-apps', title: 'All Red-XAI apps', icon: 'link', external: 'https://red-xai.com/store' },
+  { id: 'redxai-host', title: 'Red-XAI Host', icon: 'nodes', external: 'https://red-xai.com/hosting' },
   { id: 'watch', title: 'Live Watch', icon: 'pulse', adv: true },
   { id: 'raw', title: 'Raw editor', icon: 'file', adv: true },
   { id: 'policy', title: 'Security · Rules · Code', icon: 'shield', adv: true },
@@ -20,7 +24,7 @@ const NAV = [
   { id: 'presets', title: 'Presets', icon: 'compare', adv: true },
   { id: 'owner', title: 'Owner', icon: 'shield', owner: true },
 ];
-const PAGES = new Set([...NAV.map((n) => n.id), 'join', 'wizard', 'connect']);
+const PAGES = new Set([...NAV.filter((n) => !n.external).map((n) => n.id), 'join', 'wizard', 'connect']);
 
 const app = document.getElementById('app');
 let current = null; // {destroy}
@@ -152,7 +156,8 @@ function themeSwitcher() {
 function buildShell() {
   const nav = h('nav', { class: 'nav', 'aria-label': 'Main' });
   const side = h('aside', { class: 'side' },
-    h('a', { class: 'brand', href: '#/dashboard' }, h('img', { src: '/ui/icons/redx-128.png', width: 34, height: 34, alt: '' }), h('span', null, h('b', null, 'RedX'), h('small', null, 'console'))),
+    h('a', { class: 'brand', href: '#/dashboard' }, h('img', { src: '/ui/icons/redx-128.png', width: 40, height: 40, alt: '' }), h('span', null, h('b', null, 'RED-XAI'), h('small', null, 'DATABASE / WORKSPACE'))),
+    h('div', { class: 'side-label' }, 'WORKSPACE'),
     nav,
     h('div', { class: 'side-foot' }, h('span', { class: 'muted small', id: 'ver' }, 'v' + (state.who && state.who.version || ''))));
   const dbSel = h('select', { class: 'select', 'aria-label': 'Current database', onchange: (e) => setDb(e.target.value) });
@@ -163,19 +168,30 @@ function buildShell() {
   const themeBtn = themeSwitcher();
   const who = h('button', { class: 'chip who', title: 'Sign out', onclick: signOut });
   const menu = h('button', { class: 'icon-btn menu-btn', 'aria-label': 'Menu', onclick: () => root.classList.toggle('open') }, icon('menu'));
-  const top = h('header', { class: 'top' }, menu, h('div', { class: 'grow' }), h('label', { class: 'dbpick' }, h('span', { class: 'muted small' }, 'Database'), dbSel), modeBtn, themeBtn, who);
+  const top = h('header', { class: 'top' }, menu,
+    h('span', { class: 'workspace-topline' }, h('span', { class: 'workspace-pulse', 'aria-hidden': 'true' }), 'RED-XAI', h('span', { class: 'workspace-slash' }, '/'), 'DATABASE'),
+    h('div', { class: 'grow' }),
+    h('label', { class: 'dbpick' }, h('span', { class: 'muted small' }, 'Active database'), dbSel),
+    modeBtn, themeBtn, who);
   const main = h('main', { class: 'main', id: 'main', tabindex: '-1' });
   const scrim = h('div', { class: 'scrim', onclick: () => root.classList.remove('open') });
   const root = h('div', { class: 'frame' }, side, scrim, h('div', { class: 'col' }, top, main));
   function refresh() {
     clear(nav);
-    const mk = (n) => h('a', { class: 'nav-item', href: '#/' + n.id, 'data-id': n.id, onclick: () => root.classList.remove('open') }, icon(n.icon, 18), h('span', null, n.title));
+    const mk = (n) => h('a', {
+      class: 'nav-item', href: n.external || '#/' + n.id, 'data-id': n.id,
+      ...(n.external ? { rel: 'noopener noreferrer', title: 'Open the Red-XAI website' } : {}),
+      onclick: () => root.classList.remove('open')
+    }, icon(n.icon, 18), h('span', null, n.title));
     const isOwner = !!(state.who && state.who.owner);
+    // Database, API keys, data and Host links are visible to regular
+    // accounts. Only the actual owner console requires owner status.
     NAV.filter((n) => !n.adv && (!n.owner || isOwner)).forEach((n) => nav.append(mk(n)));
     nav.append(h('div', { class: 'nav-sep' }, state.mode === 'advanced' ? 'Advanced' : h('a', { href: '#', onclick: (e) => { e.preventDefault(); setMode('advanced'); } }, 'Show advanced pages')));
     if (state.mode === 'advanced') NAV.filter((n) => n.adv).forEach((n) => nav.append(mk(n)));
     clear(dbSel);
-    (state.dbs.length ? state.dbs : [state.db]).forEach((d) => dbSel.append(h('option', { value: d, selected: d === state.db }, d)));
+    (state.dbs.length ? state.dbs : [state.db]).forEach((d) =>
+      dbSel.append(h('option', { value: d, selected: d === state.db }, dbDisplayName(d))));
     modeBtn.querySelectorAll('.seg-opt').forEach((o) => o.classList.toggle('on', o.dataset.m === state.mode));
     themeBtn.sync();
     const acct = state.who && state.who.account;

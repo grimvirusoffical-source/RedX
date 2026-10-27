@@ -1,6 +1,6 @@
 import { h, icon, terminalPanel, chip, mount, toast, dialog, field, copy, download, table, emptyState, errorBox, spinner, confirmDialog, confirmTyped, ago, fmtTime } from '../util.js';
 import { api, enc } from '../api.js';
-import { state, isHostAdmin, loadDbs, gs } from '../state.js';
+import { state, isHostAdmin, isAccountTenant, dbDisplayName, loadDbs, gs } from '../state.js';
 import { pageHead, page } from './shared.js';
 import { drawQR } from '../qr.js';
 
@@ -32,7 +32,7 @@ export default async function render() {
       const rows = keys.map((k) => h('tr', { class: k.status !== 'active' ? 'dim' : '' },
         h('td', null, h('b', null, k.label || '(no label)'), h('div', { class: 'muted small mono' }, k.id)),
         h('td', null, chip(k.scope, k.scope === 'admin' ? 'warn' : k.scope === 'write' ? 'acc' : '')),
-        h('td', null, k.db === '*' ? chip('all databases') : h('code', null, k.db)),
+        h('td', null, k.db === '*' ? chip('all databases') : h('code', null, dbDisplayName(k.db))),
         h('td', { class: 'small' }, [k.prefix ? h('div', null, 'path ', h('code', null, k.prefix)) : null, k.roles && k.roles.length ? h('div', null, 'roles ', k.roles.join(', ')) : null, k.rate_rps ? h('div', { class: 'muted' }, k.rate_rps + '/s' + (k.rate_burst ? ' burst ' + k.rate_burst : '')) : null]),
         h('td', { class: 'muted small' }, ago(k.created), k.expires ? h('div', null, 'expires ', fmtTime(k.expires)) : null),
         h('td', null, chip(k.status, k.status === 'active' ? 'ok' : 'err')),
@@ -40,7 +40,12 @@ export default async function render() {
           h('button', { class: 'btn small', title: 'Make a new key and retire this one after a grace period', onclick: () => rotate(k) }, icon('refresh', 13), ' Rotate'), ' ',
           h('button', { class: 'btn small danger', onclick: () => revoke(k) }, 'Revoke')] : null)));
       mount(list, table(['Key', 'Scope', 'Database', 'Limits', 'Created', 'Status', ''], rows));
-    } catch (e) { mount(list, errorBox(e.status === 403 ? 'Managing keys needs an admin key.' : e.message, load)); }
+    } catch (e) {
+      mount(list, e.status === 403 && isAccountTenant()
+        ? emptyState('key', 'A database plan is needed', 'Sign in with a hosted plan to create and manage keys for your own databases.',
+            h('a', { class: 'btn primary', href: 'https://red-xai.com/hosting' }, 'View hosting plans'))
+        : errorBox(e.message, load));
+    }
   }
 
   async function revoke(k) {
@@ -58,8 +63,12 @@ export default async function render() {
   async function createDialog() {
     let dbs = state.dbs;
     if (!dbs.length) dbs = await loadDbs();
+    if (!dbs.length) {
+      toast('Create a database first, or activate your hosted plan.', 'error', 7000);
+      return;
+    }
     const label = h('input', { class: 'input', placeholder: 'e.g. my-game-server', maxlength: 64 });
-    const dbSel = h('select', { class: 'select' }, [...(isHostAdmin() ? [h('option', { value: '*' }, 'All databases')] : []), ...dbs.map((d) => h('option', { value: d, selected: d === state.db }, d))]);
+    const dbSel = h('select', { class: 'select' }, [...(isHostAdmin() ? [h('option', { value: '*' }, 'All databases')] : []), ...dbs.map((d) => h('option', { value: d, selected: d === state.db }, dbDisplayName(d)))]);
     let scope = 'write';
     const scopeBox = h('div', { class: 'radios' }, SCOPES.map(([v, t, d]) => h('label', { class: 'radio' }, h('input', { type: 'radio', name: 'scope', value: v, checked: v === scope, onchange: () => { scope = v; } }), h('div', null, h('b', null, t), h('div', { class: 'muted small' }, d)))));
     const ttl = h('select', { class: 'select' }, TTLS.map(([v, l]) => h('option', { value: v, selected: v === '90d' }, l)));
