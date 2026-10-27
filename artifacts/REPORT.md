@@ -8,7 +8,7 @@
 | Head | `6455153efebac10308bd27d1dc422df88fbd9125` (`cursor/lifetime-cert-owner-gate-7ab7`) |
 | Prior HOLD | head `171e059f4ea5b63dd0a624c047116e13490da506`, report on PR #27 |
 | Product vs `171e059` | `expandStepMatches` now strips one leading `[ID=n]` / `[id=n]` before numeric indexes (`host/accounts_guard.go`). |
-| Harness | `host/qa_lifetime_attack_test.go` (`//go:build qa`) on `cursor/qa-lifetime-cert-id-retest-a0ea`. Not merged. PR #26 and PR #27 left unmerged. |
+| Harness | `host/qa_lifetime_attack_test.go` (`//go:build qa`) on `cursor/qa-lifetime-cert-id-retest-a0ea`. Not merged. https://github.com/grimvirusoffical-source/RedX/pull/28 . PR #26 and PR #27 left unmerged. |
 
 Field values below are **present** or **absent** only. No ciphertext, key, seed, or PEM material is included.
 
@@ -195,4 +195,4 @@ Do not merge PR #22 until a non-owner, including the accounts service key, gets 
 
 Leave unmerged. https://github.com/grimvirusoffical-source/RedX/pull/26 and https://github.com/grimvirusoffical-source/RedX/pull/27 stay unmerged.
 
-This review's harness is the pull request opened from `cursor/qa-lifetime-cert-id-retest-a0ea`. It does not change product behavior. Leave it unmerged.
+This review's harness is https://github.com/grimvirusoffical-source/RedX/pull/28 against `cursor/lifetime-cert-owner-gate-7ab7`. It does not change product behavior. Leave it unmerged.
