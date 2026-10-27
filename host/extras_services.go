@@ -46,6 +46,9 @@ type BXResult struct {
 	Scanned  int                 `json:"scanned"`
 	Plan     []string            `json:"plan,omitempty"`
 	Results  []BXResult          `json:"results,omitempty"`
+	// Followed lists records reached by @>. It is not serialized; bxJSON omits it.
+	// The host uses it to refuse a follow into an owner-only kind.
+	Followed []string `json:"-"`
 }
 
 // BXInfo classifies a BoxQL command without running it.

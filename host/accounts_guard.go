@@ -41,14 +41,31 @@ const (
 
 func kindFile(kind string) string { return kind + ".red-xai.db" }
 
-// namesKind reports whether a BoxQL source or engine path names kind, either as
-// the file (short name or "<kind>.red-xai.db") or as the box.
-func namesKind(file, boxName, kind string) bool {
+// fileNamesKind reports whether a file name is kind under the engine's own
+// resolution. route and resolveFile pick a stored file when the name is exact
+// or the stored name starts with "<name>.". The canonical file is
+// "<kind>.red-xai.db", so both rxa-lifetime-cert and rxa-lifetime-cert.red-xai
+// address that file (the next character in the stored name is a dot). A stem
+// the engine would not select, such as rxa-lifetime or rxa-lifetime-cert.red,
+// does not.
+func fileNamesKind(file, kind string) bool {
 	file = strings.Trim(strings.TrimSpace(file), `"`)
+	if file == "" {
+		return false
+	}
+	if file == kind || file == kindFile(kind) {
+		return true
+	}
+	return strings.HasPrefix(kindFile(kind), file+".")
+}
+
+// namesKind reports whether a BoxQL source or engine path names kind, either as
+// the file (including an engine prefix of "<kind>.red-xai.db") or as the box.
+func namesKind(file, boxName, kind string) bool {
 	if boxName == kind {
 		return true
 	}
-	return file == kind || file == kindFile(kind)
+	return fileNamesKind(file, kind)
 }
 
 func parsedPath(p string) (box.Path, bool) {
@@ -69,9 +86,11 @@ func pathNamesKind(p, kind string) bool {
 			return true
 		}
 	}
-	p = strings.TrimSpace(p)
-	return p == kindFile(kind) || strings.HasPrefix(p, kindFile(kind)+":") ||
-		p == kind || strings.HasPrefix(p, kind+":") || strings.HasPrefix(p, kind+".red-xai.db")
+	file := strings.TrimSpace(p)
+	if i := strings.IndexByte(file, ':'); i >= 0 {
+		file = file[:i]
+	}
+	return fileNamesKind(file, kind)
 }
 
 // PathReadsLifetimeSecret reports whether an engine path addresses the
@@ -329,17 +348,14 @@ func prefixSelectsCert(rest string) bool {
 		return false
 	}
 	rest = strings.TrimSuffix(rest, "*")
-	file := kindFile(kindLifetimeCert)
-	switch {
-	case rest == file || rest == kindLifetimeCert:
-		return true
-	case strings.HasPrefix(rest, file):
-		return true
-	case strings.HasPrefix(rest, kindLifetimeCert+":"), strings.HasPrefix(rest, kindLifetimeCert+"."):
-		return true
-	default:
-		return PathReadsLifetimeSecret(rest)
+	file := rest
+	if i := strings.IndexByte(rest, ':'); i >= 0 {
+		file = rest[:i]
 	}
+	if fileNamesKind(file, kindLifetimeCert) {
+		return true
+	}
+	return PathReadsLifetimeSecret(rest)
 }
 
 // subscribeTargetsCert is true for a subscription aimed at the cert kind.
@@ -552,6 +568,11 @@ func guardBoxQL(q string) (readsCert, writesFlag bool) {
 
 func bxLeaksLifetimeCert(res BXResult) bool {
 	for _, p := range res.Paths {
+		if PathReadsLifetimeSecret(p) {
+			return true
+		}
+	}
+	for _, p := range res.Followed {
 		if PathReadsLifetimeSecret(p) {
 			return true
 		}

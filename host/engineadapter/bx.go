@@ -273,6 +273,9 @@ func toBXResult(res *query.Result) host.BXResult {
 	for _, a := range res.Addrs {
 		out.Paths = append(out.Paths, recPath(a))
 	}
+	for _, a := range res.Followed {
+		out.Followed = append(out.Followed, recPath(a))
+	}
 	for _, a := range res.Cascaded {
 		out.Cascaded = append(out.Cascaded, recPath(a))
 	}

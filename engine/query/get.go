@@ -318,6 +318,7 @@ type sortRow struct {
 }
 
 func (r *run) doGet(g *Get, explain bool) (*Result, error) {
+	r.followed = nil
 	pl, err := r.planGet(g)
 	if err != nil {
 		return nil, err
@@ -410,6 +411,9 @@ func (r *run) expandFollows(pl *getPlan, t tuple, j int, emit func(tuple) (bool,
 		return false, err
 	}
 	if j == len(pl.get.Follows) {
+		// Record the target even when the row is filtered out, so a follow into
+		// an owner-only record cannot be used as a silent match oracle.
+		r.noteFollows(t)
 		if !r.all(pl.post, t) {
 			return true, nil
 		}
@@ -438,6 +442,15 @@ func (r *run) expandFollows(pl *getPlan, t tuple, j int, emit func(tuple) (bool,
 		}
 	}
 	return true, nil
+}
+
+// noteFollows records every @> target on t. The source record is t[0].
+func (r *run) noteFollows(t tuple) {
+	for i := 1; i < len(t); i++ {
+		if t[i] != nil {
+			r.followed = append(r.followed, t[i].addr)
+		}
+	}
 }
 
 // linkTargets lists the @> (read) link targets held in a value: a link, or an
@@ -555,6 +568,7 @@ func (r *run) assemble(pl *getPlan, rows []sortRow) (*Result, error) {
 		}
 		res.Addrs = append(res.Addrs, sr.t[0].addr)
 	}
+	res.Followed = r.followed
 	r.fillRows(res, colIdx, all)
 	return res, nil
 }
@@ -742,7 +756,7 @@ func (r *run) doAggregate(pl *getPlan, cands []*rec) (*Result, error) {
 	if pl.limit < 0 && len(rows) > r.lim.MaxRows {
 		return nil, fmt.Errorf("%w: more than %d result rows; add Limit = n", ErrLimit, r.lim.MaxRows)
 	}
-	res := &Result{Kind: "get", Access: pl.acc.label(), Scanned: r.scanned, Columns: append([]string(nil), pl.names...)}
+	res := &Result{Kind: "get", Access: pl.acc.label(), Scanned: r.scanned, Columns: append([]string(nil), pl.names...), Followed: r.followed}
 	size := 0
 	for _, row := range rows {
 		for _, v := range row.vals {

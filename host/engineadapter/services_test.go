@@ -874,6 +874,63 @@ func TestScriptCannotReadLifetimeCert(t *testing.T) {
 	}
 }
 
+// Engine prefix resolution and @> follows must not return cert fields to a non-owner.
+func TestLifetimeCertShortPrefixAndFollow(t *testing.T) {
+	const secret = "RXSECRET-PRIVATE-ENC-CIPHERTEXT"
+	const pub = "pk-short-prefix-pubkey"
+	n := startFull(t, engineadapter.Config{CodeAllowedBoxes: []string{"*"}}, nil)
+	D := n.url + "/v1/db/default"
+	full := "rxa-lifetime-cert.red-xai.db:Record[ID=1]"
+	short := "rxa-lifetime-cert.red-xai:Record[ID=1]"
+	body := `[ {cert_id[]} = "cert-short", {pubkey[]} = "` + pub + `", {private_enc[]} = "` + secret + `", {owner_emails[]} = ;["owner-emails-short@example.com"]:, {issued[]} = "issued-short", {sig_id_prefix[]} = "sig-short" ]`
+	if st, b, _ := req(t, "PUT", n.url+"/v1/path/"+full, n.key, []byte(body)); st != 200 {
+		t.Fatalf("store: %d %s", st, b)
+	}
+	player := `[ {Name[]} = "ada", {Cert[]} = "players.red-xai.db":Player[ID=1] @> "rxa-lifetime-cert.red-xai.db":Record[ID=1] ]`
+	if st, b, _ := req(t, "PUT", n.url+"/v1/path/players.red-xai.db:Player[ID=1]", n.key, []byte(player)); st != 200 {
+		t.Fatalf("link: %d %s", st, b)
+	}
+	deny := func(what string, st int, b []byte) {
+		t.Helper()
+		if st != 403 || strings.Contains(string(b), secret) || strings.Contains(string(b), pub) || strings.Contains(string(b), "cert-short") || strings.Contains(string(b), "owner-emails-short") {
+			t.Fatalf("%s: %d %s", what, st, b)
+		}
+	}
+	for _, p := range []string{short, short + ".pubkey", short + ".cert_id", short + ".owner_emails", short + ".issued", short + ".sig_id_prefix"} {
+		st, b, _ := req(t, "GET", n.url+"/v1/path/"+p, n.key, nil)
+		deny("GET "+p, st, b)
+	}
+	for _, q := range []string{
+		`{Get[]} = "rxa-lifetime-cert.red-xai":Record[ID=1] -> pubkey`,
+		`{Get[]} = "rxa-lifetime-cert.red-xai":Record[ID=1] -> cert_id`,
+		`{Get[]} = "rxa-lifetime-cert.red-xai":Record[ID=1] -> owner_emails`,
+		`{Get[]} = players:Player[ID=1] -> [Name, Cert.pubkey] @> Cert`,
+		`{Get[]} = players:Player[ID=1] -> [Name, Cert.cert_id] @> Cert`,
+		`{Get[]} = players:Player[ID=1] -> [Name, Cert.owner_emails] @> Cert`,
+		`{Get[]} = players:Player[ID=1] -> Cert @> Cert`,
+	} {
+		st, b, _ := req(t, "POST", D+"/bx", n.key, []byte(q))
+		deny("bx "+q, st, b)
+	}
+	src := `{Script[1]} = [
+    {Name[]} = "readfield",
+    {Params[]} = ;["target", "field"]:,
+    {Uses[]} = ;["db_get"]:,
+    {Source[]} = "return db_get(target, field);"
+];`
+	if st, b, _ := req(t, "PUT", D+"/code/file/steal", n.key, []byte(src)); st != 200 {
+		t.Fatalf("define: %d %s", st, b)
+	}
+	runBody, _ := json.Marshal(map[string]interface{}{"args": []interface{}{short, "pubkey"}})
+	st, b, _ := req(t, "POST", D+"/code/run/readfield", n.key, runBody, "Content-Type", "application/json")
+	deny("script short pubkey", st, b)
+	// A normal field on the linking record is still readable, and the link text is not a cert field.
+	st, b, _ = req(t, "GET", n.url+"/v1/path/players.red-xai.db:Player[ID=1].Name", n.key, nil)
+	if st != 200 || !strings.Contains(string(b), "ada") || strings.Contains(string(b), secret) || strings.Contains(string(b), pub) {
+		t.Fatalf("player name: %d %s", st, b)
+	}
+}
+
 // ---- encryption (master key from a key file) ----
 
 func TestMasterKeyFileAndEncryptedPacks(t *testing.T) {
