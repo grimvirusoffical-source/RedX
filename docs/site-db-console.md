@@ -1,32 +1,103 @@
-# Red-XAI DB customer console restoration
+# Red-XAI Hub: native database workspace and site-account sign-in
 
-The native RedX console still provides database creation, API-key rotation, BoxQL Studio, the data explorer, record editor, setup wizard, file views, and host-owner tools. This release restores customer navigation and hosted tenant UI without giving customers host-administration privileges.
+## Product behavior
 
-## Shared sign-in vs database permissions
+The RedX engine embeds a complete, native Red-XAI Hub console at
+`/v1/console/`. It is **not** a static proxy, a CSS overlay injected into an
+unrelated site, or an owner-only master console. The existing `/ui/` and
+CLI/SDK APIs remain supported.
 
-The website at red-xai.com has its own existing Red-XAI session. The database engine is the separately authenticated `redxd` service. The database engine's `/v1/auth/config` on the current Kamatera server reports `enabled:false`; therefore the old database console **requires a RedX API key** until the website identity and its app-scoped OIDC integration are configured and tested.
+The native Hub exposes the original database functions—database list, create
+and delete, file browser, Data Explorer, record create/edit, raw editor,
+BoxQL Studio, backups, connected apps/devices, key generation/rotation/revoke,
+security, policies, live watch and settings—alongside first-party links to
+Red-XAI Apps and Host. Owner-only administration stays restricted to a
+separately verified owner principal.
 
-Never forward a host admin bearer token or a master-database key to an end user's browser. The API already implements signed-in account tenant database mapping and billing plan gates; all UI forms use the same endpoints. The master account database and global owner API remain private.
+The dashboard uses one native CSS design system (`host/ui/css/app.css`) and
+one embedded module-based UI (`host/ui/js/*`). There is no `forge.css`
+static overlay and no separate static-console proxy service.
 
-## Serving the old full console
+### Customer sign-in: **no API key or special pairing number**
 
-The authenticated database API already lives at `https://api.red-xai.com/v1/`. The static console can be served on **that same hostname** at `https://api.red-xai.com/v1/console/` by the read-only `host/ui-console-proxy.cjs` service on 127.0.0.1:17782.
+RedX already implements the correct server-side OIDC Authorization Code +
+PKCE S256 relying party. With a valid first-party Red-XAI provider configured,
+the native Hub attempts one account redirect automatically. Users already
+signed into `red-xai.com` in that browser return directly to their own
+database workspace, without entering a database API key or copying codes.
+Other users sign into the **same** website account, then return automatically
+through the one-time, server-validated handoff.
 
-The proxy only accepts GET/HEAD for allowlisted UI assets under `/v1/console/` and retrieves them from the existing redxd `/ui/` files. It rewrites UI asset references from `/ui/` to `/v1/console/` without intercepting `/v1/dbs`, `/v1/keys`, `/v1/db/<tenant>/...` or owner endpoints. It does not access or forward credentials. All protected API requests continue to route to the current redxd service and enforce their original permissions.
+The API-key/pairing screen is a collapsed **developer (advanced)** option
+for SDKs, CLI or third-party integrations. Customer browser CRUD, files and
+database listing use a normal, account-scoped console session (opaque
+`rxs_` session); the API never sends a host-owner key to a browser.
 
-Example cloudflared ingress order for `api.red-xai.com`:
+If OIDC is **not** configured yet, the Hub explicitly shows that the shared
+account integration is unavailable; it does not fake a successful login.
+Never bypass the login just because `/api/accounts/me` returns a profile,
+and never treat the presence of an email string as ownership proof.
 
-```yaml
-- hostname: api.red-xai.com
-  path: ^/v1/console(/.*)?$
-  service: http://127.0.0.1:17782
-- hostname: api.red-xai.com
-  path: ^/(v1/.*|healthz)$
-  service: http://127.0.0.1:7790
-```
+## Production setup (requires authorized website/account operator)
 
-Keep the console UI service after RedX starts. Before deployment run `node --test host/uitest/*.test.mjs` and validate the existing Cloudflare ingress. After deployment verify `/v1/console/` returns HTML and JS, and unauthenticated `/v1/dbs` and `/v1/owner/accounts` still return HTTP 401. The website Hub should include a visible customer link to the full DB console, while host control remains independently authorized.
+1. Register the RedX console as a **confidential OIDC relying party** with
+   the existing Red-XAI Accounts issuer. Register the fixed redirect URI
+   `https://api.red-xai.com/v1/auth/callback` (or the verified branded
+   endpoint actually used in your Cloudflare setup). Ensure the provider's
+   `/.well-known/openid-configuration`, JWKS, auth and token endpoints
+   are HTTPS, valid and match the configured issuer. Do not guess the issuer.
+2. Configure the RedX server (e.g. via protected env or secret file):
+   - `REDX_ACCOUNTS_ISSUER`: exact provider issuer URL
+   - `REDX_ACCOUNTS_CLIENT_ID`: registered RedX console client ID
+   - `REDX_ACCOUNTS_CLIENT_SECRET_FILE`: server-only file, mode 0600
+   - `REDX_ACCOUNTS_REDIRECT_URL`: registered absolute callback URL
+   The provider secret must not enter the repository, environment of a
+   browser, frontend JavaScript, or audit log.
+3. Build and test the new **Go redxd binary** and native embedded UI.
+   With the old host and any owner data preserved, stage a backup of the
+   current Cloudflare ingress and `redxd` service unit.
+4. Change the existing `api.red-xai.com` Cloudflare ingress so
+   `/v1/console/*` routes directly to the authenticated **redxd API
+   service**, together with the existing `/v1/*` API endpoints.
+   Do not keep routing `/v1/console/*` to the former read-only
+   `redx-console-ui.service` proxy. Only after the native route is
+   verified, disable the old static proxy, retaining its rollback backup.
+5. Verify `GET https://api.red-xai.com/v1/auth/config` reports
+   `{"enabled":true,...}`. Verify a real customer who is already logged into
+   `red-xai.com` can visit `/v1/console/`, finish the OIDC redirect and
+   list/edit **only their own databases** without entering an API key.
+   Verify a second customer's data is inaccessible, and the owner/master
+   endpoints remain forbidden to both.
+6. Verify a revoked session cannot read or write, owner elevation requires
+   the owner's independent verified-email + 2FA + owner scope checks, and
+   a lapsed plan retains data while enforcing the server's billing policy.
+   Test API key creation separately for external developers.
 
-## Rollback
+### Expected permission boundaries
 
-Restore the saved Cloudflare ingress config, restart the tunnel, and restore the prior Hub index.html. Leave database data and existing keys unchanged. Stop/disable the console static proxy. Changing a stylesheet or navigation must never change authorization or expose the master database.
+- A Red-XAI account login is sufficient **authentication** to open its
+  customer workspace. It is **not** a master-database credential and never
+  grants host-admin/owner privileges on its own.
+- Database listing and record/file operations use `Principal.Account.Sub`
+  and the existing tenant ownership map in `tenant.go`; account A never
+  sees account B's database names.
+- Existing plan/access conditions still apply to **mutations** and any
+  restricted read operations. Do not use a hidden admin API key to avoid a
+  hosting subscription.
+- Existing API key scopes remain for external apps, automation and SDKs;
+  changing the Hub UI does not loosen them.
+- Never assert the production site is using OIDC until the provider and
+  RedX host have been configured, deployed, and real-account tested.
+
+## Tests and rollback
+
+Run `go test ./host ./...` and `node --test host/uitest/*.test.mjs`.
+The Go tests verify native embedded HTML, JS, CSS, safe route handling,
+CSP, denial of non-GET static requests and protected API behavior.
+The browser tests check customer CRUD navigation, developer-only key
+options, one-shot SSO, responsive shell and absence of static overlays.
+
+On errors, restore the previous Go service binary and Cloudflare ingress,
+and re-enable the old static console route if needed. **Never** delete,
+reset or recreate tenant databases or master account records as a UI
+rollback. The old provider/owner deployment keys must remain unchanged.
