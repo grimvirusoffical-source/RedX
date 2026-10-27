@@ -154,53 +154,119 @@ function themeSwitcher() {
 }
 
 function buildShell() {
-  const nav = h('nav', { class: 'nav', 'aria-label': 'Main' });
+  // The Red-XAI workspace is one native console. All pages and actions keep
+  // their existing handlers; only navigation, discovery and layout change.
+  const nav = h('nav', { class: 'nav hub-navigation', 'aria-label': 'Red-XAI workspace' });
+  const navSearch = h('input', {
+    class: 'input hub-nav-search', type: 'search', placeholder: 'Find a tool…',
+    autocomplete: 'off', 'aria-label': 'Find a Red-XAI workspace tool',
+    oninput: () => refreshNav()
+  });
   const side = h('aside', { class: 'side' },
-    h('a', { class: 'brand', href: '#/dashboard' }, h('img', { src: '/ui/icons/redx-128.png', width: 40, height: 40, alt: '' }), h('span', null, h('b', null, 'RED-XAI'), h('small', null, 'DATABASE / WORKSPACE'))),
-    h('div', { class: 'side-label' }, 'WORKSPACE'),
+    h('a', { class: 'brand', href: '#/dashboard', title: 'Red-XAI Home' },
+      h('img', { src: './icons/redx-128.png', width: 44, height: 44, alt: '' }),
+      h('span', null, h('b', null, 'RED-XAI'), h('small', null, 'YOUR DEVELOPMENT HUB'))),
+    h('div', { class: 'hub-side-search' }, icon('search', 15), navSearch),
     nav,
-    h('div', { class: 'side-foot' }, h('span', { class: 'muted small', id: 'ver' }, 'v' + (state.who && state.who.version || ''))));
-  const dbSel = h('select', { class: 'select', 'aria-label': 'Current database', onchange: (e) => setDb(e.target.value) });
-  const modeBtn = h('button', { class: 'seg', role: 'group', 'aria-label': 'Mode' },
-    h('span', { class: 'seg-opt', 'data-m': 'simple', onclick: () => setMode('simple') }, 'Simple'),
-    h('span', { class: 'seg-opt', 'data-m': 'advanced', onclick: () => setMode('advanced') }, 'Advanced'));
-  modeBtn.title = 'Simple shows the everyday pages; Advanced adds Live Watch, Raw editor, Security, Cluster and Presets';
+    h('div', { class: 'side-foot' },
+      h('div', { class: 'hub-side-status' }, h('span', { class: 'workspace-pulse', 'aria-hidden': 'true' }), 'Red-XAI workspace'),
+      h('span', { class: 'muted small', id: 'ver' }, 'v' + (state.who && state.who.version || ''))));
+  const dbSel = h('select', { class: 'select', 'aria-label': 'Active database',
+    onchange: e => setDb(e.target.value) });
+  const modeBtn = h('button', { class: 'seg', role: 'group', 'aria-label': 'Developer tools mode' },
+    h('span', { class: 'seg-opt', 'data-m': 'simple', onclick: () => setMode('simple') }, 'Essentials'),
+    h('span', { class: 'seg-opt', 'data-m': 'advanced', onclick: () => setMode('advanced') }, 'All tools'));
+  modeBtn.title = 'All tools adds raw records, cluster status, rules, watch and presets';
   const themeBtn = themeSwitcher();
-  const who = h('button', { class: 'chip who', title: 'Sign out', onclick: signOut });
-  const menu = h('button', { class: 'icon-btn menu-btn', 'aria-label': 'Menu', onclick: () => root.classList.toggle('open') }, icon('menu'));
-  const top = h('header', { class: 'top' }, menu,
-    h('span', { class: 'workspace-topline' }, h('span', { class: 'workspace-pulse', 'aria-hidden': 'true' }), 'RED-XAI', h('span', { class: 'workspace-slash' }, '/'), 'DATABASE'),
+  const who = h('button', { class: 'chip who hub-profile', title: 'Sign out of Red-XAI console',
+    onclick: signOut });
+  const menu = h('button', { class: 'icon-btn menu-btn', 'aria-label': 'Toggle navigation',
+    onclick: () => root.classList.toggle('open') }, icon('menu', 18));
+  const workspaceTitle = h('span', { class: 'workspace-topline' },
+    h('span', { class: 'workspace-pulse', 'aria-hidden': 'true' }),
+    'RED-XAI', h('span', { class: 'workspace-slash' }, '/'), 'WORKSPACE');
+  const createDB = h('button', { class: 'btn primary small hub-create',
+    title: 'Create your database', onclick: () => navigate('databases') },
+    icon('plus', 15), ' New database');
+  const top = h('header', { class: 'top hub-toolbar' }, menu, workspaceTitle,
     h('div', { class: 'grow' }),
-    h('label', { class: 'dbpick' }, h('span', { class: 'muted small' }, 'Active database'), dbSel),
-    modeBtn, themeBtn, who);
+    h('label', { class: 'dbpick' },
+      h('span', { class: 'muted small' }, 'Database'), dbSel),
+    createDB, modeBtn, themeBtn, who);
   const main = h('main', { class: 'main', id: 'main', tabindex: '-1' });
   const scrim = h('div', { class: 'scrim', onclick: () => root.classList.remove('open') });
-  const root = h('div', { class: 'frame' }, side, scrim, h('div', { class: 'col' }, top, main));
-  function refresh() {
-    clear(nav);
-    const mk = (n) => h('a', {
-      class: 'nav-item', href: n.external || '#/' + n.id, 'data-id': n.id,
-      ...(n.external ? { rel: 'noopener noreferrer', title: 'Open the Red-XAI website' } : {}),
+  const root = h('div', { class: 'frame hub-frame' },
+    side, scrim, h('div', { class: 'col' }, top, main));
+
+  const groups = [
+    ['START HERE', ['dashboard']],
+    ['YOUR WORKSPACE', ['databases', 'data', 'studio', 'backups']],
+    ['APPS & INTEGRATIONS', ['redxai-apps', 'redxai-host', 'apps', 'devices', 'keys']],
+    ['TOOLS', ['settings', 'help']],
+  ];
+  function itemLink(n) {
+    // Red-XAI links always stay on the owned website: no localhost, raw
+    // server IP or third-party dashboard entry points in user-facing nav.
+    const attrs = {
+      class: 'nav-item',
+      href: n.external || '#/' + n.id,
+      'data-id': n.id,
       onclick: () => root.classList.remove('open')
-    }, icon(n.icon, 18), h('span', null, n.title));
-    const isOwner = !!(state.who && state.who.owner);
-    // Database, API keys, data and Host links are visible to regular
-    // accounts. Only the actual owner console requires owner status.
-    NAV.filter((n) => !n.adv && (!n.owner || isOwner)).forEach((n) => nav.append(mk(n)));
-    nav.append(h('div', { class: 'nav-sep' }, state.mode === 'advanced' ? 'Advanced' : h('a', { href: '#', onclick: (e) => { e.preventDefault(); setMode('advanced'); } }, 'Show advanced pages')));
-    if (state.mode === 'advanced') NAV.filter((n) => n.adv).forEach((n) => nav.append(mk(n)));
-    clear(dbSel);
-    (state.dbs.length ? state.dbs : [state.db]).forEach((d) =>
-      dbSel.append(h('option', { value: d, selected: d === state.db }, dbDisplayName(d))));
-    modeBtn.querySelectorAll('.seg-opt').forEach((o) => o.classList.toggle('on', o.dataset.m === state.mode));
-    themeBtn.sync();
-    const acct = state.who && state.who.account;
-    mount(who, !state.who ? '' : acct ? (acct.username || acct.email) + (acct.owner ? ' · owner' : '') : (state.who.label || state.who.id) + ' · ' + state.who.scope);
+    };
+    if (n.external) attrs.rel = 'noopener noreferrer';
+    return h('a', attrs, icon(n.icon, 18), h('span', null, n.title));
+  }
+  function refreshNav() {
+    clear(nav);
+    const term = navSearch.value.trim().toLowerCase();
+    const byID = id => NAV.find(n => n.id === id);
+    for (const [title, ids] of groups) {
+      const items = ids.map(byID).filter(n => n && (!n.owner || (state.who && state.who.owner))
+        && (!term || n.title.toLowerCase().includes(term)));
+      if (!items.length) continue;
+      nav.append(h('div', { class: 'nav-sep hub-nav-group' }, title));
+      nav.append(...items.map(itemLink));
+    }
+    if (state.mode === 'advanced' || term) {
+      const advanced = NAV.filter(n => n.adv && (!term || n.title.toLowerCase().includes(term)));
+      if (advanced.length) {
+        nav.append(h('div', { class: 'nav-sep hub-nav-group' }, 'ADVANCED'));
+        nav.append(...advanced.map(itemLink));
+      }
+    } else {
+      nav.append(h('button', { class: 'hub-show-advanced',
+        onclick: () => setMode('advanced') }, icon('plus', 14), 'Show all developer tools'));
+    }
+    if (state.who && state.who.owner && (!term || 'owner'.includes(term))) {
+      nav.append(h('div', { class: 'nav-sep hub-nav-group' }, 'ACCOUNT ADMINISTRATION'));
+      const item = NAV.find(n => n.id === 'owner');
+      if (item) nav.append(itemLink(item));
+    }
+    if (term && !nav.querySelector('.nav-item')) {
+      nav.append(h('p', { class: 'muted small hub-nav-empty' }, 'No matching tools'));
+    }
     markActive();
   }
+  function refresh() {
+    refreshNav();
+    clear(dbSel);
+    (state.dbs.length ? state.dbs : [state.db]).forEach(d =>
+      dbSel.append(h('option', { value: d, selected: d === state.db }, dbDisplayName(d))));
+    modeBtn.querySelectorAll('.seg-opt').forEach(o => o.classList.toggle('on', o.dataset.m === state.mode));
+    themeBtn.sync();
+    const acct = state.who && state.who.account;
+    mount(who, !state.who ? '' :
+      acct ? ((acct.username || acct.email) + (acct.owner ? ' · owner' : '')) :
+      (state.who.label || state.who.id) + ' · ' + state.who.scope);
+  }
   function markActive() {
-    const p = parseHash().page;
-    nav.querySelectorAll('.nav-item').forEach((a) => a.classList.toggle('active', a.dataset.id === p));
+    const page = parseHash().page;
+    nav.querySelectorAll('.nav-item').forEach(a => {
+      const active = a.dataset.id === page;
+      a.classList.toggle('active', active);
+      if (active) a.setAttribute('aria-current', 'page');
+      else a.removeAttribute('aria-current');
+    });
   }
   subscribe(refresh);
   refresh();
