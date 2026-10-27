@@ -720,7 +720,8 @@ func TestQALifetimeCertAttack(t *testing.T) {
 		return acc.URL + "/v1/db/redxai_accounts/path/" + url.PathEscape(p)
 	}
 	mst := acc.URL + "/v1/db/redxai_accounts"
-	if st, b, _ := do(t, "PUT", mp(fullRec), svc, certBox()); st != 200 || scanQA(b).any() {
+	st, b, _ = do(t, "PUT", mp(fullRec), svc, certBox())
+	if st != 200 || scanQA(b).any() {
 		t.Fatalf("service write cert: status=%d %s", st, scanQA(b))
 	}
 	t.Logf("QA name=service write cert class=QUIET status=%d %s", st, scanQA(b))
