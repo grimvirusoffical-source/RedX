@@ -25,6 +25,10 @@ type SecPrincipal struct {
 	Scope  string   // read | write | admin
 	Prefix string   // the key's path prefix ("" = none)
 	Roles  []string // roles carried by the key
+	// Owner is an authenticated owner session (verified email, 2FA, owner scope).
+	Owner bool
+	// AccountsDeploy is the accounts service key bound to the master accounts database.
+	AccountsDeploy bool
 }
 
 // BXResult is one BoxQL result. Rows are aligned with Columns (NELL/null where a row has no such column).

@@ -362,6 +362,10 @@ func (h *Host) idxQuery(w http.ResponseWriter, r *http.Request, db, set, index s
 		writeErr(w, 400, "field is required")
 		return
 	}
+	if !pr.IsOwner() && (iq.Field == fieldPrivateEnc || strings.HasSuffix(iq.Field, "."+fieldPrivateEnc)) {
+		h.denyLifetimeCert(w, r, pr, db)
+		return
+	}
 	var err error
 	if iq.Limit, err = atoiDefault(q.Get("limit"), 100); err != nil || iq.Limit < 1 {
 		writeErr(w, 400, "limit must be a positive integer")
@@ -418,6 +422,22 @@ func (h *Host) idxQuery(w http.ResponseWriter, r *http.Request, db, set, index s
 	}
 	if hits == nil {
 		hits = []IndexHit{}
+	}
+	if !pr.IsOwner() {
+		kept := hits[:0]
+		dropped := false
+		for _, ht := range hits {
+			if PathReadsLifetimeSecret(ht.Path) || ht.Field == fieldPrivateEnc || TextIsLifetimeCert(ht.Value) || TextIsLifetimeCert(ht.Record) {
+				dropped = true
+				continue
+			}
+			kept = append(kept, ht)
+		}
+		if dropped && len(kept) == 0 {
+			h.denyLifetimeCert(w, r, pr, db)
+			return
+		}
+		hits = kept
 	}
 	out := map[string]interface{}{"hits": hits, "count": len(hits), "mode": iq.Mode}
 	if note != "" {
@@ -881,6 +901,10 @@ func (h *Host) packDownloadEncrypted(w http.ResponseWriter, r *http.Request, ex 
 // ---- link resolution (GET path?resolve=1) ----
 
 func (h *Host) resolveRead(w http.ResponseWriter, r *http.Request, pr *Principal, db, p string) {
+	if !lifetimeCertVisible(pr, p, "") {
+		h.denyLifetimeCert(w, r, pr, db)
+		return
+	}
 	ex, ok := h.extrasOf(w, db)
 	if !ok {
 		return
@@ -901,6 +925,10 @@ func (h *Host) resolveRead(w http.ResponseWriter, r *http.Request, pr *Principal
 			h.extrasMapErr(w, err)
 			return
 		}
+	}
+	if !lifetimeCertVisible(pr, p, res.Value) {
+		h.denyLifetimeCert(w, r, pr, db)
+		return
 	}
 	w.Header().Set("X-Redx-Applied", strconv.FormatUint(h.Cluster.Offset(), 10))
 	if a := r.Header.Get("Accept"); strings.Contains(a, "text/x-redx-box") || strings.HasPrefix(a, "text/plain") {

@@ -349,6 +349,10 @@ func (h *Host) pathHandler(w http.ResponseWriter, r *http.Request, db, path stri
 				}
 			}
 		}
+		if !lifetimeCertVisible(pr, path, "") {
+			h.denyLifetimeCert(w, r, pr, db)
+			return
+		}
 		if rv := r.URL.Query().Get("resolve"); rv == "1" || rv == "true" {
 			h.resolveRead(w, r, pr, db, path)
 			return
@@ -364,6 +368,10 @@ func (h *Host) pathHandler(w http.ResponseWriter, r *http.Request, db, path stri
 				h.mapErr(w, err)
 				return
 			}
+		}
+		if !lifetimeCertVisible(pr, path, v) {
+			h.denyLifetimeCert(w, r, pr, db)
+			return
 		}
 		w.Header().Set("X-Redx-Applied", strconv.FormatUint(h.Cluster.Offset(), 10))
 		if a := r.Header.Get("Accept"); strings.Contains(a, "text/x-redx-box") || strings.HasPrefix(a, "text/plain") {
@@ -383,6 +391,10 @@ func (h *Host) pathHandler(w http.ResponseWriter, r *http.Request, db, path stri
 		val, opts, err := parsePut(r)
 		if err != nil {
 			h.mapErr(w, err)
+			return
+		}
+		if AccountFlagWriteForbidden(path, val) && !h.mayMutateAccountFlags(pr) {
+			h.denyAccountFlag(w, r, pr, db)
 			return
 		}
 		if !h.checkStorageQuota(w, pr, int64(len(val))) {
@@ -405,6 +417,10 @@ func (h *Host) pathHandler(w http.ResponseWriter, r *http.Request, db, path stri
 	case "DELETE":
 		pr, ok := h.authz(w, r, ScopeWrite, db, path, false)
 		if !ok {
+			return
+		}
+		if pathNamesAccountFlag(path) && !h.mayMutateAccountFlags(pr) {
+			h.denyAccountFlag(w, r, pr, db)
 			return
 		}
 		if h.maybeForward(w, r) {
@@ -538,6 +554,10 @@ func (h *Host) queryHandler(w http.ResponseWriter, r *http.Request, db string) {
 		writeErr(w, 400, "empty query")
 		return
 	}
+	if !pr.IsOwner() && queryReadsLifetimeCert(q) {
+		h.denyLifetimeCert(w, r, pr, db)
+		return
+	}
 	b, err := h.Reg.Get(db)
 	if err != nil {
 		h.mapErr(w, err)
@@ -550,6 +570,14 @@ func (h *Host) queryHandler(w http.ResponseWriter, r *http.Request, db string) {
 	}
 	if res == nil {
 		res = []string{}
+	}
+	if !pr.IsOwner() {
+		for _, s := range res {
+			if TextIsLifetimeCert(s) {
+				h.denyLifetimeCert(w, r, pr, db)
+				return
+			}
+		}
 	}
 	writeJSON(w, 200, map[string]interface{}{"results": res, "count": len(res)})
 }

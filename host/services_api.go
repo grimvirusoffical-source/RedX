@@ -209,6 +209,13 @@ func (h *Host) bxHandler(w http.ResponseWriter, r *http.Request, db string) {
 		writeErr(w, 400, "empty command")
 		return
 	}
+	if reads, writesFlag := guardBoxQL(req.Q); reads && !pr.IsOwner() {
+		h.denyLifetimeCert(w, r, pr, db)
+		return
+	} else if writesFlag && !h.mayMutateAccountFlags(pr) {
+		h.denyAccountFlag(w, r, pr, db)
+		return
+	}
 	ex, ok := h.extrasOf(w, db)
 	if !ok {
 		return
@@ -249,9 +256,13 @@ func (h *Host) bxHandler(w http.ResponseWriter, r *http.Request, db string) {
 	res, err := ex.BX(ctx, secPrincipal(&pr.Key), req.Q, req.Params, req.Explain)
 	if err != nil {
 		if errors.Is(err, ErrForbidden) {
-			h.Audit.Log(AuditEvent{Event: "auth.denied", KeyID: pr.Key.ID, DB: db, Remote: remoteIP(r), Reason: "bx: " + err.Error()})
+			h.Audit.Log(AuditEvent{Event: "auth.denied", KeyID: pr.Key.ID, DB: db, Remote: remoteIP(r), Reason: redactAuditReason("bx: " + err.Error())})
 		}
 		h.extrasMapErr(w, err)
+		return
+	}
+	if !pr.IsOwner() && bxLeaksLifetimeCert(res) {
+		h.denyLifetimeCert(w, r, pr, db)
 		return
 	}
 	if write {
@@ -288,6 +299,10 @@ func (h *Host) bxWatchHandler(w http.ResponseWriter, r *http.Request, db string)
 		writeErr(w, 400, "q is required: a {Watch[]} command")
 		return
 	}
+	if reads, _ := guardBoxQL(q.Get("q")); reads && !pr.IsOwner() {
+		h.denyLifetimeCert(w, r, pr, db)
+		return
+	}
 	ex, ok := h.extrasOf(w, db)
 	if !ok {
 		return
@@ -295,7 +310,7 @@ func (h *Host) bxWatchHandler(w http.ResponseWriter, r *http.Request, db string)
 	plan, err := ex.BXWatch(r.Context(), secPrincipal(&pr.Key), q.Get("q"), params)
 	if err != nil {
 		if errors.Is(err, ErrForbidden) {
-			h.Audit.Log(AuditEvent{Event: "auth.denied", KeyID: pr.Key.ID, DB: db, Remote: remoteIP(r), Reason: "bx watch: " + err.Error()})
+			h.Audit.Log(AuditEvent{Event: "auth.denied", KeyID: pr.Key.ID, DB: db, Remote: remoteIP(r), Reason: redactAuditReason("bx watch: " + err.Error())})
 		}
 		h.extrasMapErr(w, err)
 		return
@@ -310,8 +325,28 @@ func (h *Host) bxWatchHandler(w http.ResponseWriter, r *http.Request, db string)
 			return
 		}
 		defer cancel()
-		pumpWS(w, r, ch, nil)
+		pumpWS(w, r, ch, func(ev PulseEvent) (PulseEvent, bool) {
+			if !lifetimeCertVisible(pr, ev.Path, ev.Data) || (!pr.IsOwner() && TextIsLifetimeCert(ev.Error)) {
+				return PulseEvent{}, false
+			}
+			return ev, true
+		})
 		return
+	}
+	if !pr.IsOwner() {
+		prev := plan.Filter
+		plan.Filter = func(ev Event) (Event, bool) {
+			if prev != nil {
+				var ok bool
+				if ev, ok = prev(ev); !ok {
+					return Event{}, false
+				}
+			}
+			if !lifetimeCertVisible(pr, ev.Path, ev.Value) {
+				return Event{}, false
+			}
+			return ev, true
+		}
 	}
 	b, err := h.Reg.Get(db)
 	if err != nil {
@@ -491,15 +526,21 @@ func (h *Host) codeRoute(w http.ResponseWriter, r *http.Request, db, rest string
 		ctx, cancel := context.WithTimeout(r.Context(), cmdTimeout)
 		defer cancel()
 		h.pause.RLock()
-		res, err := ex.CodeRun(ctx, secPrincipal(&pr.Key), script, args)
+		res, err := ex.CodeRun(ctx, h.codePrincipal(pr), script, args)
 		h.pause.RUnlock()
 		h.Audit.Log(AuditEvent{Event: "code.run", KeyID: pr.Key.ID, DB: db, Remote: remoteIP(r), Detail: script + " host_calls=" + strconv.Itoa(res.HostCalls)})
 		if err != nil {
 			if errors.Is(err, ErrForbidden) {
-				h.Audit.Log(AuditEvent{Event: "auth.denied", KeyID: pr.Key.ID, DB: db, Remote: remoteIP(r), Reason: "script " + script + ": " + err.Error()})
+				h.Audit.Log(AuditEvent{Event: "auth.denied", KeyID: pr.Key.ID, DB: db, Remote: remoteIP(r), Reason: redactAuditReason("script " + script)})
 			}
 			h.extrasMapErr(w, err)
 			return
+		}
+		if !pr.IsOwner() {
+			if b, merr := json.Marshal(res.Value); merr == nil && TextIsLifetimeCert(string(b)) {
+				h.denyLifetimeCert(w, r, pr, db)
+				return
+			}
 		}
 		w.Header().Set("X-Redx-Applied", strconv.FormatUint(h.Cluster.Offset(), 10))
 		writeJSON(w, 200, res)
