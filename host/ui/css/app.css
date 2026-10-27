@@ -838,3 +838,41 @@ h2 { letter-spacing:-.026em }
 @media(prefers-reduced-motion:reduce){
   .hub-navigation .nav-item,.hub-show-advanced,.hub-side-search{transition:none}
 }
+
+
+/* Native Red-XAI account-first sign-in. API keys are a developer feature,
+   not an authentication prerequisite for the signed-in customer dashboard. */
+.hub-auth-card{
+  max-width:580px; width:min(100%,580px);
+  border-radius:22px; padding:clamp(22px,4vw,38px);
+  background:
+    radial-gradient(circle at 95% 4%,rgba(243,64,86,.10),transparent 40%),
+    var(--panel);
+  border:1px solid var(--line);
+  box-shadow:0 35px 100px -45px rgba(0,0,0,.55);
+}
+.hub-auth-card>.auth-logo{margin-bottom:24px}
+.hub-auth-card>h2{font-size:clamp(1.5rem,2.8vw,2.15rem);letter-spacing:-.055em}
+.hub-auth-card>p{line-height:1.7;max-width:58ch}
+.hub-auth-primary{margin:28px 0 20px}
+.hub-account-buttons{display:grid;gap:10px}
+.hub-account-buttons>.btn{width:100%;min-height:45px;display:flex;align-items:center;justify-content:center;gap:9px}
+.hub-account-buttons>.btn.primary{font-size:1rem}
+.hub-account-buttons>p{font-size:.85rem;line-height:1.7}
+.hub-api-key-advanced{border-top:1px solid var(--line);padding-top:19px;margin-top:21px}
+.hub-api-key-advanced summary{
+  display:flex;align-items:center;gap:10px;
+  cursor:pointer;color:var(--muted);
+  font-weight:630;font-size:.88rem;list-style:none;
+}
+.hub-api-key-advanced summary::-webkit-details-marker{display:none}
+.hub-api-key-advanced[open] summary{color:var(--fg);margin-bottom:18px}
+.hub-api-key-advanced summary:hover{color:var(--accent2)}
+.hub-api-key-advanced .input{min-width:0}
+.hub-api-key-advanced .btn{width:100%;margin-top:14px}
+.hub-api-key-advanced .check{margin:12px 0}
+.hub-auth-primary .callout{margin:0}
+@media(max-width:620px){
+  .hub-auth-card{border-radius:15px}
+  .hub-auth-primary{margin-top:22px}
+}
