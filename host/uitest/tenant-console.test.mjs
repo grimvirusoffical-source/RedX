@@ -101,3 +101,33 @@ test('native Red-XAI Hub design supports dark/light, mobile, search and reduced-
  assert.match(css,/prefers-reduced-motion:reduce/);
  assert.doesNotMatch(css,/@import|url\(https?:/i);
 });
+
+
+test('native Hub uses account SSO before optional developer API key',()=>{
+ const auth=file('js/pages/auth.js');
+ const account=file('js/pages/account.js');
+ assert.match(main,/redx\.hub\.autoSSO/);
+ assert.match(main,/location\.assign\('\/v1\/auth\/login\?console=hub&return=dashboard'\)/);
+ assert.match(main,/sessionStorage\.setItem\('redx\.hub\.autoSSO', 'attempted'\)/);
+ assert.match(auth,/Developer API key \/ pairing \(advanced\)/);
+ assert.match(auth,/class: 'hub-api-key-advanced'/);
+ assert.match(auth,/cfg\.enabled/);
+ assert.match(auth,/No developer key needed/);
+ assert.match(account,/console=hub&return=dashboard/);
+ assert.match(account,/Continue with Red-XAI/);
+ assert.match(css,/\.hub-auth-card/);
+ assert.match(css,/\.hub-api-key-advanced/);
+ assert.doesNotMatch(index,/forge\.css|ui-console-proxy/);
+});
+
+test('hub navigation retains existing database and hosting tools within native Red-XAI shell',()=>{
+ assert.match(main,/const groups = \[/);
+ assert.match(main,/YOUR WORKSPACE/);
+ assert.match(main,/APPS & INTEGRATIONS/);
+ assert.match(main,/function refreshNav\(/);
+ assert.match(main,/hub-create/);
+ assert.match(css,/\.hub-navigation/);
+ assert.match(css,/\.hub-side-search/);
+ assert.match(css,/\.hub-toolbar/);
+ assert.doesNotMatch(main,/45\.77\.105\.187|http:\/\/127\.0\.0\.1/);
+});
