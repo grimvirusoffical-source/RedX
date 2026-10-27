@@ -26,6 +26,9 @@ func TestPathAndTextLifetimeCert(t *testing.T) {
 		`rxa-lifetime-cert.red-xai:Record[ID=1].issued`,
 		`rxa-lifetime-cert.red-xai:Record[ID=1].sig_id_prefix`,
 		`"rxa-lifetime-cert.red-xai":Record[ID=1]`,
+		`"rxa-lifetime-cert.red-xai.db":Record[ID=1].pubkey`,
+		`"rxa-lifetime-cert.red-xai.db":Record[ID=1].private_enc`,
+		`"players.red-xai.db":rxa-lifetime-cert[ID=1].issued`,
 	} {
 		if !PathReadsLifetimeSecret(p) {
 			t.Errorf("path should be a cert read: %s", p)
@@ -73,6 +76,9 @@ func TestPathAndTextLifetimeCert(t *testing.T) {
 	if TextIsLifetimeCert(`{"username":"ada","pubkey":"aa"}`) || TextIsLifetimeCert(`[ {username[]} = "ada" ]`) {
 		t.Fatal("ordinary record looked like a cert")
 	}
+	if TextIsLifetimeCert(`"pk-short-prefix-pubkey"`) || TextIsLifetimeCert(certSecret) || TextIsLifetimeCert("owner-emails-short@example.com") {
+		t.Fatal("a single cert field must not look like a cert body")
+	}
 	if got := redactAuditReason("bx: " + boxText); got != "lifetime cert is owner-only" || strings.Contains(got, certSecret) {
 		t.Fatalf("audit redact: %s", got)
 	}
@@ -118,6 +124,37 @@ func TestAccountFlagWriteForbidden(t *testing.T) {
 	}
 	if ScriptCertReadBlocked(`players.red-xai.db:Player[ID=1]`, "Name") {
 		t.Fatal("ordinary script read")
+	}
+}
+
+func TestResolveReadsCert(t *testing.T) {
+	whole := []ResolvedRead{{Path: "Cert", Target: `"rxa-lifetime-cert.red-xai.db":Record[ID=1]`}}
+	if !resolveReadsCert(`players.red-xai.db:Player[ID=1].Cert.pubkey`, whole) {
+		t.Fatal("Cert.pubkey follows the cert link")
+	}
+	if !resolveReadsCert(`players.red-xai.db:Player[ID=1].Cert`, whole) {
+		t.Fatal("Cert follows the cert link")
+	}
+	if !resolveReadsCert(`players.red-xai.db:Player[ID=1]`, whole) {
+		t.Fatal("the whole record includes the cert link")
+	}
+	if resolveReadsCert(`players.red-xai.db:Player[ID=1].Name`, whole) {
+		t.Fatal("Name does not include the cert link")
+	}
+	field := []ResolvedRead{{Path: "Steal", Target: `"rxa-lifetime-cert.red-xai.db":Record[ID=1].private_enc`}}
+	if !resolveReadsCert(`players.red-xai.db:Player[ID=3].Steal`, field) {
+		t.Fatal("a link aimed at private_enc is a cert read")
+	}
+	if resolveReadsCert(`players.red-xai.db:Player[ID=3].Name`, field) {
+		t.Fatal("Name does not include the field link")
+	}
+	short := []ResolvedRead{{Path: "Steal", Target: `"rxa-lifetime-cert.red-xai":Record[ID=1].issued`}}
+	if !resolveReadsCert(`players.red-xai.db:Player[ID=6].Steal`, short) {
+		t.Fatal("a short cert file in a link target is still the cert")
+	}
+	other := []ResolvedRead{{Path: "Guild", Target: `"guilds.red-xai.db":Guild[ID=1].Name`}}
+	if resolveReadsCert(`players.red-xai.db:Player[ID=1].Guild.Name`, other) {
+		t.Fatal("an ordinary link is not a cert read")
 	}
 }
 

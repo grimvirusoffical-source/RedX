@@ -17,6 +17,14 @@ package host
 // callers. Keys scoped to the master database (the accounts service) may write
 // the record and still may not read it back.
 //
+// The request string is not enough. An empty-file query (*.pubkey, Record[ID=1].*)
+// and a no-file REST get (Record[ID=1].pubkey, while that box is unique) resolve
+// to the cert file without naming it. Link expand (?resolve=1) can return one
+// field of the cert, or the ciphertext, from a path that only names the link.
+// Those reads are owner-only when the stored file, box, or followed target is
+// the cert kind. A single field string is not a cert body, so the gate uses
+// the resolved path, not TextIsLifetimeCert alone.
+//
 // idVerified and idVerifiedMs live on kind rxa-account. Public callers, tenant
 // sessions and host-admin keys cannot set or clear them. An owner session can.
 // So can the accounts deploy key: an API key (not a console session) whose
@@ -301,6 +309,42 @@ func lifetimeCertVisible(pr *Principal, path, value string) bool {
 		return true
 	}
 	return !PathReadsLifetimeSecret(path) && !TextIsLifetimeCert(value)
+}
+
+// certExpandFeeds reports whether a link substituted at field path from
+// (dot-separated entry keys, "" for the record value itself) is part of the
+// value selected by sub. One path being a prefix of the other counts: reading
+// Cert.pubkey uses the link at Cert, and reading the whole record uses every link.
+func certExpandFeeds(sub []box.Seg, from string) bool {
+	if from == "" {
+		return true
+	}
+	parts := strings.Split(from, ".")
+	n := len(sub)
+	if len(parts) < n {
+		n = len(parts)
+	}
+	for i := 0; i < n; i++ {
+		if sub[i].String() != parts[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// resolveReadsCert reports whether a resolve expansion copied a cert field
+// into the value the request selected.
+func resolveReadsCert(request string, reads []ResolvedRead) bool {
+	var sub []box.Seg
+	if pp, ok := parsedPath(request); ok && len(pp.Segs) > 1 {
+		sub = pp.Segs[1:]
+	}
+	for _, rd := range reads {
+		if certExpandFeeds(sub, rd.Path) && PathReadsLifetimeSecret(rd.Target) {
+			return true
+		}
+	}
+	return false
 }
 
 // redactAuditReason drops any reason that would carry a lifetime-cert body.

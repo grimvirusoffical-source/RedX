@@ -85,18 +85,23 @@ func mapErr(err error) error {
 }
 
 func (s *store) Get(path string) (string, error) {
-	v, err := s.db.Get(path)
+	v, _, err := s.GetRouted(path)
+	return v, err
+}
+
+func (s *store) GetRouted(path string) (string, string, error) {
+	v, file, err := s.db.GetFile(path)
 	if err != nil {
-		return "", mapErr(err)
+		return "", "", mapErr(err)
 	}
 	if v.IsNell() {
 		// The engine reads an absent or expired path in .red-xai-db-qs / -qs-ls files as NELL. The
 		// host contract is: absent = 404, and 200 NELL only for a NELL that is really stored.
 		if vs, qerr := s.db.Query(path); qerr == nil && len(vs) == 0 {
-			return "", host.ErrNotFound
+			return "", "", host.ErrNotFound
 		}
 	}
-	return v.String(), nil
+	return v.String(), file, nil
 }
 
 func (s *store) Set(path, value string, o host.SetOpts) error {
@@ -122,18 +127,34 @@ func (s *store) Delete(path string) error {
 	return nil
 }
 
-func (s *store) Query(q string) ([]string, error) {
-	vs, err := s.db.Query(q)
-	if err != nil {
-		e := mapErr(err)
-		if e == err && !errors.Is(err, engine.ErrClosed) && !errors.Is(err, engine.ErrFailed) && !errors.Is(err, engine.ErrCorrupt) {
-			e = fmt.Errorf("%w: %v", host.ErrInvalid, err) // treat query errors as bad requests
-		}
-		return nil, e
+func (s *store) queryErr(err error) error {
+	e := mapErr(err)
+	if e == err && !errors.Is(err, engine.ErrClosed) && !errors.Is(err, engine.ErrFailed) && !errors.Is(err, engine.ErrCorrupt) {
+		e = fmt.Errorf("%w: %v", host.ErrInvalid, err) // treat query errors as bad requests
 	}
-	out := make([]string, len(vs))
-	for i, v := range vs {
-		out[i] = v.String()
+	return e
+}
+
+func (s *store) Query(q string) ([]string, error) {
+	hits, err := s.QuerySourced(q)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, len(hits))
+	for i, h := range hits {
+		out[i] = h.Value
+	}
+	return out, nil
+}
+
+func (s *store) QuerySourced(q string) ([]host.SourcedValue, error) {
+	hits, err := s.db.QueryHits(q)
+	if err != nil {
+		return nil, s.queryErr(err)
+	}
+	out := make([]host.SourcedValue, len(hits))
+	for i, h := range hits {
+		out[i] = host.SourcedValue{Path: h.Path, Value: h.Value.String()}
 	}
 	return out, nil
 }

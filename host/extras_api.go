@@ -919,6 +919,10 @@ func (h *Host) resolveRead(w http.ResponseWriter, r *http.Request, pr *Principal
 		h.extrasMapErr(w, err)
 		return
 	}
+	if !pr.IsOwner() && resolveReadsCert(p, res.Reads) {
+		h.denyLifetimeCert(w, r, pr, db)
+		return
+	}
 	if ex.SecActive() {
 		if res.Value, err = ex.SecRead(secPrincipal(&pr.Key), p, res.Value); err != nil {
 			h.auditPolicy(r, pr, db, err)

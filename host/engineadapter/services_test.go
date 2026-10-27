@@ -931,6 +931,117 @@ func TestLifetimeCertShortPrefixAndFollow(t *testing.T) {
 	}
 }
 
+// Empty-file queries, a no-file REST get, and link expand return one cert
+// field without the request naming the cert file. A non-owner still gets 403
+// and none of the field text. A query that does not touch the cert stays open.
+func TestLifetimeCertResolvedFieldReads(t *testing.T) {
+	const secret = "RXSECRET-PRIVATE-ENC-CIPHERTEXT"
+	const pub = "pk-resolved-field-pubkey"
+	const certID = "cert-resolved-id"
+	const mail = "owner-emails-resolved@example.com"
+	n := startFull(t, engineadapter.Config{}, nil)
+	P := n.url + "/v1/path/"
+	D := n.url + "/v1/db/default"
+	full := "rxa-lifetime-cert.red-xai.db:Record[ID=1]"
+	body := `[ {cert_id[]} = "` + certID + `", {pubkey[]} = "` + pub + `", {private_enc[]} = "` + secret + `", {issued[]} = "issued-resolved", {owner_emails[]} = ;["` + mail + `"]:, {sig_id_prefix[]} = "sig-resolved" ]`
+	if st, b, _ := req(t, "PUT", P+full, n.key, []byte(body)); st != 200 {
+		t.Fatalf("store: %d %s", st, b)
+	}
+	player := `[ {Name[]} = "ada", {Cert[]} = "players.red-xai.db":Player[ID=1] @> "rxa-lifetime-cert.red-xai.db":Record[ID=1] ]`
+	if st, b, _ := req(t, "PUT", P+"players.red-xai.db:Player[ID=1]", n.key, []byte(player)); st != 200 {
+		t.Fatalf("player: %d %s", st, b)
+	}
+	steal := `[ {Name[]} = "ada", {Steal[]} = "players.red-xai.db":Player[ID=3] @> "rxa-lifetime-cert.red-xai.db":Record[ID=1].private_enc ]`
+	if st, b, _ := req(t, "PUT", P+"players.red-xai.db:Player[ID=3]", n.key, []byte(steal)); st != 200 {
+		t.Fatalf("steal: %d %s", st, b)
+	}
+	clean := func(what string, st int, b []byte) {
+		t.Helper()
+		s := string(b)
+		if strings.Contains(s, secret) || strings.Contains(s, pub) || strings.Contains(s, certID) || strings.Contains(s, mail) || strings.Contains(s, "issued-resolved") || strings.Contains(s, "sig-resolved") {
+			t.Fatalf("%s leaked a cert field: %d %s", what, st, b)
+		}
+	}
+	deny := func(what string, st int, b []byte) {
+		t.Helper()
+		if st != 403 {
+			t.Fatalf("%s: want 403, got %d %s", what, st, b)
+		}
+		clean(what, st, b)
+	}
+	for _, q := range []string{
+		`*.pubkey`, `*.cert_id`, `*.owner_emails`, `*.issued`, `*.sig_id_prefix`, `*.private_enc`, `*.*`,
+		`Record[ID=1].pubkey`, `Record[ID=1].cert_id`, `Record[ID=1].*`, `Record[ID=*].pubkey`, `*[ID=1].pubkey`,
+	} {
+		st, b, _ := req(t, "POST", D+"/query", n.key, []byte(q))
+		deny("query "+q, st, b)
+	}
+	st, b, _ := req(t, "POST", D+"/query", n.key, []byte(`{"q":"*.pubkey"}`), "Content-Type", "application/json")
+	deny("query json pubkey", st, b)
+	st, b, _ = req(t, "POST", D+"/query", n.key, []byte(`{"q":"Record[ID=1].*"}`), "Content-Type", "application/json")
+	deny("query json star", st, b)
+	for _, p := range []string{"pubkey", "cert_id", "owner_emails", "issued", "sig_id_prefix", "private_enc"} {
+		st, b, _ := req(t, "GET", P+"Record[ID=1]."+p, n.key, nil)
+		deny("rest "+p, st, b)
+	}
+	st, b, _ = req(t, "GET", P+"Record[ID=1].pubkey", n.key, nil, "Accept", "text/plain")
+	deny("rest pubkey text", st, b)
+	st, b, _ = req(t, "GET", P+"Record[ID=1]", n.key, nil)
+	deny("rest record", st, b)
+	for _, p := range []string{
+		"players.red-xai.db:Player[ID=1].Cert.pubkey?resolve=1",
+		"players.red-xai.db:Player[ID=1].Cert.cert_id?resolve=1",
+		"players.red-xai.db:Player[ID=1].Cert.owner_emails?resolve=1",
+		"players.red-xai.db:Player[ID=1].Cert.private_enc?resolve=1&depth=4",
+		"players.red-xai.db:Player[ID=3].Steal?resolve=1",
+	} {
+		st, b, _ := req(t, "GET", P+p, n.key, nil)
+		deny("resolve "+p, st, b)
+	}
+	st, b, _ = req(t, "GET", P+"players.red-xai.db:Player[ID=1].Cert.pubkey?resolve=1", n.key, nil, "Accept", "text/plain")
+	deny("resolve pubkey text", st, b)
+	st, b, _ = req(t, "GET", P+"players.red-xai.db:Player[ID=3].Steal?resolve=1", n.key, nil, "Accept", "text/plain")
+	deny("resolve steal text", st, b)
+	// A field that is not on the cert is still returned, and the link literal is not the field.
+	st, b, _ = req(t, "POST", D+"/query", n.key, []byte(`*.Name`))
+	if st != 200 || !strings.Contains(string(b), "ada") {
+		t.Fatalf("query name: %d %s", st, b)
+	}
+	clean("query name", st, b)
+	st, b, _ = req(t, "GET", P+"players.red-xai.db:Player[ID=1].Name?resolve=1", n.key, nil)
+	if st != 200 || !strings.Contains(string(b), "ada") {
+		t.Fatalf("resolve name: %d %s", st, b)
+	}
+	clean("resolve name", st, b)
+	st, b, _ = req(t, "GET", P+"players.red-xai.db:Player[ID=3].Steal", n.key, nil)
+	clean("link literal", st, b)
+	// A second Record does not make the query safe. REST becomes ambiguous.
+	if st, b, _ := req(t, "PUT", P+"account.red-xai.db:Record[ID=1]", n.key, []byte(`[ {username[]} = "ada" ]`)); st != 200 {
+		t.Fatalf("sibling: %d %s", st, b)
+	}
+	st, b, _ = req(t, "POST", D+"/query", n.key, []byte(`Record[ID=1].pubkey`))
+	deny("query pubkey with sibling", st, b)
+	st, b, _ = req(t, "POST", D+"/query", n.key, []byte(`Record[ID=1].*`))
+	deny("query star with sibling", st, b)
+	st, b, _ = req(t, "GET", P+"Record[ID=1].pubkey", n.key, nil)
+	if st == 200 {
+		t.Fatalf("sibling REST must not return the field: %d %s", st, b)
+	}
+	clean("sibling REST", st, b)
+	// Closed channels stay closed.
+	st, b, _ = req(t, "GET", P+"rxa-lifetime-cert.red-xai:Record[ID=1].pubkey", n.key, nil)
+	deny("short pubkey", st, b)
+	st, b, _ = req(t, "POST", D+"/bx", n.key, []byte(`{Get[]} = players:Player[ID=1] -> Cert.pubkey @> Cert`))
+	deny("follow pubkey", st, b)
+	raw, err := os.ReadFile(n.h.Cfg.AuditLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), secret) || strings.Contains(string(raw), pub) {
+		t.Fatalf("audit log contains a cert field:\n%s", raw)
+	}
+}
+
 // ---- encryption (master key from a key file) ----
 
 func TestMasterKeyFileAndEncryptedPacks(t *testing.T) {

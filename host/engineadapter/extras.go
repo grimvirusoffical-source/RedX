@@ -926,6 +926,9 @@ func (s *store) Resolve(p string, depth int, allow func(string) bool) (host.Reso
 		v = e.Value
 	}
 	out := host.Resolved{Value: v.String()}
+	for _, c := range x.Copied {
+		out.Reads = append(out.Reads, host.ResolvedRead{Path: c.Path, Target: c.Target.String()})
+	}
 	for _, d := range x.Dangling {
 		out.Dangling = append(out.Dangling, d.String())
 	}
