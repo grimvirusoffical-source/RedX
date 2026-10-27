@@ -48,7 +48,7 @@ func TestLifetimeCertResolvedReadsOnEngine(t *testing.T) {
 	q := n.URL + "/v1/db/redxai_accounts/query"
 	deny := func(who, what string, st int, body string) {
 		t.Helper()
-		if st != 403 || strings.Contains(body, secret) || strings.Contains(body, pub) || strings.Contains(body, "cert-engine") || strings.Contains(body, "issued-engine") {
+		if st != 403 || strings.Contains(body, secret) || strings.Contains(body, pub) || strings.Contains(body, "cert-engine") || strings.Contains(body, "issued-engine") || strings.Contains(body, "owner-emails-engine") || strings.Contains(body, "sig-engine") {
 			t.Fatalf("%s %s: %d %s", who, what, st, body)
 		}
 	}
@@ -139,6 +139,34 @@ func TestLifetimeCertResolvedReadsOnEngine(t *testing.T) {
 	st, b, _ = do(t, "GET", enginePath(n, "players.red-xai.db:Player[ID=10].Wrap.Bag")+"?resolve=1&depth=4", tok, "")
 	if st != 200 || !strings.Contains(b, "cert-engine") || strings.Contains(b, secret) {
 		t.Fatalf("owner resolve nested array: %d %s", st, b)
+	}
+	idBag := `[ {Name[]} = "ada", {Bag[ID=0]} = ;["players.red-xai.db":Player[ID=17] @> "rxa-lifetime-cert.red-xai.db":Record[ID=1].pubkey]: ]`
+	if st, b, _ := do(t, "PUT", enginePath(n, "players.red-xai.db:Player[ID=17]"), svc, idBag); st != 200 || strings.Contains(b, pub) {
+		t.Fatalf("service id array link: %d %s", st, b)
+	}
+	idSteal := `[ {Name[]} = "ada", {Steal[ID=1]} = "players.red-xai.db":Player[ID=20] @> "rxa-lifetime-cert.red-xai.db":Record[ID=1].private_enc ]`
+	if st, b, _ := do(t, "PUT", enginePath(n, "players.red-xai.db:Player[ID=20]"), svc, idSteal); st != 200 || strings.Contains(b, secret) {
+		t.Fatalf("service id field link: %d %s", st, b)
+	}
+	idLower := `[ {Name[]} = "ada", {Bag[id=7]} = ;["players.red-xai.db":Player[ID=25] @> "rxa-lifetime-cert.red-xai.db":Record[ID=1].owner_emails]: ]`
+	if st, b, _ := do(t, "PUT", enginePath(n, "players.red-xai.db:Player[ID=25]"), svc, idLower); st != 200 || strings.Contains(b, "owner-emails-engine") {
+		t.Fatalf("service lowercase id link: %d %s", st, b)
+	}
+	st, b, _ = do(t, "GET", enginePath(n, "players.red-xai.db:Player[ID=17].Bag")+"?resolve=1&depth=4", svc, "")
+	deny("service", "resolve id array pubkey", st, b)
+	st, b, _ = do(t, "GET", enginePath(n, "players.red-xai.db:Player[ID=17].Bag[ID=0]")+"?resolve=1", svc, "")
+	deny("service", "resolve id array with id", st, b)
+	st, b, _ = do(t, "GET", enginePath(n, "players.red-xai.db:Player[ID=20].Steal")+"?resolve=1", svc, "", "Accept", "text/plain")
+	deny("service", "resolve id private_enc", st, b)
+	st, b, _ = do(t, "GET", enginePath(n, "players.red-xai.db:Player[ID=25].Bag")+"?resolve=1", svc, "", "Accept", "text/plain")
+	deny("service", "resolve lowercase id", st, b)
+	st, b, _ = do(t, "GET", enginePath(n, "players.red-xai.db:Player[ID=17].Bag")+"?resolve=1&depth=4", tok, "")
+	if st != 200 || !strings.Contains(b, pub) || strings.Contains(b, secret) {
+		t.Fatalf("owner resolve id array pubkey: %d %s", st, b)
+	}
+	st, b, _ = do(t, "GET", enginePath(n, "players.red-xai.db:Player[ID=20].Steal")+"?resolve=1", tok, "", "Accept", "text/plain")
+	if st != 200 || !strings.Contains(b, secret) {
+		t.Fatalf("owner resolve id private_enc: %d %s", st, b)
 	}
 	raw, err := os.ReadFile(n.H.Cfg.AuditLog)
 	if err != nil {

@@ -185,6 +185,67 @@ func TestResolveReadsCert(t *testing.T) {
 	if resolveReadsCert(`players.red-xai.db:Player[ID=1].Certificate`, []ResolvedRead{{Path: "Cert", Target: `"rxa-lifetime-cert.red-xai.db":Record[ID=1]`}}) {
 		t.Fatal("a longer field name is not the cert link")
 	}
+	// An entry ID is part of the field the bare name selects. The expander
+	// records Bag[ID=n] and Bag[ID=n][0], not a different name.
+	idBag := []ResolvedRead{{Path: "Bag[ID=0][0]", Target: `"rxa-lifetime-cert.red-xai.db":Record[ID=1].pubkey`}}
+	if !resolveReadsCert(`players.red-xai.db:Player[ID=17].Bag`, idBag) {
+		t.Fatal("a bare array field includes the link stored at Bag[ID=0][0]")
+	}
+	if !resolveReadsCert(`players.red-xai.db:Player[ID=17].Bag[ID=0]`, idBag) {
+		t.Fatal("the same array field named with its ID includes Bag[ID=0][0]")
+	}
+	if resolveReadsCert(`players.red-xai.db:Player[ID=17].Bag[ID=9]`, idBag) {
+		t.Fatal("a different entry ID is not this array")
+	}
+	if resolveReadsCert(`players.red-xai.db:Player[ID=17].Name`, idBag) {
+		t.Fatal("Name does not include the ID'd array link")
+	}
+	idSecret := []ResolvedRead{{Path: "Bag[ID=0][0]", Target: `"rxa-lifetime-cert.red-xai.db":Record[ID=1].private_enc`}}
+	if !resolveReadsCert(`players.red-xai.db:Player[ID=18].Bag`, idSecret) {
+		t.Fatal("an ID'd array link aimed at private_enc is a cert read")
+	}
+	idWrap := []ResolvedRead{{Path: "Wrap[ID=3].Bag[0]", Target: `"rxa-lifetime-cert.red-xai.db":Record[ID=1].cert_id`}}
+	if !resolveReadsCert(`players.red-xai.db:Player[ID=19].Wrap.Bag`, idWrap) {
+		t.Fatal("a bare nested field includes Wrap[ID=3].Bag[0]")
+	}
+	if !resolveReadsCert(`players.red-xai.db:Player[ID=19].Wrap`, idWrap) {
+		t.Fatal("the parent box includes the ID'd nested link")
+	}
+	if !resolveReadsCert(`players.red-xai.db:Player[ID=19].Wrap[ID=3].Bag`, idWrap) {
+		t.Fatal("the nested field named with its ID includes Wrap[ID=3].Bag[0]")
+	}
+	idSteal := []ResolvedRead{{Path: "Steal[ID=1]", Target: `"rxa-lifetime-cert.red-xai.db":Record[ID=1].private_enc`}}
+	if !resolveReadsCert(`players.red-xai.db:Player[ID=20].Steal`, idSteal) {
+		t.Fatal("a bare box field includes the link stored at Steal[ID=1]")
+	}
+	if !resolveReadsCert(`players.red-xai.db:Player[ID=20].Steal[ID=1]`, idSteal) {
+		t.Fatal("the same box field named with its ID includes Steal[ID=1]")
+	}
+	idMulti := []ResolvedRead{
+		{Path: "Bag[ID=2][0]", Target: `"rxa-lifetime-cert.red-xai.db":Record[ID=1].pubkey`},
+		{Path: "Bag[ID=2][1]", Target: `"rxa-lifetime-cert.red-xai.db":Record[ID=1].cert_id`},
+	}
+	if !resolveReadsCert(`players.red-xai.db:Player[ID=21].Bag`, idMulti) {
+		t.Fatal("an ID'd array of several cert links is a cert read")
+	}
+	idDeep := []ResolvedRead{{Path: "Bag[ID=4][0][1]", Target: `"rxa-lifetime-cert.red-xai.db":Record[ID=1].sig_id_prefix`}}
+	if !resolveReadsCert(`players.red-xai.db:Player[ID=23].Bag`, idDeep) {
+		t.Fatal("a nested index under an ID'd array is still inside Bag")
+	}
+	idLower := []ResolvedRead{{Path: "Bag[id=7][0]", Target: `"rxa-lifetime-cert.red-xai.db":Record[ID=1].owner_emails`}}
+	if !resolveReadsCert(`players.red-xai.db:Player[ID=25].Bag`, idLower) {
+		t.Fatal("a lowercase id attribute is still the same field")
+	}
+	idHop := []ResolvedRead{{Path: "Hop[ID=1].Ptr", Target: `"rxa-lifetime-cert.red-xai.db":Record[ID=1].owner_emails`}}
+	if !resolveReadsCert(`players.red-xai.db:Player[ID=26].Hop`, idHop) {
+		t.Fatal("a bare two-hop field includes the link stored under Hop[ID=1]")
+	}
+	if resolveReadsCert(`players.red-xai.db:Player[ID=17].Baggage`, []ResolvedRead{{Path: "Bag[ID=0]", Target: `"rxa-lifetime-cert.red-xai.db":Record[ID=1].pubkey`}}) {
+		t.Fatal("a longer field name is not the ID'd bag")
+	}
+	if resolveReadsCert(`players.red-xai.db:Player[ID=17].Bag`, []ResolvedRead{{Path: "Bag[LOCK=3]", Target: `"rxa-lifetime-cert.red-xai.db":Record[ID=1].pubkey`}}) {
+		t.Fatal("a non-ID attribute is not an entry ID")
+	}
 }
 
 func TestGuardBoxQL(t *testing.T) {

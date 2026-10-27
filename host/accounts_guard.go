@@ -317,8 +317,9 @@ func lifetimeCertVisible(pr *Principal, path, value string) bool {
 // Cert.pubkey uses the link at Cert, and reading the whole record uses every link.
 //
 // An array element is recorded as Name[0] (and Name[0][1] when that element is
-// itself an array). The HTTP path names the array field, so Bag selects Bag[0]
-// and Wrap.Bag selects Wrap.Bag[0].
+// itself an array). An entry that carries an ID is recorded as Name[ID=n], and
+// an array element under it as Name[ID=n][0]. The HTTP path names the field,
+// so Bag selects Bag[0] and Bag[ID=n][0], and Wrap.Bag selects Wrap[ID=n].Bag[0].
 func certExpandFeeds(sub []box.Seg, from string) bool {
 	if from == "" {
 		return true
@@ -329,7 +330,7 @@ func certExpandFeeds(sub []box.Seg, from string) bool {
 		n = len(parts)
 	}
 	for i := 0; i < n; i++ {
-		if !expandStepMatches(sub[i].String(), parts[i]) {
+		if !expandStepMatches(sub[i], parts[i]) {
 			return false
 		}
 	}
@@ -338,18 +339,54 @@ func certExpandFeeds(sub []box.Seg, from string) bool {
 
 // expandStepMatches reports whether a request segment selects a recorded
 // expand step. Equality is the box-field case. A numeric [n] suffix (one or
-// more) is an array index inside that field, not a different name.
-func expandStepMatches(seg, part string) bool {
-	if seg == part {
+// more) is an array index inside that field, not a different name. Lookup of
+// a bare field name still returns an entry stored as Name[ID=n], so that
+// attribute is part of the same field. A request that already names an ID
+// selects only that ID.
+func expandStepMatches(seg box.Seg, part string) bool {
+	label := seg.String()
+	if label == part {
 		return true
 	}
-	if seg == "" || !strings.HasPrefix(part, seg) {
+	if label == "" || !strings.HasPrefix(part, label) {
 		return false
 	}
-	rest := part[len(seg):]
-	if len(rest) == 0 || rest[0] != '[' {
-		return false
+	rest := part[len(label):]
+	if !seg.HasID && !seg.AnyID {
+		if trimmed, ok := stripRecordedID(rest); ok {
+			rest = trimmed
+		}
 	}
+	return onlyNumericIndexes(rest)
+}
+
+// stripRecordedID removes one leading [ID=n] entry attribute. The expander
+// records keys with EKey.String, which writes ID in that form. A lowercase
+// id= attribute in the step counts the same way.
+func stripRecordedID(rest string) (string, bool) {
+	if len(rest) < 5 || rest[0] != '[' {
+		return "", false
+	}
+	end := strings.IndexByte(rest, ']')
+	if end < 0 {
+		return "", false
+	}
+	inner := rest[1:end]
+	key, val, ok := strings.Cut(inner, "=")
+	if !ok || !strings.EqualFold(key, "ID") || val == "" {
+		return "", false
+	}
+	for _, c := range val {
+		if c < '0' || c > '9' {
+			return "", false
+		}
+	}
+	return rest[end+1:], true
+}
+
+// onlyNumericIndexes reports whether rest is empty or a sequence of [n] array
+// indexes and nothing else.
+func onlyNumericIndexes(rest string) bool {
 	for len(rest) > 0 {
 		if rest[0] != '[' {
 			return false

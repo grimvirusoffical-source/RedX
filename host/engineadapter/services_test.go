@@ -967,6 +967,26 @@ func TestLifetimeCertResolvedFieldReads(t *testing.T) {
 	if st, b, _ := req(t, "PUT", P+"players.red-xai.db:Player[ID=10]", n.key, []byte(bagNest)); st != 200 {
 		t.Fatalf("nested bag: %d %s", st, b)
 	}
+	idBag := `[ {Name[]} = "ada", {Bag[ID=0]} = ;["players.red-xai.db":Player[ID=17] @> "rxa-lifetime-cert.red-xai.db":Record[ID=1].pubkey]: ]`
+	if st, b, _ := req(t, "PUT", P+"players.red-xai.db:Player[ID=17]", n.key, []byte(idBag)); st != 200 {
+		t.Fatalf("id bag: %d %s", st, b)
+	}
+	idSec := `[ {Name[]} = "ada", {Bag[ID=0]} = ;["players.red-xai.db":Player[ID=18] @> "rxa-lifetime-cert.red-xai.db":Record[ID=1].private_enc]: ]`
+	if st, b, _ := req(t, "PUT", P+"players.red-xai.db:Player[ID=18]", n.key, []byte(idSec)); st != 200 {
+		t.Fatalf("id secret: %d %s", st, b)
+	}
+	idWrap := `[ {Name[]} = "ada", {Wrap[ID=3]} = [ {Bag[]} = ;["players.red-xai.db":Player[ID=19] @> "rxa-lifetime-cert.red-xai.db":Record[ID=1].cert_id]: ] ]`
+	if st, b, _ := req(t, "PUT", P+"players.red-xai.db:Player[ID=19]", n.key, []byte(idWrap)); st != 200 {
+		t.Fatalf("id wrap: %d %s", st, b)
+	}
+	idSteal := `[ {Name[]} = "ada", {Steal[ID=1]} = "players.red-xai.db":Player[ID=20] @> "rxa-lifetime-cert.red-xai.db":Record[ID=1].private_enc ]`
+	if st, b, _ := req(t, "PUT", P+"players.red-xai.db:Player[ID=20]", n.key, []byte(idSteal)); st != 200 {
+		t.Fatalf("id steal: %d %s", st, b)
+	}
+	idLower := `[ {Name[]} = "ada", {Bag[id=7]} = ;["players.red-xai.db":Player[ID=25] @> "rxa-lifetime-cert.red-xai.db":Record[ID=1].owner_emails]: ]`
+	if st, b, _ := req(t, "PUT", P+"players.red-xai.db:Player[ID=25]", n.key, []byte(idLower)); st != 200 {
+		t.Fatalf("id lower: %d %s", st, b)
+	}
 	clean := func(what string, st int, b []byte) {
 		t.Helper()
 		s := string(b)
@@ -1010,6 +1030,14 @@ func TestLifetimeCertResolvedFieldReads(t *testing.T) {
 		"players.red-xai.db:Player[ID=9].Bag?resolve=1",
 		"players.red-xai.db:Player[ID=10].Wrap.Bag?resolve=1&depth=4",
 		"players.red-xai.db:Player[ID=10].Wrap?resolve=1&depth=4",
+		"players.red-xai.db:Player[ID=17].Bag?resolve=1&depth=4",
+		"players.red-xai.db:Player[ID=18].Bag?resolve=1",
+		"players.red-xai.db:Player[ID=19].Wrap.Bag?resolve=1&depth=4",
+		"players.red-xai.db:Player[ID=19].Wrap?resolve=1&depth=4",
+		"players.red-xai.db:Player[ID=20].Steal?resolve=1",
+		"players.red-xai.db:Player[ID=17].Bag[ID=0]?resolve=1",
+		"players.red-xai.db:Player[ID=20].Steal[ID=1]?resolve=1",
+		"players.red-xai.db:Player[ID=25].Bag?resolve=1",
 	} {
 		st, b, _ := req(t, "GET", P+p, n.key, nil)
 		deny("resolve "+p, st, b)
@@ -1022,6 +1050,10 @@ func TestLifetimeCertResolvedFieldReads(t *testing.T) {
 	deny("resolve array pubkey text", st, b)
 	st, b, _ = req(t, "GET", P+"players.red-xai.db:Player[ID=9].Bag?resolve=1", n.key, nil, "Accept", "text/plain")
 	deny("resolve array secret text", st, b)
+	st, b, _ = req(t, "GET", P+"players.red-xai.db:Player[ID=18].Bag?resolve=1", n.key, nil, "Accept", "text/plain")
+	deny("resolve id array secret text", st, b)
+	st, b, _ = req(t, "GET", P+"players.red-xai.db:Player[ID=20].Steal?resolve=1", n.key, nil, "Accept", "text/plain")
+	deny("resolve id steal text", st, b)
 	st, b, _ = req(t, "GET", P+"players.red-xai.db:Player[ID=8].Bag[0]?resolve=1", n.key, nil)
 	if st == 200 {
 		t.Fatalf("array index path must not return the field: %d %s", st, b)
