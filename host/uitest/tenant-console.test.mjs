@@ -87,7 +87,7 @@ test('customer dashboard restores creation, explorer, BoxQL, credentials, and pl
 });
 
 test('native Red-XAI Hub design supports dark/light, mobile, search and reduced-motion',()=>{
- assert.match(index,/\.\/css\/app\.css/);
+ assert.match(index,/\/ui\/css\/app\.css/);
  assert.doesNotMatch(index,/forge\.css/);
  assert.match(main,/hub-nav-search/);
  assert.match(css,/\.hub-navigation/);
