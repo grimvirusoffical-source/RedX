@@ -127,7 +127,9 @@ func (h *Host) authLogin(w http.ResponseWriter, r *http.Request) {
 	// become an arbitrary hostname or URL supplied by the browser.
 	hub := r.URL.Query().Get("console") == "hub"
 	signInRoute := "/#/signin"
-	if hub { signInRoute = "/v1/console/#/signin" }
+	if hub {
+		signInRoute = "/v1/console/#/signin"
+	}
 	if h.acctThrottle(w, r, "login", 1, 20) {
 		return
 	}
@@ -194,7 +196,9 @@ func (h *Host) authCallback(w http.ResponseWriter, r *http.Request) {
 		fail("expired")
 		return
 	}
-	if p.hub { signInRoute = "/v1/console/#/signin" }
+	if p.hub {
+		signInRoute = "/v1/console/#/signin"
+	}
 	if e := q.Get("error"); e != "" {
 		h.Audit.Log(AuditEvent{Event: "account.signin.fail", Remote: remoteIP(r), Reason: "provider error: " + truncate(e, 64)})
 		if e == "access_denied" {
