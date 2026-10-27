@@ -3,8 +3,8 @@
    on the backgrounds they are used on; scripts/contrast check in docs/console.md. */
 :root {
   --bg: #090b10; --bg2: #11131a; --panel: #171a23; --panel2: #222530; --line: #303340; --line2: #44404d;
-  --fg: #f7f3f4; --muted: #b7b3bc; --dim: #948285;
-  --accent: #ff4055; --accent2: #ff7888; --accent-bg: rgba(242, 73, 90, .14); --accent-fg: #fff;
+  --fg: #f7f3f4; --muted: #b7b3bc; --dim: #aca7b4;
+  --accent: #ff5367; --accent2: #ff7888; --accent-bg: rgba(242, 73, 90, .14); --accent-fg: #fff;
   --btn: #c91c34; --btn-hi: #e0283f; --btn-lo: #a8132a; --glow: rgba(242, 73, 90, .10); --accent-glow: rgba(242, 73, 90, .45); --hairline: rgba(255, 255, 255, .045);
   color-scheme: dark;
   --ok: #3ecf8e; --warn: #f5a524; --err: #ff5d6c; --info: #5aa9ff;
@@ -13,7 +13,7 @@
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --radius: 16px;
   /* syntax */
-  --tk-comment: #948285; --tk-string: #9fd6a0; --tk-number: #f0b27a; --tk-keyword: #ff7b8a; --tk-marker: #7fc3ff; --tk-verb: #ff6b78;
+  --tk-comment: #b5afb9; --tk-string: #9fd6a0; --tk-number: #f0b27a; --tk-keyword: #ff7b8a; --tk-marker: #7fc3ff; --tk-verb: #ff6b78;
   --tk-box: #e5c07b; --tk-file: #c792ea; --tk-field: #d9e2ec; --tk-param: #ffcb6b; --tk-ttl: #ff9f6b; --tk-link: #5eead4; --tk-list: #f78fb3;
   --tk-operator: #8fb8de; --tk-punct: #b6a4a8; --tk-function: #82aaff; --tk-option: #c3a6ff; --tk-error: #ff5d6c; --tk-ident: #e8dcde; --tk-arrow: #5eead4; --tk-bracket: #cdbcc0; --tk-brace: #ff9aa5;
 }
