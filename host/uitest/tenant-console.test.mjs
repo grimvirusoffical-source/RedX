@@ -13,7 +13,7 @@ const wizard=file('js/pages/wizard.js');
 const keys=file('js/pages/keys.js');
 const dashboard=file('js/pages/dashboard.js');
 const index=file('index.html');
-const css=file('css/forge.css');
+const css=file('css/app.css');
 
 test('all old customer tools and both website destinations remain visible in the source navigation',()=>{
  for(const id of ['databases','data','studio','keys','devices','apps','raw','backups','wizard']){
@@ -24,7 +24,9 @@ test('all old customer tools and both website destinations remain visible in the
  assert.match(main,/title: 'Red-XAI Host'/);
  assert.match(main,/https:\/\/red-xai\.com\/hosting/);
  assert.match(main,/https:\/\/red-xai\.com\/store/);
- assert.match(main,/NAV\.filter\(\(n\) => !n\.adv && \(!n\.owner \|\| isOwner\)\)/);
+ assert.match(main,/const groups = \[/);
+ assert.match(main,/function refreshNav\(/);
+ assert.match(main,/data-id/);
 });
 
 test('tenant auth never grants host administration or owner access',()=>{
@@ -84,8 +86,12 @@ test('customer dashboard restores creation, explorer, BoxQL, credentials, and pl
  assert.doesNotMatch(dashboard,/Your own databases on this host yet/);
 });
 
-test('unique Red-XAI Forge design supports dark/light, mobile and reduced-motion',()=>{
- assert.match(index,/ui\/css\/forge\.css/);
+test('native Red-XAI Hub design supports dark/light, mobile, search and reduced-motion',()=>{
+ assert.match(index,/\.\/css\/app\.css/);
+ assert.doesNotMatch(index,/forge\.css/);
+ assert.match(main,/hub-nav-search/);
+ assert.match(css,/\.hub-navigation/);
+ assert.match(css,/\.hub-nav-search/);
  assert.match(css,/\.customer-hero/);
  assert.match(css,/\.customer-action/);
  assert.match(css,/\.side-label/);
