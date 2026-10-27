@@ -315,6 +315,10 @@ func lifetimeCertVisible(pr *Principal, path, value string) bool {
 // (dot-separated entry keys, "" for the record value itself) is part of the
 // value selected by sub. One path being a prefix of the other counts: reading
 // Cert.pubkey uses the link at Cert, and reading the whole record uses every link.
+//
+// An array element is recorded as Name[0] (and Name[0][1] when that element is
+// itself an array). The HTTP path names the array field, so Bag selects Bag[0]
+// and Wrap.Bag selects Wrap.Bag[0].
 func certExpandFeeds(sub []box.Seg, from string) bool {
 	if from == "" {
 		return true
@@ -325,9 +329,41 @@ func certExpandFeeds(sub []box.Seg, from string) bool {
 		n = len(parts)
 	}
 	for i := 0; i < n; i++ {
-		if sub[i].String() != parts[i] {
+		if !expandStepMatches(sub[i].String(), parts[i]) {
 			return false
 		}
+	}
+	return true
+}
+
+// expandStepMatches reports whether a request segment selects a recorded
+// expand step. Equality is the box-field case. A numeric [n] suffix (one or
+// more) is an array index inside that field, not a different name.
+func expandStepMatches(seg, part string) bool {
+	if seg == part {
+		return true
+	}
+	if seg == "" || !strings.HasPrefix(part, seg) {
+		return false
+	}
+	rest := part[len(seg):]
+	if len(rest) == 0 || rest[0] != '[' {
+		return false
+	}
+	for len(rest) > 0 {
+		if rest[0] != '[' {
+			return false
+		}
+		end := strings.IndexByte(rest, ']')
+		if end < 2 {
+			return false
+		}
+		for _, c := range rest[1:end] {
+			if c < '0' || c > '9' {
+				return false
+			}
+		}
+		rest = rest[end+1:]
 	}
 	return true
 }

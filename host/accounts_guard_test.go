@@ -156,6 +156,35 @@ func TestResolveReadsCert(t *testing.T) {
 	if resolveReadsCert(`players.red-xai.db:Player[ID=1].Guild.Name`, other) {
 		t.Fatal("an ordinary link is not a cert read")
 	}
+	array := []ResolvedRead{{Path: "Bag[0]", Target: `"rxa-lifetime-cert.red-xai.db":Record[ID=1].pubkey`}}
+	if !resolveReadsCert(`players.red-xai.db:Player[ID=8].Bag`, array) {
+		t.Fatal("an array field includes the link stored at Bag[0]")
+	}
+	if resolveReadsCert(`players.red-xai.db:Player[ID=8].Name`, array) {
+		t.Fatal("Name does not include the array link")
+	}
+	secretArr := []ResolvedRead{{Path: "Bag[0]", Target: `"rxa-lifetime-cert.red-xai.db":Record[ID=1].private_enc`}}
+	if !resolveReadsCert(`players.red-xai.db:Player[ID=9].Bag`, secretArr) {
+		t.Fatal("an array link aimed at private_enc is a cert read")
+	}
+	nested := []ResolvedRead{{Path: "Wrap.Bag[0]", Target: `"rxa-lifetime-cert.red-xai.db":Record[ID=1].cert_id`}}
+	if !resolveReadsCert(`players.red-xai.db:Player[ID=10].Wrap.Bag`, nested) {
+		t.Fatal("a nested array field includes Wrap.Bag[0]")
+	}
+	if !resolveReadsCert(`players.red-xai.db:Player[ID=10].Wrap`, nested) {
+		t.Fatal("the parent box includes the nested array link")
+	}
+	deep := []ResolvedRead{{Path: "Bag[0][1]", Target: `"rxa-lifetime-cert.red-xai.db":Record[ID=1].issued`}}
+	if !resolveReadsCert(`players.red-xai.db:Player[ID=8].Bag`, deep) {
+		t.Fatal("an array inside an array element is still inside Bag")
+	}
+	inner := []ResolvedRead{{Path: "Bag[0].Steal", Target: `"rxa-lifetime-cert.red-xai.db":Record[ID=1].pubkey`}}
+	if !resolveReadsCert(`players.red-xai.db:Player[ID=8].Bag`, inner) {
+		t.Fatal("a link inside an array element is inside Bag")
+	}
+	if resolveReadsCert(`players.red-xai.db:Player[ID=1].Certificate`, []ResolvedRead{{Path: "Cert", Target: `"rxa-lifetime-cert.red-xai.db":Record[ID=1]`}}) {
+		t.Fatal("a longer field name is not the cert link")
+	}
 }
 
 func TestGuardBoxQL(t *testing.T) {

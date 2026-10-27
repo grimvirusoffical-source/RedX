@@ -955,6 +955,18 @@ func TestLifetimeCertResolvedFieldReads(t *testing.T) {
 	if st, b, _ := req(t, "PUT", P+"players.red-xai.db:Player[ID=3]", n.key, []byte(steal)); st != 200 {
 		t.Fatalf("steal: %d %s", st, b)
 	}
+	bagPub := `[ {Name[]} = "ada", {Bag[]} = ;["players.red-xai.db":Player[ID=8] @> "rxa-lifetime-cert.red-xai.db":Record[ID=1].pubkey]: ]`
+	if st, b, _ := req(t, "PUT", P+"players.red-xai.db:Player[ID=8]", n.key, []byte(bagPub)); st != 200 {
+		t.Fatalf("bag pubkey: %d %s", st, b)
+	}
+	bagSec := `[ {Name[]} = "ada", {Bag[]} = ;["players.red-xai.db":Player[ID=9] @> "rxa-lifetime-cert.red-xai.db":Record[ID=1].private_enc]: ]`
+	if st, b, _ := req(t, "PUT", P+"players.red-xai.db:Player[ID=9]", n.key, []byte(bagSec)); st != 200 {
+		t.Fatalf("bag secret: %d %s", st, b)
+	}
+	bagNest := `[ {Name[]} = "ada", {Wrap[]} = [ {Bag[]} = ;["players.red-xai.db":Player[ID=10] @> "rxa-lifetime-cert.red-xai.db":Record[ID=1].cert_id]: ] ]`
+	if st, b, _ := req(t, "PUT", P+"players.red-xai.db:Player[ID=10]", n.key, []byte(bagNest)); st != 200 {
+		t.Fatalf("nested bag: %d %s", st, b)
+	}
 	clean := func(what string, st int, b []byte) {
 		t.Helper()
 		s := string(b)
@@ -994,6 +1006,10 @@ func TestLifetimeCertResolvedFieldReads(t *testing.T) {
 		"players.red-xai.db:Player[ID=1].Cert.owner_emails?resolve=1",
 		"players.red-xai.db:Player[ID=1].Cert.private_enc?resolve=1&depth=4",
 		"players.red-xai.db:Player[ID=3].Steal?resolve=1",
+		"players.red-xai.db:Player[ID=8].Bag?resolve=1&depth=4",
+		"players.red-xai.db:Player[ID=9].Bag?resolve=1",
+		"players.red-xai.db:Player[ID=10].Wrap.Bag?resolve=1&depth=4",
+		"players.red-xai.db:Player[ID=10].Wrap?resolve=1&depth=4",
 	} {
 		st, b, _ := req(t, "GET", P+p, n.key, nil)
 		deny("resolve "+p, st, b)
@@ -1002,6 +1018,15 @@ func TestLifetimeCertResolvedFieldReads(t *testing.T) {
 	deny("resolve pubkey text", st, b)
 	st, b, _ = req(t, "GET", P+"players.red-xai.db:Player[ID=3].Steal?resolve=1", n.key, nil, "Accept", "text/plain")
 	deny("resolve steal text", st, b)
+	st, b, _ = req(t, "GET", P+"players.red-xai.db:Player[ID=8].Bag?resolve=1", n.key, nil, "Accept", "text/plain")
+	deny("resolve array pubkey text", st, b)
+	st, b, _ = req(t, "GET", P+"players.red-xai.db:Player[ID=9].Bag?resolve=1", n.key, nil, "Accept", "text/plain")
+	deny("resolve array secret text", st, b)
+	st, b, _ = req(t, "GET", P+"players.red-xai.db:Player[ID=8].Bag[0]?resolve=1", n.key, nil)
+	if st == 200 {
+		t.Fatalf("array index path must not return the field: %d %s", st, b)
+	}
+	clean("array index", st, b)
 	// A field that is not on the cert is still returned, and the link literal is not the field.
 	st, b, _ = req(t, "POST", D+"/query", n.key, []byte(`*.Name`))
 	if st != 200 || !strings.Contains(string(b), "ada") {
