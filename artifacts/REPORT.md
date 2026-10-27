@@ -9,7 +9,7 @@
 | Prior HOLD | head `86f6275cde42f3078a56c6ae8fc2c7f881a55855`, report on PR #26 |
 | Product vs `86f6275` | Array-index match in `certExpandFeeds` (`host/accounts_guard.go` and its tests). |
 | Product vs `a09baece` | Cert gate unchanged. The only diff is `host/hosted_test.go`: the sign-in limiter test no longer follows the authorize redirect. |
-| Harness | `host/qa_lifetime_attack_test.go` (`//go:build qa`) on `cursor/qa-lifetime-cert-array-retest-d80e`. Not merged. PR #26 left unmerged. |
+| Harness | `host/qa_lifetime_attack_test.go` (`//go:build qa`) on `cursor/qa-lifetime-cert-array-retest-d80e`. Not merged. https://github.com/grimvirusoffical-source/RedX/pull/27 . PR #26 left unmerged. |
 
 Field values below are **present** or **absent** only. No ciphertext, key, seed, or PEM material is included.
 
@@ -158,4 +158,4 @@ Do not merge PR #22 until a non-owner, including the accounts service key, gets 
 
 Leave unmerged. https://github.com/grimvirusoffical-source/RedX/pull/26 stays unmerged.
 
-This review's harness is a separate PR against `cursor/lifetime-cert-owner-gate-7ab7`. It does not change product behavior.
+This review's harness is https://github.com/grimvirusoffical-source/RedX/pull/27 against `cursor/lifetime-cert-owner-gate-7ab7`. It does not change product behavior. Leave it unmerged.
