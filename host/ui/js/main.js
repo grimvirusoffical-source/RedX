@@ -92,7 +92,24 @@ async function boot() {
   let needs = false;
   try { needs = (await api('GET', '/v1/ui/bootstrap-status', { noAuthRedirect: true })).needsSetup; } catch { /* host unreachable: login shows the error */ }
   if (needs) return showWelcome();
-  if (!session.key) return showLogin();
+  if (!session.key) {
+    // The first visit through the native Red-XAI Hub performs exactly one
+    // account OIDC redirect. If the user has an existing site session the
+    // provider returns directly, without asking for a DB key or pairing code.
+    // The tab-local marker prevents login redirect loops if the provider is
+    // unavailable or explicitly denied.
+    if (location.pathname.startsWith('/v1/console/')) {
+      try {
+        const cfg = await api('GET', '/v1/auth/config', { key: '', noAuthRedirect: true });
+        if (cfg.enabled && sessionStorage.getItem('redx.hub.autoSSO') !== 'attempted') {
+          sessionStorage.setItem('redx.hub.autoSSO', 'attempted');
+          location.assign('/v1/auth/login?console=hub&return=dashboard');
+          return;
+        }
+      } catch { /* sign-in screen offers account retry and a helpful error */ }
+    }
+    return showLogin();
+  }
   try {
     await loadWho();
   } catch (e) {
@@ -274,6 +291,9 @@ function buildShell() {
 }
 
 async function signOut() {
+  // A deliberate sign-out must not trigger immediate automatic sign-in on
+  // the same still-authenticated browser session.
+  try { sessionStorage.setItem('redx.hub.autoSSO', 'attempted'); } catch {}
   if (session.key.startsWith('rxs_')) { try { await api('POST', '/v1/auth/logout', { noAuthRedirect: true }); } catch { /* the session expires anyway */ } }
   session.clear();
   state.who = null;
