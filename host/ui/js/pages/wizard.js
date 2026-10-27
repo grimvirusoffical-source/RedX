@@ -1,6 +1,6 @@
 import { h, icon, chip, mount, toast, field, copy, spinner, emptyState } from '../util.js';
 import { api, enc, pathURL } from '../api.js';
-import { state, loadDbs, setDb, gs, wizard, ID_RE, isHostAdmin, setMode } from '../state.js';
+import { state, loadDbs, setDb, gs, wizard, ID_RE, isHostAdmin, isAccountTenant, canManageDatabases, dbDisplayName, setMode } from '../state.js';
 import { page } from './shared.js';
 import { loadPresets, applyPreset } from './presets.js';
 import { navigate } from '../main.js';
@@ -22,8 +22,10 @@ const PROFILES = [['', 'Skip: keep the current settings'], ['dev', 'Dev / laptop
 export default async function render() {
   const root = page();
   const S = { step: 0, name: '', tpl: 'game', seed: true, profile: '', adv: state.mode === 'advanced' };
-  if (!isHostAdmin()) {
-    root.append(h('div', { class: 'callout info' }, icon('info'), h('div', null, 'The setup wizard needs a host admin key. You can still use the ', h('a', { href: '#/data' }, 'Data Explorer'), ' and the ', h('a', { href: '#/studio' }, 'BoxQL Studio'), '.')));
+  if (!canManageDatabases()) {
+    root.append(h('div', { class: 'callout info' }, icon('info'), h('div', null,
+      'This account or API key cannot create databases. Sign in with Red-XAI or open ',
+      h('a', { href: '#/data' }, 'Data Explorer'), ' with the key you were given.')));
     return root;
   }
   const body = h('div');
@@ -38,7 +40,7 @@ export default async function render() {
   function paint() {
     paintSteps();
     if (S.step === 0) {
-      const input = h('input', { class: 'input big', value: S.name, placeholder: 'my-app', maxlength: 63, autocomplete: 'off', 'aria-label': 'Database name', oninput: (e) => { S.name = e.target.value.trim(); err.hidden = true; } });
+      const input = h('input', { class: 'input big', value: S.name, placeholder: 'my-app', maxlength: isAccountTenant() ? 50 : 63, autocomplete: 'off', 'aria-label': 'Database name', oninput: (e) => { S.name = e.target.value.trim(); err.hidden = true; } });
       const err = h('div', { class: 'form-err', hidden: true });
       input.addEventListener('keydown', (e) => { if (e.key === 'Enter') next(); });
       mount(body, h('h2', null, 'Name your database'), h('p', { class: 'muted' }, 'One database per app or project. Use lower-case letters, digits, "-" and "_".'), input, err, h('p', { class: 'muted small' }, state.dbs.length ? 'You already have: ' + state.dbs.join(', ') + '.' : ''));
@@ -49,6 +51,17 @@ export default async function render() {
         h('div', { class: 'grid g2 tcards' }, TEMPLATES.map((t) => h('button', { class: 'card pcard' + (t.id === S.tpl ? ' on' : ''), onclick: () => { S.tpl = t.id; paint(); } }, h('h3', null, icon(t.ico, 18), ' ', t.title), h('p', { class: 'muted' }, t.blurb), S.adv && t.file ? h('div', { class: 'small' }, h('code', null, t.file), ' · box ', h('code', null, t.box)) : h('div', { class: 'small muted' }, t.what)))),
         tpl().seeds.length ? h('label', { class: 'check', style: { marginTop: '12px' } }, h('input', { type: 'checkbox', checked: S.seed, onchange: (e) => { S.seed = e.target.checked; } }), ' Add ' + tpl().seeds.length + ' example record' + (tpl().seeds.length === 1 ? '' : 's')) : null);
     } else if (S.step === 2) {
+      if (isAccountTenant()) {
+        S.profile = '';
+        mount(body, h('h2', null, 'Hosted on Red-XAI'),
+          h('p', { class: 'muted' }, 'Your workspace runs in private account-isolated hosting. The service manages infrastructure and enforces your plan and quotas.'),
+          h('div', { class: 'card' }, h('h3', null, icon('shield', 18), ' Private by design'),
+            h('p', null, 'Other accounts cannot read your database. Share access with scoped API keys under API Keys.'),
+            h('a', { href: 'https://red-xai.com/hosting', class: 'btn small' }, 'Manage hosting plan')));
+        mount(nav, h('button', { class: 'btn', onclick: () => { S.step--; paint(); } }, 'Back'),
+          h('div', { class: 'grow' }), h('button', { class: 'btn primary', onclick: next }, 'Next'));
+        return;
+      }
       const profiles = S.adv ? PROFILES : PROFILES.filter((p) => ['', 'dev', 'server'].includes(p[0]));
       mount(body, h('h2', null, 'Where will it run?'), h('p', { class: 'muted' }, 'Optional. A profile sets sensible defaults for network access, security and speed. It only changes the settings file; you will restart redxd to use it.'),
         h('div', { class: 'radios' }, profiles.map(([v, l]) => h('label', { class: 'radio' }, h('input', { type: 'radio', name: 'prof', checked: S.profile === v, onchange: () => { S.profile = v; } }), h('div', null, h('b', null, l))))),
@@ -82,19 +95,36 @@ export default async function render() {
     mount(nav);
     const log = [];
     try {
-      try { await api('POST', '/v1/dbs', { json: { name: S.name } }); log.push(['ok', 'Created database ' + S.name]); gs.set('db'); } catch (e) { if (/exist/i.test(e.message) || e.status === 409) log.push(['info', 'Database ' + S.name + ' already existed; using it']); else throw e; }
+      let dbName = S.name;
+      try {
+        const created = await api('POST', '/v1/dbs', { json: { name: S.name } });
+        dbName = created.name || S.name;
+        log.push(['ok', 'Created database ' + S.name]);
+        gs.set('db');
+      } catch (e) {
+        // A conflict can mean a reserved database or someone else's record.
+        // Only reuse a database already listed as ours.
+        const ours = state.dbs.find((d) => dbDisplayName(d) === S.name);
+        if (e.status === 409 && ours) {
+          dbName = ours;
+          log.push(['info', 'Using your existing database ' + S.name]);
+        } else throw e;
+      }
       await loadDbs();
-      setDb(S.name);
+      if (!state.dbs.includes(dbName)) {
+        throw Error('New database was not visible to this account; reload your database list.');
+      }
+      setDb(dbName);
       const t = tpl();
       if (S.seed && t.seeds.length) {
         for (const [box, id] of t.seeds) {
           const qs = t.ttl ? '?ttl=' + t.ttl : '';
-          await api('PUT', pathURL(S.name, `${t.file}:${t.box}[ID=${id}]`) + qs, { json: { box } });
+          await api('PUT', pathURL(dbName, `${t.file}:${t.box}[ID=${id}]`) + qs, { json: { box } });
         }
         gs.set('record');
         log.push(['ok', 'Added ' + t.seeds.length + ' example record' + (t.seeds.length === 1 ? '' : 's')]);
       }
-      if (S.profile && S.profile !== 'edge') {
+      if (!isAccountTenant() && S.profile && S.profile !== 'edge') {
         try { const r = await applyPreset(S.profile, {}, '', false); log.push(['ok', 'Saved profile "' + S.profile + '" (' + r.changes.filter((c) => c.changed).length + ' settings changed). Restart redxd to use it.']); if (r.skipped && r.skipped.length) log.push(['info', r.skipped.map((s) => s.key + ': ' + s.reason).join(' ')]); } catch (e) { log.push(['err', 'Profile not applied: ' + e.message]); }
       }
       wizard.finish();
@@ -105,7 +135,7 @@ export default async function render() {
         h('div', { class: 'log' }, log.map(([k, m]) => h('div', { class: 'logrow ' + k }, icon(k === 'err' ? 'alert' : k === 'ok' ? 'check' : 'info', 15), m))),
         h('h3', null, 'Next'),
         h('div', { class: 'grid g2' },
-          h('a', { class: 'card linkcard', href: '#/data' + (t2.file ? '?db=' + enc(S.name) + '&file=' + enc(t2.file) : '') }, h('b', null, icon('table', 16), ' Look at your data'), h('p', { class: 'muted small' }, 'Browse and edit records.')),
+          h('a', { class: 'card linkcard', href: '#/data' + (t2.file ? '?db=' + enc(dbName) + '&file=' + enc(t2.file) : '') }, h('b', null, icon('table', 16), ' Look at your data'), h('p', { class: 'muted small' }, 'Browse and edit records.')),
           h('a', { class: 'card linkcard', href: '#/studio', onclick: () => { if (t2.query) sessionStorage.setItem('redx.studio.q', t2.query); } }, h('b', null, icon('terminal', 16), ' Run a query'), h('p', { class: 'muted small' }, 'Try BoxQL on your data.')),
           h('a', { class: 'card linkcard', href: '#/keys' }, h('b', null, icon('key', 16), ' Make a key for your app'), h('p', { class: 'muted small' }, 'Give your app its own limited key.')),
           h('a', { class: 'card linkcard', href: '#/' }, h('b', null, icon('home', 16), ' Go to the dashboard'), h('p', { class: 'muted small' }, 'Status and the Get-started list.'))));

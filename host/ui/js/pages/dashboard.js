@@ -1,6 +1,6 @@
 import { h, icon, terminalPanel, fmtBytes, fmtDur, ago, sparkline, chip, errorBox, spinner, copy, mount, confirmDialog } from '../util.js';
 import { api, session } from '../api.js';
-import { state, isHostAdmin, gs, wizard } from '../state.js';
+import { state, isHostAdmin, dbDisplayName, gs, wizard } from '../state.js';
 import { pageHead, page } from './shared.js';
 import { navigate } from '../main.js';
 
@@ -8,13 +8,73 @@ export default async function render() {
   const root = page();
   if (!isHostAdmin() && state.who.account) {
     const a = state.who.account;
-    root.append(pageHead('Dashboard', 'Signed in with your Red-XAI Account.'),
-      a.owner_blocked ? h('div', { class: 'callout warn', id: 'owner-blocked' }, icon('alert'), h('div', null, h('b', null, 'Owner access is not active. '),
-        a.owner_blocked === 'owner_2fa_required' ? 'Owner logins must finish signing in with two-factor authentication. Turn on 2FA for this account, then sign out and sign in again.'
-          : a.owner_blocked === 'owner_scope_missing' ? 'Red-XAI Accounts did not grant the owner scope on this sign-in (the account must be verified, use 2FA, and be listed as an owner). Sign out and sign in again.'
-          : 'Verify this account\'s email address, then sign out and sign in again.')) : null,
-      h('div', { class: 'card', id: 'account-card' }, h('h3', null, a.username || a.email), h('p', { class: 'muted' }, a.email),
-        h('p', null, 'This account has no databases on this host yet. API keys still work for apps and SDKs.')));
+    const tenantDBs = state.dbs.map((d) => ({ id: d, label: dbDisplayName(d) }));
+    const needPlan = state.dbAccessIssue === 'plan_required';
+    const keysPanel = h('div', { class: 'card', id: 'tenant-key-status' },
+      h('h3', null, icon('key', 18), ' API keys'),
+      h('p', { class: 'muted small' }, 'Checking keys for your account…'));
+    root.append(
+      pageHead('Your database workspace',
+        'Build on Red-XAI with private, account-scoped databases and application keys.',
+        h('a', { class: 'btn primary', href: '#/databases' }, icon('plus', 16), ' New database')),
+      a.owner_blocked ? h('div', { class: 'callout warn', id: 'owner-blocked' }, icon('alert'),
+        h('div', null, 'Owner administration is separate from your customer databases. Your personal tools remain available.')) : null,
+      h('section', { class: 'customer-hero', id: 'account-card' },
+        h('div', null,
+          h('div', { class: 'customer-eyebrow' }, 'RED-XAI · CONNECTED WORKSPACE'),
+          h('h2', null, 'Welcome, ', a.username || a.email || 'developer', '.'),
+          h('p', null, 'One account. Private data, powerful tools and scoped app credentials.'),
+          h('div', { class: 'row gap wrap' },
+            h('a', { class: 'btn primary', href: '#/wizard' }, 'Setup wizard'),
+            h('a', { class: 'btn', href: 'https://red-xai.com/hosting' }, 'Hosting & plans'))),
+        h('div', { class: 'hero-mark', 'aria-hidden': 'true' }, '×')),
+      needPlan ? h('div', { class: 'callout warn', role: 'status' }, icon('alert'),
+        h('div', null, 'A hosted database plan is needed to create databases and API keys. ',
+          h('a', { href: 'https://red-xai.com/hosting' }, 'View plans'))) : null,
+      state.dbAccessIssue === 'readonly' ? h('div', { class: 'callout warn' },
+        icon('info'), h('div', null, 'This plan is currently read-only. Your data is preserved.')) : null,
+      h('div', { class: 'grid g3 customer-cards' },
+        h('a', { class: 'card customer-action', href: '#/databases' },
+          h('div', { class: 'card-symbol' }, icon('db', 22)),
+          h('h3', null, 'Databases'), h('p', { class: 'muted' }, 'Create and manage private databases.'),
+          h('strong', { class: 'customer-count' }, String(tenantDBs.length) + ' database(s)')),
+        h('a', { class: 'card customer-action', href: '#/data' },
+          h('div', { class: 'card-symbol' }, icon('table', 22)),
+          h('h3', null, 'Data Explorer'), h('p', { class: 'muted' }, 'Browse, add and edit records.'),
+          h('span', { class: 'customer-link' }, 'Open explorer →')),
+        h('a', { class: 'card customer-action', href: '#/studio' },
+          h('div', { class: 'card-symbol' }, icon('terminal', 22)),
+          h('h3', null, 'BoxQL Studio'), h('p', { class: 'muted' }, 'Query data with BoxQL.'),
+          h('span', { class: 'customer-link' }, 'Open studio →'))),
+      h('div', { class: 'grid g2 customer-bottom' },
+        h('section', { class: 'card' }, h('h3', null, icon('db', 18), ' Your databases'),
+          tenantDBs.length ? tenantDBs.map((d) => h('a', {
+            href: '#/databases', class: 'tenant-db-row'
+          }, h('span', { class: 'tenant-db-dot' }), h('b', null, d.label),
+             h('span', { class: 'muted small' }, 'Manage →'))) :
+          h('p', { class: 'muted' }, 'No databases visible yet. Create one or activate a hosting plan.'),
+          h('a', { class: 'btn small', href: '#/databases' }, 'View databases')),
+        keysPanel),
+      h('div', { class: 'workspace-resources' },
+        h('a', { href: '#/keys' }, 'API credentials'),
+        h('a', { href: '#/raw' }, 'Raw editor'),
+        h('a', { href: '#/help' }, 'Documentation'),
+        h('a', { href: 'https://red-xai.com/store' }, 'All Red-XAI apps')));
+    try {
+      const res = await api('GET', '/v1/keys');
+      const mine = Array.isArray(res.keys) ? res.keys : [];
+      mount(keysPanel,
+        h('h3', null, icon('key', 18), ' Your API keys'),
+        h('div', { class: 'customer-count' },
+          String(mine.filter((k) => k.status === 'active').length)),
+        h('p', { class: 'muted' }, 'Active keys scoped to databases owned by your account.'),
+        h('a', { class: 'btn small', href: '#/keys' }, 'Create, rotate and revoke keys'));
+    } catch {
+      mount(keysPanel, h('h3', null, icon('key', 18), ' Your API keys'),
+        h('p', { class: 'muted' }, needPlan ?
+          'Activate a hosted plan before creating keys.' : 'Key listing is currently unavailable.'),
+        h('a', { class: 'btn small', href: '#/keys' }, 'Open API keys'));
+    }
     return root;
   }
   if (!isHostAdmin()) {

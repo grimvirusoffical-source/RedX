@@ -46,40 +46,65 @@ export function renderWelcome(onDone) {
 }
 
 export function renderLogin(msg, onDone) {
-  const input = h('input', { class: 'input mono', type: 'password', placeholder: 'rx_live_…  or  RP-XXXXX-XXXXX', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'API key or pairing code' });
+  // Account sign-in is the normal customer path. An API key is for SDKs,
+  // automation, or administrators and must never be required just to browse
+  // and edit databases belonging to an authenticated Red-XAI account.
+  const input = h('input', { class: 'input mono', type: 'password',
+    placeholder: 'rx_live_…  or  RP-XXXXX-XXXXX',
+    autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Developer API key or pairing code' });
   const remember = h('input', { type: 'checkbox' });
   const err = h('div', { class: 'form-err', role: 'alert', hidden: !msg }, msg || '');
-  const go = async () => {
-    let k = input.value.trim();
-    if (!k) return;
+  const signInWithKey = async () => {
+    let key = input.value.trim();
+    if (!key) return;
     err.hidden = true;
     try {
-      if (looksLikePairingCode(k)) k = await exchangePairingCode(k); // a one-time code from another signed-in device
-      await api('GET', '/v1/ui/whoami', { key: k, noAuthRedirect: true });
-      session.set(k, remember.checked);
+      if (looksLikePairingCode(key)) key = await exchangePairingCode(key);
+      await api('GET', '/v1/ui/whoami', { key, noAuthRedirect: true });
+      session.set(key, remember.checked);
       await onDone();
     } catch (e) {
-      err.textContent = e.status === 401 && !looksLikePairingCode(input.value) ? 'That key was not accepted. Check for missing characters, or ask an admin for a new one.' : e.message;
+      err.textContent = e.status === 401 && !looksLikePairingCode(input.value)
+        ? 'That developer key was rejected. Check its scope, expiration and characters.' : e.message;
       err.hidden = false;
     }
   };
-  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
-  const card = h('div', { class: 'auth-card' }, logo('Sign in with an API key'),
-    field('API key or pairing code', input), err,
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') signInWithKey(); });
+  const advanced = h('details', { class: 'hub-api-key-advanced' },
+    h('summary', null, icon('key', 16), 'Developer API key / pairing (advanced)'),
+    h('p', { class: 'muted small' }, 'Only use a key for SDKs, automated clients, or an administrator-provided integration. Normal dashboard users sign in with their Red-XAI account.'),
+    field('API key or pairing code', input),
+    err,
     h('label', { class: 'check' }, remember, ' Remember this device'),
-    h('button', { class: 'btn primary big', onclick: go }, 'Sign in'),
-    h('p', { class: 'muted small' }, 'Keys stay in this browser and are only sent to this RedX host. Lost the admin key? On the host computer run ', h('code', null, 'redx key create --offline --scope admin --db \'*\''), '.'));
-  setTimeout(() => input.focus(), 50);
+    h('button', { class: 'btn', onclick: signInWithKey }, 'Continue using API key'));
+  const primary = h('div', { class: 'hub-auth-primary', id: 'hub-auth-primary' },
+    h('p', { class: 'muted' }, 'Checking shared account sign-in…'));
+  const card = h('div', { class: 'auth-card hub-auth-card' },
+    logo('YOUR RED-XAI DEVELOPMENT HUB'),
+    h('h2', null, 'Welcome to your workspace'),
+    h('p', { class: 'muted' }, 'One account for your own databases, records, projects, BoxQL Studio, hosting and API credentials. No developer key needed to manage your own data.'),
+    primary,
+    advanced);
   const wrap = h('div', { class: 'auth' }, card);
-  // Red-XAI Accounts sign-in, when this host has it configured
   import('./account.js').then(async ({ accountsConfig, accountButtons, renderSignup }) => {
     const cfg = await accountsConfig();
-    if (!cfg.enabled) return;
-    card.append(accountButtons(cfg, () => {
-      const su = renderSignup(() => su.replaceWith(renderLogin(msg, onDone)));
-      wrap.replaceWith(su);
-    }));
-  }).catch(() => {});
+    if (cfg.enabled) {
+      primary.replaceChildren(accountButtons(cfg, () => {
+        const signup = renderSignup(() => signup.replaceWith(renderLogin(msg, onDone)));
+        wrap.replaceWith(signup);
+      }));
+    } else {
+      primary.replaceChildren(h('div', { class: 'callout warn', role: 'status' },
+        icon('alert', 19),
+        h('div', null,
+          h('b', null, 'Shared Red-XAI sign-in is not enabled on this database host yet.'),
+          h('p', { class: 'muted small' },
+            'Your databases are preserved. An operator must enable the existing account provider for this host. Do not enter an owner or master key into a customer account.'))));
+    }
+  }).catch(() => {
+    primary.replaceChildren(h('p', { class: 'muted' },
+      'The Red-XAI account service is temporarily unavailable. Your databases have not changed.'));
+  });
   return wrap;
 }
 

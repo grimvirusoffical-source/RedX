@@ -123,13 +123,20 @@ const oidcCookie = "redx_oidc"
 
 // authLogin starts the authorization code flow with PKCE S256 and redirects to Red-XAI Accounts.
 func (h *Host) authLogin(w http.ResponseWriter, r *http.Request) {
+	// A fixed, internal route selector; never let an OAuth return address
+	// become an arbitrary hostname or URL supplied by the browser.
+	hub := r.URL.Query().Get("console") == "hub"
+	signInRoute := "/#/signin"
+	if hub {
+		signInRoute = "/v1/console/#/signin"
+	}
 	if h.acctThrottle(w, r, "login", 1, 20) {
 		return
 	}
 	d, err := h.oidc.discovery(r.Context())
 	if err != nil {
 		h.Logf("accounts: discovery: %v", err)
-		http.Redirect(w, r, "/#/signin?error=unavailable", http.StatusFound)
+		http.Redirect(w, r, signInRoute+"?error=unavailable", http.StatusFound)
 		return
 	}
 	state, nonce, verifier := randToken(""), randToken(""), randToken("")
@@ -137,9 +144,9 @@ func (h *Host) authLogin(w http.ResponseWriter, r *http.Request) {
 	if !safeReturn(ret) {
 		ret = ""
 	}
-	p := &acctPending{verifier: verifier, nonce: nonce, redirect: h.redirectURI(r), ret: ret}
+	p := &acctPending{verifier: verifier, nonce: nonce, redirect: h.redirectURI(r), ret: ret, hub: hub}
 	if err := h.accts.addPending(state, p); err != nil {
-		http.Redirect(w, r, "/#/signin?error=busy", http.StatusFound)
+		http.Redirect(w, r, signInRoute+"?error=busy", http.StatusFound)
 		return
 	}
 	http.SetCookie(w, &http.Cookie{Name: oidcCookie, Value: state, Path: "/v1/auth/callback", MaxAge: int(acctLoginTTL / time.Second),
@@ -168,9 +175,10 @@ func safeReturn(s string) bool {
 }
 
 func (h *Host) authCallback(w http.ResponseWriter, r *http.Request) {
+	signInRoute := "/#/signin"
 	fail := func(code string) {
 		http.SetCookie(w, &http.Cookie{Name: oidcCookie, Value: "", Path: "/v1/auth/callback", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
-		http.Redirect(w, r, "/#/signin?error="+url.QueryEscape(code), http.StatusFound)
+		http.Redirect(w, r, signInRoute+"?error="+url.QueryEscape(code), http.StatusFound)
 	}
 	if h.acctThrottle(w, r, "callback", 1, 20) {
 		return
@@ -187,6 +195,9 @@ func (h *Host) authCallback(w http.ResponseWriter, r *http.Request) {
 	if p == nil {
 		fail("expired")
 		return
+	}
+	if p.hub {
+		signInRoute = "/v1/console/#/signin"
 	}
 	if e := q.Get("error"); e != "" {
 		h.Audit.Log(AuditEvent{Event: "account.signin.fail", Remote: remoteIP(r), Reason: "provider error: " + truncate(e, 64)})
@@ -251,7 +262,7 @@ func (h *Host) authCallback(w http.ResponseWriter, r *http.Request) {
 		h.Audit.Log(AuditEvent{Event: "account.signin", KeyID: "acct:" + id.Sub, Remote: remoteIP(r)})
 	}
 	http.SetCookie(w, &http.Cookie{Name: oidcCookie, Value: "", Path: "/v1/auth/callback", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
-	dest := "/#/signin?handoff=" + url.QueryEscape(handoff)
+	dest := signInRoute + "?handoff=" + url.QueryEscape(handoff)
 	if p.ret != "" {
 		dest += "&return=" + url.QueryEscape(p.ret)
 	}

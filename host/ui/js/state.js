@@ -10,6 +10,8 @@ export const state = {
   status: null, // /v1/admin/status for host admins
   db: ls('redx.db', 'default'),
   dbs: [],
+  dbLogical: {}, // server-provided names for the logged-in account only
+  dbAccessIssue: null,
   mode: ls('redx.mode', 'simple'), // simple | advanced
   theme: normTheme(ls('redx.theme', 'dark')), // dark (default) | system | light
 };
@@ -38,13 +40,30 @@ export function applyTheme() {
 }
 export const isAdmin = () => !!(state.who && state.who.scope === 'admin');
 export const isHostAdmin = () => !!(state.who && state.who.host_admin);
+// A regular, signed-in Red-XAI Account has its own hosted tenant; a host
+// admin key is a distinct credential. Never use this to access owner routes.
+export const isAccountTenant = () => !!(state.who && state.who.account && !state.who.owner && !state.who.host_admin);
+export const canManageDatabases = () => isHostAdmin() || isAccountTenant();
+export const dbDisplayName = (db) => state.dbLogical[db] || db;
 
 export async function loadDbs() {
   try {
     const r = await api('GET', '/v1/dbs');
-    state.dbs = r.dbs || [];
+    state.dbs = Array.isArray(r.dbs) ? r.dbs : [];
+    // Mapping is returned by the authenticated server, never guessed from a
+    // physical database name and never retained across account switches.
+    const logical = r.logical && typeof r.logical === 'object' && !Array.isArray(r.logical) ? r.logical : {};
+    state.dbLogical = Object.fromEntries(state.dbs.map((d) => [d, typeof logical[d] === 'string' ? logical[d] : d]));
+    state.dbAccessIssue = r.suspended ? 'suspended' : r.readonly ? 'readonly' : null;
     if (!state.dbs.includes(state.db)) state.db = state.dbs[0] || 'default';
-  } catch { state.dbs = state.dbs || []; }
+  } catch (e) {
+    // Never preserve another user's database list after logout or a forbidden
+    // response. In particular, do not treat a paid-plan 403 as host admin.
+    state.dbs = [];
+    state.dbLogical = {};
+    state.db = 'default';
+    state.dbAccessIssue = e.status === 403 || e.status === 402 ? 'plan_required' : 'unavailable';
+  }
   emit();
   return state.dbs;
 }

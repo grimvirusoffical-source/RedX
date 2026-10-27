@@ -53,7 +53,12 @@ const OWNER = 'owner@example.com'; // placeholder; real owner addresses live in 
     await p.goto(url + '/', { waitUntil: 'networkidle' });
     await p.waitForSelector('#acct-signin', { timeout: 10000 });
     expect(await p.evaluate(() => document.documentElement.dataset.theme) === 'dark', 'dark theme by default (even when the device prefers light)');
-    expect(await p.$('input[aria-label="API key or pairing code"]') !== null, 'API-key sign-in is still offered');
+    // Customers use their shared Red-XAI identity, not a developer secret.
+    // Preserve key/pairing support for SDK users, collapsed by default.
+    expect(await p.isVisible('#acct-signin'), 'Red-XAI account sign-in is the primary choice');
+    expect(await p.$('input[aria-label="Developer API key or pairing code"]') !== null
+      && !(await p.$eval('.hub-api-key-advanced', el => el.open)),
+      'developer API-key/pairing is available but optional and collapsed');
 
     // ---- sign-up: ToS gate ----
     where = 'signup-tos';

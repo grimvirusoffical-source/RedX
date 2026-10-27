@@ -26,6 +26,8 @@ func TestThemeNoFlashAndDarkDefault(t *testing.T) {
 	if !strings.Contains(idx, `data-theme="dark"`) {
 		t.Fatal("index.html must default to the dark theme")
 	}
+	// The original root console retains absolute /ui assets. The Hub
+	// produces a separately namespaced variant without changing this order.
 	si, ci := strings.Index(idx, "/ui/js/theme-init.js"), strings.Index(idx, "/ui/css/app.css")
 	if si < 0 || ci < 0 || si > ci {
 		t.Fatal("theme-init.js must be loaded in <head> before the stylesheet")
