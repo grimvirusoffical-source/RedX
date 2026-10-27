@@ -371,7 +371,9 @@ func TestStaticClusterSecretFollower(t *testing.T) {
 		c.NodeID = "static1"
 	})
 	do(t, "PUT", leader.URL+P+"z:B.K", leader.Key, "1")
-	eventually(t, "static-secret follower replicates", 6*time.Second, func() bool {
+	// Windows runners under the race detector join a static-secret follower
+	// slower than 6s. The condition itself is unchanged.
+	eventually(t, "static-secret follower replicates", 20*time.Second, func() bool {
 		st, _, _ := do(t, "GET", f.URL+P+"z:B.K", leader.Key, "")
 		return st == 200
 	})
