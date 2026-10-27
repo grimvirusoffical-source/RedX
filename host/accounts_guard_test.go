@@ -246,6 +246,62 @@ func TestResolveReadsCert(t *testing.T) {
 	if resolveReadsCert(`players.red-xai.db:Player[ID=17].Bag`, []ResolvedRead{{Path: "Bag[LOCK=3]", Target: `"rxa-lifetime-cert.red-xai.db":Record[ID=1].pubkey`}}) {
 		t.Fatal("a non-ID attribute is not an entry ID")
 	}
+	// EKey.String records a signed FormatInt, so a minus is part of the same field.
+	negBag := []ResolvedRead{{Path: "Bag[ID=-1][0]", Target: `"rxa-lifetime-cert.red-xai.db":Record[ID=1].pubkey`}}
+	if !resolveReadsCert(`players.red-xai.db:Player[ID=30].Bag`, negBag) {
+		t.Fatal("a bare array field includes the link stored at Bag[ID=-1][0]")
+	}
+	if !resolveReadsCert(`players.red-xai.db:Player[ID=30].Bag[ID=-1]`, negBag) {
+		t.Fatal("the same array field named with its negative ID includes Bag[ID=-1][0]")
+	}
+	if resolveReadsCert(`players.red-xai.db:Player[ID=30].Bag[ID=-2]`, negBag) {
+		t.Fatal("a different negative ID is not this array")
+	}
+	negSecret := []ResolvedRead{{Path: "Bag[ID=-2][0]", Target: `"rxa-lifetime-cert.red-xai.db":Record[ID=1].private_enc`}}
+	if !resolveReadsCert(`players.red-xai.db:Player[ID=31].Bag`, negSecret) {
+		t.Fatal("a negative array link aimed at private_enc is a cert read")
+	}
+	negWrap := []ResolvedRead{{Path: "Wrap[ID=-3].Bag[0]", Target: `"rxa-lifetime-cert.red-xai.db":Record[ID=1].cert_id`}}
+	if !resolveReadsCert(`players.red-xai.db:Player[ID=32].Wrap.Bag`, negWrap) || !resolveReadsCert(`players.red-xai.db:Player[ID=32].Wrap`, negWrap) {
+		t.Fatal("a negative ID on Wrap is still inside Wrap and Wrap.Bag")
+	}
+	negSteal := []ResolvedRead{{Path: "Steal[ID=-4]", Target: `"rxa-lifetime-cert.red-xai.db":Record[ID=1].private_enc`}}
+	if !resolveReadsCert(`players.red-xai.db:Player[ID=33].Steal`, negSteal) {
+		t.Fatal("a bare box field includes the link stored at Steal[ID=-4]")
+	}
+	minID := []ResolvedRead{{Path: "Steal[ID=-9223372036854775808]", Target: `"rxa-lifetime-cert.red-xai.db":Record[ID=1].private_enc`}}
+	if !resolveReadsCert(`players.red-xai.db:Player[ID=47].Steal`, minID) {
+		t.Fatal("the minimum int64 ID is the FormatInt spelling of that entry")
+	}
+	maxID := []ResolvedRead{{Path: "Bag[ID=9223372036854775807][0]", Target: `"rxa-lifetime-cert.red-xai.db":Record[ID=1].cert_id`}}
+	if !resolveReadsCert(`players.red-xai.db:Player[ID=48].Bag`, maxID) {
+		t.Fatal("the maximum int64 ID is the FormatInt spelling of that entry")
+	}
+	negDeep := []ResolvedRead{{Path: "Bag[ID=-9][0][1]", Target: `"rxa-lifetime-cert.red-xai.db":Record[ID=1].issued`}}
+	if !resolveReadsCert(`players.red-xai.db:Player[ID=40].Bag`, negDeep) {
+		t.Fatal("a nested index under a negative ID is still inside Bag")
+	}
+	negLower := []ResolvedRead{{Path: "Bag[id=-11][0]", Target: `"rxa-lifetime-cert.red-xai.db":Record[ID=1].private_enc`}}
+	if !resolveReadsCert(`players.red-xai.db:Player[ID=45].Bag`, negLower) {
+		t.Fatal("a lowercase id with a signed value is still the same field")
+	}
+	negHop := []ResolvedRead{{Path: "Hop[ID=-8].Ptr", Target: `"rxa-lifetime-cert.red-xai.db":Record[ID=1].owner_emails`}}
+	if !resolveReadsCert(`players.red-xai.db:Player[ID=39].Hop`, negHop) {
+		t.Fatal("a bare two-hop field includes the link stored under Hop[ID=-8]")
+	}
+	sibling := []ResolvedRead{
+		{Path: "Bag[ID=-20][0]", Target: `"rxa-lifetime-cert.red-xai.db":Record[ID=1].private_enc`},
+		{Path: "Bag[ID=20][0]", Target: `"notes.red-xai.db":Note[ID=1].text`},
+	}
+	if !resolveReadsCert(`players.red-xai.db:Player[ID=50].Bag`, sibling) {
+		t.Fatal("a negative cert link still feeds Bag when a positive sibling is not a cert")
+	}
+	if resolveReadsCert(`players.red-xai.db:Player[ID=30].Bag`, []ResolvedRead{{Path: "Bag[ID=+7][0]", Target: `"rxa-lifetime-cert.red-xai.db":Record[ID=1].pubkey`}}) {
+		t.Fatal("a plus sign is not the FormatInt spelling")
+	}
+	if resolveReadsCert(`players.red-xai.db:Player[ID=30].Bag`, []ResolvedRead{{Path: "Bag[ID=007][0]", Target: `"rxa-lifetime-cert.red-xai.db":Record[ID=1].pubkey`}}) {
+		t.Fatal("leading zeros are not the FormatInt spelling")
+	}
 }
 
 func TestGuardBoxQL(t *testing.T) {

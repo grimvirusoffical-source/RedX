@@ -33,6 +33,7 @@ package host
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"redx/box"
@@ -317,9 +318,10 @@ func lifetimeCertVisible(pr *Principal, path, value string) bool {
 // Cert.pubkey uses the link at Cert, and reading the whole record uses every link.
 //
 // An array element is recorded as Name[0] (and Name[0][1] when that element is
-// itself an array). An entry that carries an ID is recorded as Name[ID=n], and
-// an array element under it as Name[ID=n][0]. The HTTP path names the field,
-// so Bag selects Bag[0] and Bag[ID=n][0], and Wrap.Bag selects Wrap[ID=n].Bag[0].
+// itself an array). An entry that carries an ID is recorded by EKey.String as
+// Name[ID=<strconv.FormatInt>], including a leading minus, and an array element
+// under it as Name[ID=<n>][0]. The HTTP path names the field, so Bag selects
+// Bag[0], Bag[ID=n][0], and Bag[ID=-n][0].
 func certExpandFeeds(sub []box.Seg, from string) bool {
 	if from == "" {
 		return true
@@ -360,9 +362,11 @@ func expandStepMatches(seg box.Seg, part string) bool {
 	return onlyNumericIndexes(rest)
 }
 
-// stripRecordedID removes one leading [ID=n] entry attribute. The expander
-// records keys with EKey.String, which writes ID in that form. A lowercase
-// id= attribute in the step counts the same way.
+// stripRecordedID removes one leading entry-ID attribute in the form
+// EKey.String writes: [ID=] plus strconv.FormatInt of the stored int64.
+// That spelling includes a leading minus. Source forms such as id=, "-5",
+// 1e20, or spaces are folded to this spelling before the step is recorded.
+// The key compare is case-insensitive so a step that still says id= counts.
 func stripRecordedID(rest string) (string, bool) {
 	if len(rest) < 5 || rest[0] != '[' {
 		return "", false
@@ -373,15 +377,17 @@ func stripRecordedID(rest string) (string, bool) {
 	}
 	inner := rest[1:end]
 	key, val, ok := strings.Cut(inner, "=")
-	if !ok || !strings.EqualFold(key, "ID") || val == "" {
+	if !ok || !strings.EqualFold(key, "ID") || !canonicalRecordedID(val) {
 		return "", false
 	}
-	for _, c := range val {
-		if c < '0' || c > '9' {
-			return "", false
-		}
-	}
 	return rest[end+1:], true
+}
+
+// canonicalRecordedID reports whether val is exactly strconv.FormatInt of an
+// int64, the only ID spelling EKey.String records.
+func canonicalRecordedID(val string) bool {
+	n, err := strconv.ParseInt(val, 10, 64)
+	return err == nil && strconv.FormatInt(n, 10) == val
 }
 
 // onlyNumericIndexes reports whether rest is empty or a sequence of [n] array
