@@ -164,6 +164,31 @@ func (h *Host) serveUI(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// serveHubConsole makes the real embedded Red-XAI console accessible below
+// /v1/console/ without a separate static proxy, script injection, or CSS
+// overlay. All existing protected /v1 API endpoints remain unchanged.
+func (h *Host) serveHubConsole(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/v1/console" {
+		http.Redirect(w, r, "/v1/console/", http.StatusPermanentRedirect)
+		return
+	}
+	asset := strings.TrimPrefix(r.URL.Path, "/v1/console/")
+	if strings.Contains(asset, "..") || strings.ContainsAny(asset, "\\\\") {
+		writeErr(w, 404, "not found")
+		return
+	}
+	next := r.Clone(r.Context())
+	u := *r.URL
+	if asset == "" {
+		u.Path = "/ui/"
+	} else {
+		u.Path = "/ui/" + asset
+	}
+	u.RawPath = ""
+	next.URL = &u
+	h.serveUI(w, next)
+}
+
 // ---- first-run web setup ----
 
 // ResolveBootstrap says how the first admin key is made for cfg: "web", "console" or "off".
