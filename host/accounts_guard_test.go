@@ -117,7 +117,7 @@ func TestGuardBoxQL(t *testing.T) {
 		`{Get[]} = players:Player -> private_enc`,
 		`{Get[]} = players:Player[private_enc = "x"] -> Name`,
 		`{Watch[]} = "rxa-lifetime-cert.red-xai.db":Record`,
-		`{Explain[]} = {Get[]} = "rxa-lifetime-cert.red-xai.db":Record[ID=1]`,
+		`{Explain[]} = [ {Get[]} = "rxa-lifetime-cert.red-xai.db":Record[ID=1] ]`,
 	}
 	for _, q := range reads {
 		r, w := guardBoxQL(q)

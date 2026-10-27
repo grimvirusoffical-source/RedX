@@ -791,6 +791,89 @@ func TestCodeSandboxAllowedBoxesAndPolicy(t *testing.T) {
 	}
 }
 
+// A host-admin key is not an owner. It must not read a lifetime cert through a
+// script, BoxQL, or REST, and it must not set idVerified.
+func TestScriptCannotReadLifetimeCert(t *testing.T) {
+	const secret = "RXSECRET-PRIVATE-ENC-CIPHERTEXT"
+	n := startFull(t, engineadapter.Config{CodeAllowedBoxes: []string{
+		"rxa-lifetime-cert.red-xai.db:Record",
+		"rxa-account.red-xai.db:Record",
+	}}, nil)
+	D := n.url + "/v1/db/default"
+	cert := "rxa-lifetime-cert.red-xai.db:Record[ID=1]"
+	acct := "rxa-account.red-xai.db:Record[ID=1]"
+	stored := `[ {cert_id[]} = "c1", {pubkey[]} = "aa", {private_enc[]} = "` + secret + `" ]`
+	if st, b, _ := req(t, "PUT", n.url+"/v1/path/"+cert, n.key, []byte(stored)); st != 200 {
+		t.Fatalf("store cert: %d %s", st, b)
+	}
+	if st, b, _ := req(t, "PUT", n.url+"/v1/path/"+cert+".private_enc", n.key, []byte(`"`+secret+`"`)); st != 200 {
+		t.Fatalf("store field: %d %s", st, b)
+	}
+	for _, p := range []string{cert, cert + ".private_enc", cert + ".pubkey", cert + ".cert_id"} {
+		st, b, _ := req(t, "GET", n.url+"/v1/path/"+p, n.key, nil)
+		if st != 403 || strings.Contains(string(b), secret) {
+			t.Fatalf("GET %s: %d %s", p, st, b)
+		}
+	}
+	st, b, _ := req(t, "POST", D+"/bx", n.key, []byte(`{Get[]} = "rxa-lifetime-cert.red-xai.db":Record[ID=1]`))
+	if st != 403 || strings.Contains(string(b), secret) {
+		t.Fatalf("boxql: %d %s", st, b)
+	}
+	st, b, _ = req(t, "POST", D+"/bx", n.key, []byte(`{Get[]} = "rxa-lifetime-cert.red-xai.db":Record[ID=1] -> pubkey`))
+	if st != 403 || strings.Contains(string(b), secret) {
+		t.Fatalf("boxql pubkey: %d %s", st, b)
+	}
+	src := `{Script[1]} = [
+    {Name[]}   = "steal",
+    {Params[]} = ;["target"]:,
+    {Uses[]}   = ;["db_get"]:,
+    {Source[]} = "return db_get(target, \"private_enc\");"
+];
+{Script[2]} = [
+    {Name[]}   = "flag",
+    {Params[]} = ;["target"]:,
+    {Uses[]}   = ;["db_set"]:,
+    {Source[]} = "db_set(target, \"idVerified\", true); return 1;"
+];
+{Script[3]} = [
+    {Name[]}   = "rename",
+    {Params[]} = ;["target"]:,
+    {Uses[]}   = ;["db_set"]:,
+    {Source[]} = "db_set(target, \"username\", \"ada\"); return 1;"
+];
+`
+	if st, b, _ := req(t, "PUT", D+"/code/file/certs", n.key, []byte(src)); st != 200 {
+		t.Fatalf("define: %d %s", st, b)
+	}
+	run := func(script, target string) (int, string) {
+		body, _ := json.Marshal(map[string]interface{}{"args": []interface{}{target}})
+		st, b, _ := req(t, "POST", D+"/code/run/"+script, n.key, body, "Content-Type", "application/json")
+		return st, string(b)
+	}
+	if st, raw := run("steal", cert); st != 403 || strings.Contains(raw, secret) {
+		t.Fatalf("script read: %d %s", st, raw)
+	}
+	if st, raw := run("flag", acct); st != 403 || strings.Contains(raw, secret) {
+		t.Fatalf("script idVerified: %d %s", st, raw)
+	}
+	if st, b, _ := req(t, "GET", n.url+"/v1/path/"+acct+".idVerified", n.key, nil); st != 404 {
+		t.Fatalf("idVerified was stored: %d %s", st, b)
+	}
+	if st, raw := run("rename", acct); st != 200 {
+		t.Fatalf("username write: %d %s", st, raw)
+	}
+	if st, b, _ := req(t, "GET", n.url+"/v1/path/"+acct+".username", n.key, nil); st != 200 || !strings.Contains(string(b), "ada") {
+		t.Fatalf("username: %d %s", st, b)
+	}
+	raw, err := os.ReadFile(n.h.Cfg.AuditLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), secret) {
+		t.Fatalf("audit log contains private_enc:\n%s", raw)
+	}
+}
+
 // ---- encryption (master key from a key file) ----
 
 func TestMasterKeyFileAndEncryptedPacks(t *testing.T) {

@@ -301,7 +301,10 @@ func TestBackupHidesLifetimeCertFromNonOwners(t *testing.T) {
 		t.Fatalf("owner stores cert: %d %s", st, b)
 	}
 	st, b, _ := do(t, "GET", n.URL+"/v1/admin/backup", n.Key, "")
-	assertForbidden(t, "accounts-on admin backup", st, b)
+	if st != 403 {
+		t.Fatalf("accounts-on admin backup: want 403, got %d %s", st, b)
+	}
+	assertNoSecret(t, "accounts-on admin backup", b)
 	st, b, _ = do(t, "POST", n.URL+"/v1/keys", tok, `{"db":"redxai_accounts","scope":"admin","label":"svc-admin"}`, "Content-Type", "application/json")
 	if st != 201 {
 		t.Fatalf("mint: %d %s", st, b)

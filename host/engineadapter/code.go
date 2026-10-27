@@ -267,6 +267,10 @@ func codeErr(err error) error {
 	switch {
 	case err == nil:
 		return nil
+	case errors.Is(err, host.ErrForbidden):
+		// Cert and idVerified refusals are already a static forbidden error.
+		// Do not wrap the host-function chain: its text must not reach the client.
+		return host.ErrForbidden
 	case errors.Is(err, sec.ErrDenied), errors.Is(err, code.ErrNotGranted):
 		return fmt.Errorf("%w: %v", host.ErrForbidden, err)
 	case errors.Is(err, code.ErrLimit), errors.Is(err, code.ErrBadArguments), errors.Is(err, code.ErrBadScript),
