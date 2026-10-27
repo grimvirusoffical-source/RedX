@@ -76,6 +76,7 @@ test('customer dashboard restores creation, explorer, BoxQL, credentials, and pl
  for(const route of ['#/databases','#/data','#/studio','#/wizard','#/keys']){
   assert.ok(dashboard.includes(route),'missing '+route);
  }
+ assert.match(dashboard,/id: 'account-card'/); // preserve existing browser test selector
  assert.match(dashboard,/dbDisplayName\(d\)/);
  assert.match(dashboard,/plan_required/);
  assert.match(dashboard,/read-only/);

@@ -19,7 +19,7 @@ export default async function render() {
         h('a', { class: 'btn primary', href: '#/databases' }, icon('plus', 16), ' New database')),
       a.owner_blocked ? h('div', { class: 'callout warn', id: 'owner-blocked' }, icon('alert'),
         h('div', null, 'Owner administration is separate from your customer databases. Your personal tools remain available.')) : null,
-      h('section', { class: 'customer-hero' },
+      h('section', { class: 'customer-hero', id: 'account-card' },
         h('div', null,
           h('div', { class: 'customer-eyebrow' }, 'RED-XAI · CONNECTED WORKSPACE'),
           h('h2', null, 'Welcome, ', a.username || a.email || 'developer', '.'),
