@@ -25,11 +25,18 @@ export const SIGNIN_ERRORS = {
 
 /** The block under the API-key form: Sign in / Create account. */
 export function accountButtons(cfg, onSignup) {
-  return h('div', { class: 'acct-block' },
-    h('div', { class: 'or-sep' }, h('span', null, 'or')),
-    h('a', { class: 'btn primary big', id: 'acct-signin', href: '/v1/auth/login' }, icon('user', 18), ' Sign in with Red-XAI Account'),
-    h('button', { class: 'btn big', id: 'acct-signup', type: 'button', onclick: onSignup }, 'Create a Red-XAI Account'),
-    h('p', { class: 'muted small' }, 'One Red-XAI Account works in every Red-XAI app. ', h('a', { href: cfg.forgot_password, rel: 'noopener' }, 'Forgot your password?')));
+  // The authorization provider reuses an existing red-xai.com browser session
+  // when present. There is no second login/password or developer key.
+  const redirect = location.pathname.startsWith('/v1/console/')
+    ? '/v1/auth/login?console=hub&return=dashboard' : '/v1/auth/login';
+  return h('div', { class: 'acct-block hub-account-buttons' },
+    h('a', { class: 'btn primary big', id: 'acct-signin', href: redirect },
+      icon('user', 18), ' Continue with Red-XAI'),
+    h('button', { class: 'btn big', id: 'acct-signup', type: 'button', onclick: onSignup },
+      'Create a Red-XAI Account'),
+    h('p', { class: 'muted small' },
+      'Already signed into red-xai.com in this browser? Your account is recognized automatically. ', 
+      h('a', { href: cfg.forgot_password, rel: 'noopener' }, 'Forgot password?')));
 }
 
 // ---------- rules (mirror of the Red-XAI Accounts v1 contract; the server checks again) ----------
