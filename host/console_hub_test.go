@@ -40,9 +40,9 @@ func TestNativeHubConsoleRoutesRetainEmbeddedAssetsAndCSP(t *testing.T) {
 				}
 				if tc.path == "/v1/console/" {
 					body := out.Body.String()
-					if !strings.Contains(body, "src=\"./js/main.js\"") ||
+					if !strings.Contains(body, "src=\"/v1/console/js/main.js\"") ||
 						strings.Contains(body, "forge.css") ||
-						!strings.Contains(body, "href=\"./css/app.css\"") {
+						!strings.Contains(body, "href=\"/v1/console/css/app.css\"") {
 						t.Fatalf("static overlay remains or native assets missing: %s", body)
 					}
 				}
