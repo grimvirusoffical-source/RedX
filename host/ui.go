@@ -177,13 +177,43 @@ func (h *Host) serveHubConsole(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, "not found")
 		return
 	}
+	if asset == "" {
+		// The same embedded HTML is also served at / and /ui/. Rewrite only
+		// these trusted static asset prefixes to the native namespaced route.
+		// This is built into redxd (not a static overlay/proxy), and the root
+		// console keeps its existing /ui/* assets and service worker.
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		original := uiFiles["index.html"]
+		data := []byte(strings.NewReplacer(
+			"/ui/js/", "/v1/console/js/",
+			"/ui/css/", "/v1/console/css/",
+			"/ui/icons/", "/v1/console/icons/",
+		).Replace(string(original.data)))
+		sum := sha256.Sum256(data)
+		etag := `"` + hex.EncodeToString(sum[:8]) + `"`
+		header := w.Header()
+		header.Set("Content-Type", "text/html; charset=utf-8")
+		header.Set("Content-Security-Policy", uiCSP)
+		header.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		header.Set("Cache-Control", "no-cache")
+		header.Set("ETag", etag)
+		if r.Header.Get("If-None-Match") == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		if r.Method == http.MethodGet {
+			_, _ = w.Write(data)
+		}
+		return
+	}
 	next := r.Clone(r.Context())
 	u := *r.URL
-	if asset == "" {
-		u.Path = "/ui/"
-	} else {
-		u.Path = "/ui/" + asset
-	}
+	u.Path = "/ui/" + asset
 	u.RawPath = ""
 	next.URL = &u
 	h.serveUI(w, next)
