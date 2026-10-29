@@ -348,18 +348,29 @@ func (db *Database) tablesFor(p box.Path) ([]*table, error) {
 // ---- Store ---------------------------------------------------------------------
 
 func (db *Database) Get(path string) (box.Value, error) {
+	v, _, err := db.GetFile(path)
+	return v, err
+}
+
+// GetFile is Get plus the stored file route selected. A path with no file
+// still names that file when exactly one table holds the top-level box.
+func (db *Database) GetFile(path string) (box.Value, string, error) {
 	if db.closed.Load() {
-		return box.Value{}, ErrClosed
+		return box.Value{}, "", ErrClosed
 	}
 	p, err := box.ParsePath(path)
 	if err != nil || p.HasWild() {
-		return box.Value{}, fmt.Errorf("%w: %q", ErrBadPath, path)
+		return box.Value{}, "", fmt.Errorf("%w: %q", ErrBadPath, path)
 	}
 	t, err := db.route(p, false)
 	if err != nil {
-		return box.Value{}, err
+		return box.Value{}, "", err
 	}
-	return t.get(p.Segs)
+	v, err := t.get(p.Segs)
+	if err != nil {
+		return box.Value{}, "", err
+	}
+	return v, t.name, nil
 }
 
 func (db *Database) Set(path string, v box.Value, opts SetOpts) error {
@@ -404,7 +415,28 @@ func (db *Database) Delete(path string) error {
 	return t.commit([]Op{{Kind: "delete", Path: box.SegsString(p.Segs), segs: p.Segs}}, commitMode{})
 }
 
+// QueryHit is one query match and the stored path it was read from.
+// Path is file:Box[ID=n].field even when q itself named no file.
+type QueryHit struct {
+	Path  string
+	Value box.Value
+}
+
 func (db *Database) Query(q string) ([]box.Value, error) {
+	hits, err := db.QueryHits(q)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]box.Value, len(hits))
+	for i, h := range hits {
+		out[i] = h.Value
+	}
+	return out, nil
+}
+
+// QueryHits is Query with the stored path of every match. An empty file
+// ("*.pubkey", "Record[ID=1].*") walks every table; the path says which one.
+func (db *Database) QueryHits(q string) ([]QueryHit, error) {
 	if db.closed.Load() {
 		return nil, ErrClosed
 	}
@@ -416,9 +448,11 @@ func (db *Database) Query(q string) ([]box.Value, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := []box.Value{}
+	out := []QueryHit{}
 	for _, t := range ts {
-		out = append(out, t.query(p.Segs)...)
+		for _, h := range t.query(p.Segs) {
+			out = append(out, QueryHit{Path: t.name + ":" + h.rel, Value: h.val})
+		}
 	}
 	return out, nil
 }

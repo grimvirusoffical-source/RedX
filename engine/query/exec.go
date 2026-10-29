@@ -61,6 +61,7 @@ type Result struct {
 	Columns  []string
 	Rows     [][]box.Value // aligned with Columns; NELL where a row has no such column
 	Addrs    []link.Addr   // Get: the source record behind each row
+	Followed []link.Addr   // Get: records reached by @> (not the source). Not a client field.
 	Affected int           // Add/Set/Delete: records changed (cascades excluded)
 	Matched  int           // Require: records that matched
 	Cascaded []link.Addr   // Delete: extra records removed by @!> cascades
@@ -137,6 +138,7 @@ type run struct {
 	params   []box.Value
 	scanned  int
 	ticks    int
+	followed []link.Addr // @> targets seen while the current Get runs
 	jr       *journal
 	arithErr error // first numeric failure (division by zero, overflow) seen while evaluating a write
 }

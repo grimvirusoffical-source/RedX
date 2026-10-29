@@ -103,11 +103,20 @@ type PackFsckResult struct {
 	OrphanManifests int      `json:"orphan_manifests"`
 }
 
+// ResolvedRead is one link target substituted into a resolved value.
+// Path is the field path of the link inside the root record. Target is the
+// engine path that was copied. Neither is sent to the client.
+type ResolvedRead struct {
+	Path   string
+	Target string
+}
+
 // Resolved is a read with embedded links followed.
 type Resolved struct {
-	Value    string   `json:"value"`
-	Dangling []string `json:"dangling,omitempty"`
-	Cycles   []string `json:"cycles,omitempty"`
+	Value    string         `json:"value"`
+	Dangling []string       `json:"dangling,omitempty"`
+	Cycles   []string       `json:"cycles,omitempty"`
+	Reads    []ResolvedRead `json:"-"`
 }
 
 // PulseState is the rule set of a database.

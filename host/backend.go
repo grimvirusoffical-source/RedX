@@ -42,6 +42,26 @@ type Backend interface {
 	Close() error
 }
 
+// SourcedValue is one query match plus the stored path it was read from.
+// Path is set even when the query string named no file.
+type SourcedValue struct {
+	Path  string
+	Value string
+}
+
+// SourcedQuery is implemented by backends that can say which stored path each
+// query value came from. Empty-file queries ("*.pubkey", "Record[ID=1].*")
+// walk every table; the path is what makes a cert field visible to the gate.
+type SourcedQuery interface {
+	QuerySourced(q string) ([]SourcedValue, error)
+}
+
+// RoutedGet is Get plus the stored file the path resolved to, including a
+// path that omits the file when exactly one table holds that top-level box.
+type RoutedGet interface {
+	GetRouted(path string) (value, file string, err error)
+}
+
 // Opener opens (creating if necessary) a database in dir. follower=true means
 // the node is currently a replication follower: a Backend that implements
 // ReplBackend must start in follower mode (no local expiry decisions).

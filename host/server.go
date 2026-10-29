@@ -351,29 +351,45 @@ func (h *Host) pathHandler(w http.ResponseWriter, r *http.Request, db, path stri
 				}
 			}
 		}
+		if !lifetimeCertVisible(pr, path, "") {
+			h.denyLifetimeCert(w, r, pr, db)
+			return
+		}
 		if rv := r.URL.Query().Get("resolve"); rv == "1" || rv == "true" {
 			h.resolveRead(w, r, pr, db, path)
 			return
 		}
-		v, err := h.ReadGet(db, path)
+		v, err := h.readPath(db, path)
 		if err != nil {
 			h.mapErr(w, err)
 			return
 		}
+		if !pr.IsOwner() && fileNamesKind(v.file, kindLifetimeCert) {
+			h.denyLifetimeCert(w, r, pr, db)
+			return
+		}
+		if h.Cluster.IsLeader() {
+			h.Tracker.Touch(db, path, time.Now())
+		}
+		val := v.value
 		if ex, ok := h.backendExtras(db); ok && ex.SecActive() {
-			if v, err = ex.SecRead(secPrincipal(&pr.Key), path, v); err != nil {
+			if val, err = ex.SecRead(secPrincipal(&pr.Key), path, val); err != nil {
 				h.auditPolicy(r, pr, db, err)
 				h.mapErr(w, err)
 				return
 			}
 		}
+		if !lifetimeCertVisible(pr, path, val) {
+			h.denyLifetimeCert(w, r, pr, db)
+			return
+		}
 		w.Header().Set("X-Redx-Applied", strconv.FormatUint(h.Cluster.Offset(), 10))
 		if a := r.Header.Get("Accept"); strings.Contains(a, "text/x-redx-box") || strings.HasPrefix(a, "text/plain") {
 			w.Header().Set("Content-Type", "text/x-redx-box; charset=utf-8")
-			_, _ = io.WriteString(w, v)
+			_, _ = io.WriteString(w, val)
 			return
 		}
-		writeJSON(w, 200, map[string]string{"path": path, "value": v})
+		writeJSON(w, 200, map[string]string{"path": path, "value": val})
 	case "PUT":
 		pr, ok := h.authz(w, r, ScopeWrite, db, path, false)
 		if !ok {
@@ -385,6 +401,10 @@ func (h *Host) pathHandler(w http.ResponseWriter, r *http.Request, db, path stri
 		val, opts, err := parsePut(r)
 		if err != nil {
 			h.mapErr(w, err)
+			return
+		}
+		if AccountFlagWriteForbidden(path, val) && !h.mayMutateAccountFlags(pr) {
+			h.denyAccountFlag(w, r, pr, db)
 			return
 		}
 		if !h.checkStorageQuota(w, pr, int64(len(val))) {
@@ -407,6 +427,10 @@ func (h *Host) pathHandler(w http.ResponseWriter, r *http.Request, db, path stri
 	case "DELETE":
 		pr, ok := h.authz(w, r, ScopeWrite, db, path, false)
 		if !ok {
+			return
+		}
+		if pathNamesAccountFlag(path) && !h.mayMutateAccountFlags(pr) {
+			h.denyAccountFlag(w, r, pr, db)
 			return
 		}
 		if h.maybeForward(w, r) {
@@ -540,20 +564,83 @@ func (h *Host) queryHandler(w http.ResponseWriter, r *http.Request, db string) {
 		writeErr(w, 400, "empty query")
 		return
 	}
+	if !pr.IsOwner() && queryReadsLifetimeCert(q) {
+		h.denyLifetimeCert(w, r, pr, db)
+		return
+	}
 	b, err := h.Reg.Get(db)
 	if err != nil {
 		h.mapErr(w, err)
 		return
 	}
-	res, err := b.Query(q)
-	if err != nil {
-		h.mapErr(w, err)
-		return
-	}
-	if res == nil {
-		res = []string{}
+	var res []string
+	if sq, ok := b.(SourcedQuery); ok {
+		hits, err := sq.QuerySourced(q)
+		if err != nil {
+			h.mapErr(w, err)
+			return
+		}
+		if !pr.IsOwner() {
+			for _, hit := range hits {
+				if PathReadsLifetimeSecret(hit.Path) || TextIsLifetimeCert(hit.Value) {
+					h.denyLifetimeCert(w, r, pr, db)
+					return
+				}
+			}
+		}
+		res = make([]string, len(hits))
+		for i, hit := range hits {
+			res[i] = hit.Value
+		}
+	} else {
+		res, err = b.Query(q)
+		if err != nil {
+			h.mapErr(w, err)
+			return
+		}
+		if res == nil {
+			res = []string{}
+		}
+		if !pr.IsOwner() {
+			for _, s := range res {
+				if TextIsLifetimeCert(s) {
+					h.denyLifetimeCert(w, r, pr, db)
+					return
+				}
+			}
+		}
 	}
 	writeJSON(w, 200, map[string]interface{}{"results": res, "count": len(res)})
+}
+
+// routedValue is a read plus the stored file it resolved to ("" when the
+// backend does not report one).
+type routedValue struct {
+	value string
+	file  string
+}
+
+// readPath reads path. On a RoutedGet backend, file is the table the engine
+// selected, including a no-file path that uniquely names one top-level box.
+func (h *Host) readPath(db, path string) (routedValue, error) {
+	h.pause.RLock()
+	defer h.pause.RUnlock()
+	b, err := h.Reg.Get(db)
+	if err != nil {
+		return routedValue{}, err
+	}
+	if rg, ok := b.(RoutedGet); ok {
+		v, file, err := rg.GetRouted(path)
+		if err != nil {
+			return routedValue{}, err
+		}
+		return routedValue{value: v, file: file}, nil
+	}
+	v, err := b.Get(path)
+	if err != nil {
+		return routedValue{}, err
+	}
+	return routedValue{value: v}, nil
 }
 
 func (h *Host) statsHandler(w http.ResponseWriter, r *http.Request, db string) {
