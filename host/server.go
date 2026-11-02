@@ -86,6 +86,8 @@ func (h *Host) routes() http.Handler {
 		// Dangerous operations confirm themselves after authentication and
 		// authorisation (401, then 403, then 428). See requireDangerConfirm.
 		switch {
+		case h.website != nil && (p == "/db" || p == "/db/"):
+			http.Redirect(w, r, "/v1/console/", http.StatusFound)
 		case p == "/v1/console" || strings.HasPrefix(p, "/v1/console/"):
 			h.serveHubConsole(w, r)
 		case isUIPath(p):

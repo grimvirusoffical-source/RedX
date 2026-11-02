@@ -1,5 +1,6 @@
 import { h, icon, terminalPanel, chip, mount, toast, errorBox, spinner, copy, confirmDialog, table } from '../util.js';
-import { api, session } from '../api.js';
+import { api, session, websiteAuthentication, websiteAccountURL } from '../api.js';
+import { accountLocal } from '../account-storage.js';
 import { state, setTheme, setMode, isHostAdmin, gs, wizard } from '../state.js';
 import { pageHead, page } from './shared.js';
 
@@ -23,12 +24,14 @@ export default async function render() {
     h('div', { class: 'grid g2' },
       h('div', { class: 'card' }, h('h3', null, 'This browser'),
         row('Theme', themeSel), row('Mode', modeSel, 'Simple hides the expert pages.'),
-        row('Signed in as', h('span', null, chip(state.who.scope, 'acc'), ' ', state.who.label || state.who.id || '', ' ', chip(session.remembered ? 'remembered on this device' : 'this tab only', session.remembered ? 'warn' : 'ok'))),
+        row('Signed in as', h('span', null, chip(state.who.scope, 'acc'), ' ', state.who.label || state.who.id || '', ' ', chip(websiteAuthentication() ? 'website account session' : session.remembered ? 'remembered on this device' : 'this tab only', session.remembered ? 'warn' : 'ok'))),
         row('Offline shell', swState),
         h('div', { class: 'row gap wrap', style: { marginTop: '12px' } },
-          h('button', { class: 'btn', onclick: async () => { if (await confirmDialog('Sign out?', 'The key is removed from this browser. It still works elsewhere until you revoke it.', { ok: 'Sign out' })) { session.clear(); location.hash = '#/'; location.reload(); } } }, 'Sign out'),
-          h('button', { class: 'btn', onclick: () => { gs.reset(); localStorage.removeItem('redx.gs.dismissed'); localStorage.removeItem('redx.wizard'); toast('Get-started checklist reset', 'ok'); } }, 'Reset Get-started'),
-          h('button', { class: 'btn', onclick: () => { ['redx.hist', 'redx.saved', 'redx.studio.draft'].forEach((k) => localStorage.removeItem(k)); toast('Saved queries and history cleared', 'ok'); } }, 'Clear saved queries'))),
+          websiteAuthentication()
+            ? h('a', { class: 'btn', href: websiteAccountURL() }, 'Manage website account')
+            : h('button', { class: 'btn', onclick: async () => { if (await confirmDialog('Sign out?', 'The key is removed from this browser. It still works elsewhere until you revoke it.', { ok: 'Sign out' })) { session.clear(); location.hash = '#/'; location.reload(); } } }, 'Sign out'),
+          h('button', { class: 'btn', onclick: () => { gs.reset(); accountLocal.removeItem('redx.gs.dismissed'); accountLocal.removeItem('redx.wizard'); toast('Get-started checklist reset', 'ok'); } }, 'Reset Get-started'),
+          h('button', { class: 'btn', onclick: () => { ['redx.hist', 'redx.saved', 'redx.studio.draft'].forEach((k) => accountLocal.removeItem(k)); toast('Saved queries and history cleared', 'ok'); } }, 'Clear saved queries'))),
       h('div', { class: 'card' }, h('h3', null, 'Documentation'),
         ['box-grammar:Box file grammar', 'boxql:BoxQL guide', 'hosting:Hosting guide', 'clustering:Clustering', 'connect:Connecting apps', 'console:This console'].map((x) => { const [id, t] = x.split(':'); return h('div', null, h('a', { href: '#/help/' + id }, icon('book', 14), ' ', t)); }),
         h('p', { class: 'muted small' }, 'Everything is built into the host, so it works offline.'))),

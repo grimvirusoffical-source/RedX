@@ -1,6 +1,6 @@
 import { h, icon, mount, toast, $, clear } from './util.js';
-import { api, session, setUnauthorizedHandler, exchangePairingCode } from './api.js';
-import { state, subscribe, setMode, setTheme, setDb, applyTheme, loadWho, loadDbs, isHostAdmin, dbDisplayName, wizard } from './state.js';
+import { api, session, setUnauthorizedHandler, exchangePairingCode, configureAuthentication, websiteAuthentication, websiteAccountURL, invalidateRequests } from './api.js';
+import { state, subscribe, setMode, setTheme, setDb, applyTheme, loadWho, loadDbs, isHostAdmin, dbDisplayName, wizard, resetAccountState, identityOf } from './state.js';
 
 const NAV = [
   { id: 'dashboard', title: 'Dashboard', icon: 'home' },
@@ -16,7 +16,7 @@ const NAV = [
   // These are customer destinations, not owner routes. The actual Host
   // service independently authenticates each request.
   { id: 'redxai-apps', title: 'All Red-XAI apps', icon: 'link', external: 'https://red-xai.com/store' },
-  { id: 'redxai-host', title: 'Red-XAI Host', icon: 'nodes', external: 'https://red-xai.com/hosting' },
+  { id: 'redxai-host', title: 'Red-XAI Host', icon: 'nodes', external: 'https://red-xai.com/host' },
   { id: 'watch', title: 'Live Watch', icon: 'pulse', adv: true },
   { id: 'raw', title: 'Raw editor', icon: 'file', adv: true },
   { id: 'policy', title: 'Security · Rules · Code', icon: 'shield', adv: true },
@@ -39,19 +39,40 @@ export function parseHash() {
 
 setUnauthorizedHandler(() => {
   if (!state.who) return;
+  const website = websiteAuthentication();
   session.clear();
-  state.who = null;
-  showLogin('Your key was rejected or has been revoked. Please sign in again.');
+  showLogin(website ? 'Your website session has ended or cannot be verified. Sign in to Red-XAI again.' : 'Your key was rejected or has been revoked. Please sign in again.');
 });
 
 // ---------- boot ----------
 async function boot() {
   applyTheme();
   matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => state.theme === 'system' && applyTheme());
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
   // pairing link:  #/login?code=RP-XXXXX-XXXXX  (from a QR code; the code is single-use, expires in 5 minutes and is not a key.
   // The fragment is never sent to a server and is removed from the address bar before the exchange.)
   const dl = parseHash();
+  // Join instructions are public and do not select an authentication method.
+  if (dl.page === 'join') {
+    const { renderJoin } = await import('./pages/auth.js');
+    clear(app);
+    app.className = 'plain';
+    app.append(renderJoin(dl.query));
+    return;
+  }
+  const { accountsConfig } = await import('./pages/account.js');
+  const authConfig = await accountsConfig();
+  if (authConfig.unavailable) return showLogin('Account sign-in settings could not be loaded. Try again when the host is reachable.');
+  configureAuthentication(authConfig);
+  // The website owns the root service worker and cache namespace. Do not
+  // register the standalone console worker (which clears other caches) here.
+  if (!websiteAuthentication() && 'serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+  if (websiteAuthentication()) {
+    resetAccountState();
+    try { await loadWho(); } catch (e) { return showLogin(e.status === 401 ? 'Sign in with your existing Red-XAI website account.' : e.message); }
+    await startShell();
+    installWebsiteChecks();
+    return;
+  }
   // back from Red-XAI Accounts: #/signin?handoff=<single-use code> (or ?error=<code>). The code is traded once for a
   // console session and removed from the address bar first.
   if (dl.page === 'signin') {
@@ -80,14 +101,6 @@ async function boot() {
     } catch (e) {
       return showLogin(e.status === 401 || e.status === 429 || e.status === 409 ? e.message : 'Could not use that pairing code: ' + e.message);
     }
-  }
-  // a join link does not need a login
-  if (dl.page === 'join') {
-    const { renderJoin } = await import('./pages/auth.js');
-    clear(app);
-    app.className = 'plain';
-    app.append(renderJoin(dl.query));
-    return;
   }
   let needs = false;
   try { needs = (await api('GET', '/v1/ui/bootstrap-status', { noAuthRedirect: true })).needsSetup; } catch { /* host unreachable: login shows the error */ }
@@ -126,6 +139,12 @@ export async function showWelcome() {
   app.append(renderWelcome(async () => { await loadWho(); await startShell(true); }));
 }
 export async function showLogin(msg) {
+  teardownWorkspace();
+  resetAccountState();
+  // Remove the previous account's view before awaiting a module download.
+  clear(app);
+  app.hidden = false;
+  app.inert = false;
   const { renderLogin } = await import('./pages/auth.js');
   clear(app);
   app.className = 'plain';
@@ -137,10 +156,14 @@ let shell;
 export async function startShell(firstRun = false) {
   if (isHostAdmin()) { try { state.status = await api('GET', '/v1/admin/status'); } catch { /* ignore */ } }
   await loadDbs();
+  if (!state.who) return;
+  teardownWorkspace();
   clear(app);
   app.className = 'shell';
   shell = buildShell();
   app.append(shell.root);
+  app.hidden = false;
+  app.inert = false;
   window.removeEventListener('hashchange', route);
   window.addEventListener('hashchange', route);
   // a connect link (#/connect?...) must survive the first-run setup and sign-in: never send it to the wizard
@@ -197,7 +220,7 @@ function buildShell() {
     h('span', { class: 'seg-opt', 'data-m': 'advanced', onclick: () => setMode('advanced') }, 'All tools'));
   modeBtn.title = 'All tools adds raw records, cluster status, rules, watch and presets';
   const themeBtn = themeSwitcher();
-  const who = h('button', { class: 'chip who hub-profile', title: 'Sign out of Red-XAI console',
+  const who = h('button', { class: 'chip who hub-profile', title: websiteAuthentication() ? 'Manage website account' : 'Sign out of Red-XAI console',
     onclick: signOut });
   const menu = h('button', { class: 'icon-btn menu-btn', 'aria-label': 'Toggle navigation',
     onclick: () => root.classList.toggle('open') }, icon('menu', 18));
@@ -287,23 +310,66 @@ function buildShell() {
       else a.removeAttribute('aria-current');
     });
   }
-  subscribe(refresh);
+  const unsubscribe = subscribe(refresh);
   refresh();
-  return { root, main, refresh, markActive };
+  return { root, main, refresh, markActive, destroy() { unsubscribe(); } };
 }
 
 async function signOut() {
+  if (websiteAuthentication()) { location.assign(websiteAccountURL()); return; }
   // A deliberate sign-out must not trigger immediate automatic sign-in on
   // the same still-authenticated browser session.
   try { sessionStorage.setItem('redx.hub.autoSSO', 'attempted'); } catch {}
   if (session.key.startsWith('rxs_')) { try { await api('POST', '/v1/auth/logout', { noAuthRedirect: true }); } catch { /* the session expires anyway */ } }
   session.clear();
-  state.who = null;
+  resetAccountState();
   location.hash = '';
   location.reload();
 }
 
 let routeSeq = 0;
+function teardownWorkspace() {
+  routeSeq++;
+  if (current?.destroy) { try { current.destroy(); } catch {} }
+  current = null;
+  if (shell?.destroy) shell.destroy();
+  shell = null;
+  window.removeEventListener('hashchange', route);
+}
+
+let websiteChecking = false;
+let websiteChecksInstalled = false;
+async function revalidateWebsiteAccount(conceal = true) {
+  if (!websiteAuthentication() || document.hidden || websiteChecking || !state.who) return;
+  websiteChecking = true;
+  const before = identityOf(state.who);
+  if (conceal) { app.hidden = true; app.inert = true; }
+  try {
+    await loadWho();
+    if (identityOf(state.who) !== before) {
+      invalidateRequests();
+      teardownWorkspace();
+      clear(app);
+      await startShell();
+    }
+  } catch {
+    await showLogin('Your website session has ended or cannot be verified. Sign in to Red-XAI again.');
+  } finally {
+    websiteChecking = false;
+    app.hidden = false;
+    app.inert = false;
+  }
+}
+function installWebsiteChecks() {
+  if (websiteChecksInstalled) return;
+  websiteChecksInstalled = true;
+  window.addEventListener('focus', () => { void revalidateWebsiteAccount(); });
+  window.addEventListener('pageshow', () => { void revalidateWebsiteAccount(); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) void revalidateWebsiteAccount(); });
+  // The periodic check preserves the current editor when the identity is
+  // unchanged; revocation/account switching still discards the old workspace.
+  setInterval(() => { void revalidateWebsiteAccount(false); }, 30000);
+}
 async function route() {
   if (!shell) return;
   const seq = ++routeSeq;

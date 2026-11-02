@@ -239,7 +239,7 @@ func ResolveBootstrap(cfg Config) string {
 
 // WebSetupPending reports whether the browser may still create the first admin key.
 func (h *Host) WebSetupPending() bool {
-	return h.webSetup && h.Cluster.IsLeader() && h.KS.Count() == 0
+	return h.website == nil && h.webSetup && h.Cluster.IsLeader() && h.KS.Count() == 0
 }
 
 func hostIsLoopbackName(hostport string) bool {

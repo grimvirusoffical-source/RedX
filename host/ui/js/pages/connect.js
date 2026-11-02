@@ -1,3 +1,4 @@
+import { accountTab } from '../account-storage.js';
 // Consent page for the app connect handshake (docs/connect.md).
 //   #/connect?v=1&provider=..&state=..&pkce_challenge=..&callback=..[&app=..&workspace=..&scope=..&prefix=..&host=..&pin=..&name=..]
 // The link carries no secret. The provider's name shown here comes from RedX's own list, never from the link.
@@ -14,7 +15,7 @@ const scopeWords = (s) => (s === 'read' ? 'look at data' : 'read and change data
 export default async function render({ query, navigate }) {
   const root = page();
   let q = query && query.state ? query : null;
-  if (!q) { try { q = JSON.parse(sessionStorage.getItem(SAVE) || 'null'); } catch { q = null; } }
+  if (!q) { try { q = JSON.parse(accountTab.getItem(SAVE) || 'null'); } catch { q = null; } }
   root.append(pageHead('Connect an app', 'An app asked to use this RedX host. Nothing is shared until you approve.'));
   if (!isHostAdmin()) {
     root.append(h('div', { class: 'callout warn' }, icon('alert'), h('div', null, 'Only a host admin can connect apps. Sign in with an admin key.')));
@@ -25,14 +26,14 @@ export default async function render({ query, navigate }) {
       h('a', { class: 'btn', href: '#/apps' }, icon('list', 15), ' Connected apps')));
     return root;
   }
-  try { sessionStorage.setItem(SAVE, JSON.stringify(q)); } catch { /* private mode */ }
+  try { accountTab.setItem(SAVE, JSON.stringify(q)); } catch { /* private mode */ }
   const body = {};
   for (const k of LINK_KEYS) if (q[k] !== undefined && q[k] !== '') body[k] = k === 'v' ? Number(q[k]) : String(q[k]);
   let s;
   try {
     s = await api('POST', '/v1/connect/start', { json: body });
   } catch (e) {
-    sessionStorage.removeItem(SAVE);
+    accountTab.removeItem(SAVE);
     const code = e.body && e.body.code;
     const msg = code === 'expired' || code === 'code_used' || code === 'superseded' || code === 'denied'
       ? 'This request is ' + (code === 'code_used' ? 'already finished' : code) + '. Go back to the app and tap Connect again.'
@@ -81,7 +82,7 @@ export default async function render({ query, navigate }) {
     approveBtn.disabled = true;
     try {
       const a = await api('POST', '/v1/connect/approve', { json: { request_id: s.request_id, workspace: wsIn.value.trim(), confirm: confirmIn.value.trim(), replace: replace.checked }, confirm: 'connectApprove' });
-      sessionStorage.removeItem(SAVE);
+      accountTab.removeItem(SAVE);
       clearInterval(tick);
       denyBtn.disabled = true;
       const cb = a.callback_template ? a.callback_template.replace('{state}', encodeURIComponent(q.state)) : '';
@@ -101,7 +102,7 @@ export default async function render({ query, navigate }) {
   async function deny() {
     try {
       await api('POST', '/v1/connect/deny', { json: { request_id: s.request_id } });
-      sessionStorage.removeItem(SAVE);
+      accountTab.removeItem(SAVE);
       clearInterval(tick);
       toast('Request denied', 'ok');
       navigate('apps');

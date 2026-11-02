@@ -1,6 +1,6 @@
 // Full-screen flows: Welcome (first run), Login, Join link landing page.
 import { h, icon, copy, download, toast, field } from '../util.js';
-import { api, session, exchangePairingCode, looksLikePairingCode } from '../api.js';
+import { api, session, exchangePairingCode, looksLikePairingCode, websiteAuthentication } from '../api.js';
 
 function logo(sub) {
   return h('div', { class: 'auth-logo' }, h('img', { src: '/ui/icons/redx-192.png', width: 84, height: 84, alt: 'RedX' }), h('h1', null, 'RedX'), h('p', { class: 'muted' }, sub));
@@ -46,6 +46,7 @@ export function renderWelcome(onDone) {
 }
 
 export function renderLogin(msg, onDone) {
+  const website = websiteAuthentication();
   // Account sign-in is the normal customer path. An API key is for SDKs,
   // automation, or administrators and must never be required just to browse
   // and edit databases belonging to an authenticated Red-XAI account.
@@ -61,7 +62,7 @@ export function renderLogin(msg, onDone) {
     try {
       if (looksLikePairingCode(key)) key = await exchangePairingCode(key);
       await api('GET', '/v1/ui/whoami', { key, noAuthRedirect: true });
-      session.set(key, remember.checked);
+      session.set(key, website ? false : remember.checked);
       await onDone();
     } catch (e) {
       err.textContent = e.status === 401 && !looksLikePairingCode(input.value)
@@ -75,7 +76,9 @@ export function renderLogin(msg, onDone) {
     h('p', { class: 'muted small' }, 'Only use a key for SDKs, automated clients, or an administrator-provided integration. Normal dashboard users sign in with their Red-XAI account.'),
     field('API key or pairing code', input),
     err,
-    h('label', { class: 'check' }, remember, ' Remember this device'),
+    website
+      ? h('p', { class: 'muted small' }, 'Developer key mode lasts until this page is reloaded. Reloading resumes website sign-in.')
+      : h('label', { class: 'check' }, remember, ' Remember this device'),
     h('button', { class: 'btn', onclick: signInWithKey }, 'Continue using API key'));
   const primary = h('div', { class: 'hub-auth-primary', id: 'hub-auth-primary' },
     h('p', { class: 'muted' }, 'Checking shared account sign-in…'));

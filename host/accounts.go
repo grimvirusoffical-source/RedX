@@ -484,7 +484,7 @@ func (s *accountStore) signup(handle string, remove bool) (string, bool) {
 // ---- host helpers ----
 
 // AccountsEnabled reports whether Red-XAI Accounts sign-in is configured.
-func (h *Host) AccountsEnabled() bool { return h.Cfg.AccountsIssuer != "" }
+func (h *Host) AccountsEnabled() bool { return h.Cfg.AccountsIssuer != "" || h.website != nil }
 
 // masterDB is the protected master accounts database name, or "" when accounts are off.
 func (h *Host) masterDB() string {

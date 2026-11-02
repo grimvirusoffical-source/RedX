@@ -33,16 +33,17 @@ type Host struct {
 	// BootstrapKey is set only when this start created the first admin key.
 	BootstrapKey string
 
-	pair        pairStore        // one-time sign-in pairing codes (pairing.go)
-	connect     *connectStore    // app connect handshake (connect.go)
-	accts       *accountStore    // Red-XAI Accounts console sessions (accounts.go)
-	acctLim     *Limiter         // per-IP limits for the sign-in and sign-up endpoints
-	evCursor    *eventCursor     // Red-XAI Accounts event feed cursor (accounts_events.go)
-	oidc        *oidcClient      // Red-XAI Accounts OIDC relying party (accounts_oidc.go)
-	billing     *billing.Service // RedX Hosted plans on Stripe (billing_api.go)
-	tenants     *tenantStore     // which hosted account owns which database (tenant.go)
-	webSetup    bool             // an empty keystore may be set up from the browser (loopback only)
-	bootMu      sync.Mutex       // serialises the web bootstrap
+	pair        pairStore              // one-time sign-in pairing codes (pairing.go)
+	connect     *connectStore          // app connect handshake (connect.go)
+	accts       *accountStore          // Red-XAI Accounts console sessions (accounts.go)
+	acctLim     *Limiter               // per-IP limits for the sign-in and sign-up endpoints
+	evCursor    *eventCursor           // Red-XAI Accounts event feed cursor (accounts_events.go)
+	oidc        *oidcClient            // Red-XAI Accounts OIDC relying party (accounts_oidc.go)
+	website     *websiteSessionAdapter // optional same-site website account authority
+	billing     *billing.Service       // RedX Hosted plans on Stripe (billing_api.go)
+	tenants     *tenantStore           // which hosted account owns which database (tenant.go)
+	webSetup    bool                   // an empty keystore may be set up from the browser (loopback only)
+	bootMu      sync.Mutex             // serialises the web bootstrap
 	runMu       sync.Mutex
 	listenAt    string // actual listen address, set by Serve
 	scheme      string // http | https, set by Serve
@@ -121,6 +122,8 @@ func New(cfg Config, opener Opener, logf func(string, ...interface{})) (*Host, e
 	h.acctLim = NewLimiter(nil)
 	h.oidc = newOIDCClient(cfg)
 	h.Auth.accounts = h.resolveAccount
+	h.website = websiteSessionFromEnv()
+	h.Auth.website = h.resolveWebsiteAccount
 	h.Auth.master = h.masterDB
 	h.connect = openConnectStore(cfg.DataDir)
 	if h.billing, err = newBilling(cfg, logf); err != nil {
@@ -160,7 +163,7 @@ func New(cfg Config, opener Opener, logf func(string, ...interface{})) (*Host, e
 				return fail(err)
 			}
 		}
-		if h.KS.Count() == 0 && os.Getenv("REDX_NO_BOOTSTRAP") == "" {
+		if h.website == nil && h.KS.Count() == 0 && os.Getenv("REDX_NO_BOOTSTRAP") == "" {
 			switch ResolveBootstrap(cfg) {
 			case "web":
 				h.webSetup = true
@@ -176,11 +179,11 @@ func New(cfg Config, opener Opener, logf func(string, ...interface{})) (*Host, e
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	h.cancel = cancel
-	h.mux = h.routes()
+	h.mux = h.websiteBoundary(h.routes())
 	h.Cluster.start(ctx)
 	h.wg.Add(1)
 	go h.maintenance(ctx)
-	if h.AccountsEnabled() {
+	if h.Cfg.AccountsIssuer != "" {
 		h.evCursor = loadEventCursor(cfg.DataDir)
 		h.wg.Add(1)
 		go h.accountEventsLoop(ctx)

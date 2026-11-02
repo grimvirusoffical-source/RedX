@@ -1,3 +1,4 @@
+import { accountTab } from '../account-storage.js';
 import { h, icon, chip, mount, toast, field, copy, spinner, emptyState } from '../util.js';
 import { api, enc, pathURL } from '../api.js';
 import { state, loadDbs, setDb, gs, wizard, ID_RE, isHostAdmin, isAccountTenant, canManageDatabases, dbDisplayName, setMode } from '../state.js';
@@ -136,7 +137,7 @@ export default async function render() {
         h('h3', null, 'Next'),
         h('div', { class: 'grid g2' },
           h('a', { class: 'card linkcard', href: '#/data' + (t2.file ? '?db=' + enc(dbName) + '&file=' + enc(t2.file) : '') }, h('b', null, icon('table', 16), ' Look at your data'), h('p', { class: 'muted small' }, 'Browse and edit records.')),
-          h('a', { class: 'card linkcard', href: '#/studio', onclick: () => { if (t2.query) sessionStorage.setItem('redx.studio.q', t2.query); } }, h('b', null, icon('terminal', 16), ' Run a query'), h('p', { class: 'muted small' }, 'Try BoxQL on your data.')),
+          h('a', { class: 'card linkcard', href: '#/studio', onclick: () => { if (t2.query) accountTab.setItem('redx.studio.q', t2.query); } }, h('b', null, icon('terminal', 16), ' Run a query'), h('p', { class: 'muted small' }, 'Try BoxQL on your data.')),
           h('a', { class: 'card linkcard', href: '#/keys' }, h('b', null, icon('key', 16), ' Make a key for your app'), h('p', { class: 'muted small' }, 'Give your app its own limited key.')),
           h('a', { class: 'card linkcard', href: '#/' }, h('b', null, icon('home', 16), ' Go to the dashboard'), h('p', { class: 'muted small' }, 'Status and the Get-started list.'))));
       mount(nav);

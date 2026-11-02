@@ -39,6 +39,7 @@ type Authenticator struct {
 	auditOK  bool
 	// accounts resolves console session tokens (rxs_...); master names the protected database. Set by Host.
 	accounts func(token string) (*Principal, bool)
+	website  func(*http.Request) (*Principal, bool)
 	master   func() string
 }
 
@@ -79,6 +80,11 @@ func (a *Authenticator) Authenticate(r *http.Request) (*Principal, time.Duration
 	}
 	key := bearer(r)
 	if key == "" {
+		if a.website != nil {
+			if pr, ok := a.website(r); ok {
+				return a.accountResult(r, ip, pr)
+			}
+		}
 		a.fail(r, ip, "", "missing bearer token")
 		return nil, 0, ErrUnauthorized
 	}
@@ -127,6 +133,10 @@ func (a *Authenticator) authAccount(r *http.Request, ip, token string) (*Princip
 		a.fail(r, ip, "", "unknown or expired account session")
 		return nil, 0, ErrUnauthorized
 	}
+	return a.accountResult(r, ip, pr)
+}
+
+func (a *Authenticator) accountResult(r *http.Request, ip string, pr *Principal) (*Principal, time.Duration, error) {
 	pr.master = a.masterDB()
 	if ok, wait := a.keyLim.Allow(pr.Key.ID, a.defRPS, a.defBurst); !ok {
 		a.audit.Log(AuditEvent{Event: "ratelimit", KeyID: pr.Key.ID, Remote: ip, Method: r.Method})

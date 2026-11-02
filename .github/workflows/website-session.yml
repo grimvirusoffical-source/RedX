@@ -1,0 +1,58 @@
+name: Website account console integration
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'host/**'
+      - 'cmd/redxd/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'docs/website-session-console.md'
+      - '.github/workflows/website-session.yml'
+  push:
+    branches: ['codex/website-session-db']
+    paths:
+      - 'host/**'
+      - 'cmd/redxd/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'docs/website-session-console.md'
+      - '.github/workflows/website-session.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-account-console:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Native HTTP, tenant, engine-adapter and console race tests
+        run: go test -race -count=1 -timeout=6m ./host/... ./cmd/redxd/...
+      - name: Console browser-module behavior tests
+        run: node --test host/uitest/*.test.mjs
+      - name: Build native binaries without runtime credentials
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          mkdir -p stage
+          go build -trimpath -o stage/redxd ./cmd/redxd
+          go build -trimpath -o stage/redx ./cmd/redx
+      - uses: actions/upload-artifact@v7
+        with:
+          name: website-session-native-linux-amd64
+          path: |
+            stage/redxd
+            stage/redx
+          if-no-files-found: error
+          retention-days: 7

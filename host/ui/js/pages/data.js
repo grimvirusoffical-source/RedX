@@ -1,3 +1,4 @@
+import { accountTab } from '../account-storage.js';
 import { h, icon, terminalPanel, chip, errorBox, spinner, mount, toast, confirmDialog, emptyState, table, field, dialog, debounce, copy } from '../util.js';
 import { api, enc, pathURL } from '../api.js';
 import { state, fileStem, gs, setDb } from '../state.js';
@@ -141,7 +142,7 @@ export default async function render(ctx) {
       h('div', { style: { marginTop: '10px' } }, rowsEl,
         h('div', { class: 'row gap wrap', style: { marginTop: '8px' } }, h('button', { class: 'btn small', onclick: () => { sel.filters.push({ field: '', op: '=', value: '' }); paint(); } }, icon('plus', 14), ' Add condition (AND)'), h('button', { class: 'btn small primary', onclick: apply }, 'Apply filter'),
           sel.filter ? h('button', { class: 'btn small', onclick: () => { sel.filter = ''; sel.filters = [{ field: '', op: '=', value: '' }]; sel.offset = 0; showBox(); } }, 'Clear') : null,
-          h('button', { class: 'btn small', onclick: () => { build(); sessionStorage.setItem('redx.studio.q', gen.textContent); location.hash = '#/studio'; } }, 'Open in BoxQL Studio')),
+          h('button', { class: 'btn small', onclick: () => { build(); accountTab.setItem('redx.studio.q', gen.textContent); location.hash = '#/studio'; } }, 'Open in BoxQL Studio')),
         h('div', { style: { marginTop: '8px' } }, h('span', { class: 'muted small' }, 'BoxQL: '), gen)));
   }
 

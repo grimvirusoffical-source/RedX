@@ -1,3 +1,4 @@
+import { accountTab } from '../account-storage.js';
 import { h, icon, terminalPanel, chip, mount, toast, emptyState, copy, download } from '../util.js';
 import { wsURL, enc } from '../api.js';
 import { state } from '../state.js';
@@ -19,8 +20,8 @@ export default async function render() {
   const events = [];
   let files = [];
   try { files = (await listFiles(db)).files.filter((f) => f.records === 'records'); } catch { /* limited key */ }
-  const pre = sessionStorage.getItem('redx.watch.q');
-  sessionStorage.removeItem('redx.watch.q');
+  const pre = accountTab.getItem('redx.watch.q');
+  accountTab.removeItem('redx.watch.q');
   const first = files[0];
   const init = pre || (first ? `{Watch[]} = ${fileStem(first.name)}:*[ID=*]` : '{Watch[]} = players:Player[ID=*]');
   const editor = createEditor({ language: 'boxql', value: init, height: '96px', onRun: start });
