@@ -1,6 +1,6 @@
 // Full-screen flows: Welcome (first run), Login, Join link landing page.
 import { h, icon, copy, download, toast, field } from '../util.js';
-import { api, session, exchangePairingCode, looksLikePairingCode, websiteAuthentication } from '../api.js';
+import { api, session, exchangePairingCode, looksLikePairingCode, websiteAuthentication, websiteAccountURL } from '../api.js';
 
 function logo(sub) {
   return h('div', { class: 'auth-logo' }, h('img', { src: '/ui/icons/redx-192.png', width: 84, height: 84, alt: 'RedX' }), h('h1', null, 'RedX'), h('p', { class: 'muted' }, sub));
@@ -45,8 +45,7 @@ export function renderWelcome(onDone) {
   return h('div', { class: 'auth' }, card);
 }
 
-export function renderLogin(msg, onDone) {
-  const website = websiteAuthentication();
+function developerKeyLogin(msg, onDone, website) {
   // Account sign-in is the normal customer path. An API key is for SDKs,
   // automation, or administrators and must never be required just to browse
   // and edit databases belonging to an authenticated Red-XAI account.
@@ -71,7 +70,7 @@ export function renderLogin(msg, onDone) {
     }
   };
   input.addEventListener('keydown', e => { if (e.key === 'Enter') signInWithKey(); });
-  const advanced = h('details', { class: 'hub-api-key-advanced' },
+  return h('details', { class: 'hub-api-key-advanced' },
     h('summary', null, icon('key', 16), 'Developer API key / pairing (advanced)'),
     h('p', { class: 'muted small' }, 'Only use a key for SDKs, automated clients, or an administrator-provided integration. Normal dashboard users sign in with their Red-XAI account.'),
     field('API key or pairing code', input),
@@ -80,6 +79,22 @@ export function renderLogin(msg, onDone) {
       ? h('p', { class: 'muted small' }, 'Developer key mode lasts until this page is reloaded. Reloading resumes website sign-in.')
       : h('label', { class: 'check' }, remember, ' Remember this device'),
     h('button', { class: 'btn', onclick: signInWithKey }, 'Continue using API key'));
+}
+
+export function renderAccountUnavailable(msg, onRetry, onDone) {
+  return h('div', { class: 'auth' }, h('div', { class: 'auth-card' },
+    h('h2', null, 'Database workspace unavailable'),
+    h('p', { role: 'status' }, msg || 'Your website account could not be verified. Try again when the account service is available.'),
+    h('button', { class: 'btn primary', type: 'button', onclick: onRetry }, 'Retry workspace'),
+    h('p', { class: 'muted small' }, h('a', { href: websiteAccountURL() }, 'Open website account')),
+    onDone ? developerKeyLogin('', onDone, websiteAuthentication()) : null));
+}
+
+export function renderLogin(msg, onDone, onRetry = () => location.reload()) {
+  // Website sign-in belongs to the primary site. This view only recovers from
+  // failed verification/return and never adds a second account sign-in step.
+  if (websiteAuthentication()) return renderAccountUnavailable(msg, onRetry, onDone);
+  const advanced = developerKeyLogin(msg, onDone, false);
   const primary = h('div', { class: 'hub-auth-primary', id: 'hub-auth-primary' },
     h('p', { class: 'muted' }, 'Checking shared account sign-in…'));
   const card = h('div', { class: 'auth-card hub-auth-card' },

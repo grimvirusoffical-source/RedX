@@ -1,6 +1,7 @@
 import { h, icon, mount, toast, $, clear } from './util.js';
 import { api, session, setUnauthorizedHandler, exchangePairingCode, configureAuthentication, websiteAuthentication, websiteAccountURL, invalidateRequests } from './api.js';
 import { state, subscribe, setMode, setTheme, setDb, applyTheme, loadWho, loadDbs, isHostAdmin, dbDisplayName, wizard, resetAccountState, identityOf } from './state.js';
+import { redirectWebsiteSignIn, resetWebsiteSignIn } from './website-session.js';
 
 const NAV = [
   { id: 'dashboard', title: 'Dashboard', icon: 'home' },
@@ -28,6 +29,7 @@ const PAGES = new Set([...NAV.filter((n) => !n.external).map((n) => n.id), 'join
 
 const app = document.getElementById('app');
 let current = null; // {destroy}
+let loginSequence = 0;
 
 export function navigate(path) { location.hash = '#/' + path.replace(/^#?\/?/, ''); }
 export function parseHash() {
@@ -40,8 +42,9 @@ export function parseHash() {
 setUnauthorizedHandler(() => {
   if (!state.who) return;
   const website = websiteAuthentication();
+  if (website) { void revalidateWebsiteAccount(); return; }
   session.clear();
-  showLogin(website ? 'Your website session has ended or cannot be verified. Sign in to Red-XAI again.' : 'Your key was rejected or has been revoked. Please sign in again.');
+  showLogin('Your key was rejected or has been revoked. Please sign in again.');
 });
 
 // ---------- boot ----------
@@ -61,17 +64,19 @@ async function boot() {
   }
   const { accountsConfig } = await import('./pages/account.js');
   const authConfig = await accountsConfig();
-  if (authConfig.unavailable) return showLogin('Account sign-in settings could not be loaded. Try again when the host is reachable.');
+  if (authConfig.unavailable) {
+    const { renderAccountUnavailable } = await import('./pages/auth.js');
+    clear(app);
+    app.className = 'plain';
+    app.append(renderAccountUnavailable('Account settings could not be loaded. Retry when the host is reachable.', () => location.reload()));
+    return;
+  }
   configureAuthentication(authConfig);
   // The website owns the root service worker and cache namespace. Do not
   // register the standalone console worker (which clears other caches) here.
   if (!websiteAuthentication() && 'serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
   if (websiteAuthentication()) {
-    resetAccountState();
-    try { await loadWho(); } catch (e) { return showLogin(e.status === 401 ? 'Sign in with your existing Red-XAI website account.' : e.message); }
-    await startShell();
-    installWebsiteChecks();
-    return;
+    return openWebsiteWorkspace();
   }
   // back from Red-XAI Accounts: #/signin?handoff=<single-use code> (or ?error=<code>). The code is traded once for a
   // console session and removed from the address bar first.
@@ -138,17 +143,42 @@ export async function showWelcome() {
   app.className = 'plain';
   app.append(renderWelcome(async () => { await loadWho(); await startShell(true); }));
 }
-export async function showLogin(msg) {
+async function openWebsiteWorkspace() {
+  loginSequence++;
+  resetAccountState();
+  try { await loadWho(); }
+  catch (e) { return showLogin(e.message, e); }
+  resetWebsiteSignIn();
+  await startShell();
+  installWebsiteChecks();
+}
+
+export async function showLogin(msg, failure) {
+  const sequence = ++loginSequence;
   teardownWorkspace();
   resetAccountState();
   // Remove the previous account's view before awaiting a module download.
   clear(app);
   app.hidden = false;
   app.inert = false;
+  if (websiteAuthentication()) {
+    app.className = 'plain';
+    mount(app, h('div', { class: 'loading', role: 'status' }, h('span', { class: 'spin' }), 'Checking website account…'));
+    const redirected = await redirectWebsiteSignIn(failure, () => sequence === loginSequence && !state.who);
+    if (redirected || sequence !== loginSequence) return;
+    msg = failure?.status === 503
+      ? 'The account service is unavailable. Retry when it is reachable.'
+      : 'Access to your website account could not be verified. Retry the workspace or open your website account.';
+  }
   const { renderLogin } = await import('./pages/auth.js');
+  if (sequence !== loginSequence) return;
   clear(app);
   app.className = 'plain';
-  app.append(renderLogin(msg, async () => { await loadWho(); await startShell(); }));
+  app.append(renderLogin(msg, async () => { await loadWho(); await startShell(); }, async () => {
+    resetWebsiteSignIn();
+    mount(app, h('div', { class: 'loading', role: 'status' }, h('span', { class: 'spin' }), 'Opening your workspace…'));
+    await openWebsiteWorkspace();
+  }));
 }
 
 // ---------- shell ----------
@@ -346,14 +376,15 @@ async function revalidateWebsiteAccount(conceal = true) {
   if (conceal) { app.hidden = true; app.inert = true; }
   try {
     await loadWho();
+    resetWebsiteSignIn();
     if (identityOf(state.who) !== before) {
       invalidateRequests();
       teardownWorkspace();
       clear(app);
       await startShell();
     }
-  } catch {
-    await showLogin('Your website session has ended or cannot be verified. Sign in to Red-XAI again.');
+  } catch (e) {
+    await showLogin(e.message, e);
   } finally {
     websiteChecking = false;
     app.hidden = false;

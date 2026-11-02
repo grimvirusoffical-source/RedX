@@ -8,7 +8,8 @@ let requestEpoch = 0;
 let websiteLogin = '/signin';
 let websiteAccount = '/settings';
 export const websiteAuthentication = () => websiteConfigured && !developerSelected;
-export const websiteLoginURL = () => websiteLogin;
+// The return destination is fixed, never copied from a query or fragment.
+export const websiteLoginURL = () => websiteLogin + '?next=' + encodeURIComponent('/db');
 export const websiteAccountURL = () => websiteAccount;
 export function invalidateRequests() { requestEpoch++; }
 export function configureAuthentication(config) {

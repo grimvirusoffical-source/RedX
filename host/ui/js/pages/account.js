@@ -1,7 +1,7 @@
 // Red-XAI Accounts: "Sign in with Red-XAI Account" and the sign-up flow (ToS gate, live red/green hints,
 // confirm boxes with a copy arrow, date of birth with a calendar, 2FA choice). redxd re-checks every field.
 import { h, icon, toast, debounce } from '../util.js';
-import { api, websiteLoginURL, websiteAccountURL } from '../api.js';
+import { api } from '../api.js';
 import { drawQR } from '../qr.js';
 
 let cfgCache = null;
@@ -25,13 +25,6 @@ export const SIGNIN_ERRORS = {
 
 /** The block under the API-key form: Sign in / Create account. */
 export function accountButtons(cfg, onSignup) {
-  if (cfg.mode === 'website') {
-    return h('div', { class: 'acct-block hub-account-buttons' },
-      h('a', { class: 'btn primary big', id: 'acct-signin', href: websiteLoginURL() }, icon('user', 18), ' Sign in to Red-XAI'),
-      h('a', { class: 'btn', href: location.pathname }, 'Check website sign-in again'),
-      h('a', { href: websiteAccountURL() }, 'Manage website account'),
-      h('p', { class: 'muted small' }, 'Use your existing website account, then return to this workspace. No database API key is required.'));
-  }
   // The authorization provider reuses an existing red-xai.com browser session
   // when present. There is no second login/password or developer key.
   const redirect = location.pathname.startsWith('/v1/console/')
