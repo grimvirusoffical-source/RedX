@@ -105,6 +105,20 @@ new instance on the website origin; placing only the HTML behind a prefix does
 not provide working cookie authentication. Do not move this mode to
 `api.red-xai.com` without a separate reviewed session integration.
 
+Website mode opens the workspace directly after canonical cookie verification.
+Only an explicit `401 {"error":"signed_out"}` from the primary site's
+`/api/accounts/me` starts `/signin?next=%2Fdb`; this is the existing website login
+and fixed return path. A tab-local guard prevents repeated redirects. Authority
+failure or an account/DB mismatch shows recovery rather than another DB login.
+This browser probe never establishes database identity or changes server RBAC.
+
+Console HTML references a content revision namespace for its full static module
+graph. Every embedded filename/content digest contributes to the revision;
+relative imports retain that prefix. This avoids stale login modules when a CDN
+or browser applies a long static-asset TTL despite origin revalidation headers.
+Legacy asset URLs remain available. Website caches and its root service worker
+are preserved; this mode does not register the standalone console worker.
+
 Preserve existing `api.red-xai.com` routes to the old native service, the original
 website/account service on `4200`, Hub on `4210`, Host on `14202`, and unrelated
 ingress rules. Point the Host DB entry at the reviewed same-site native console

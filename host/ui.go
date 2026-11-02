@@ -28,7 +28,8 @@ import (
 var uiFS embed.FS
 
 var (
-	uiFiles = map[string]uiAsset{}
+	uiFiles    map[string]uiAsset
+	uiRevision string
 )
 
 type uiAsset struct {
@@ -38,15 +39,36 @@ type uiAsset struct {
 }
 
 func init() {
-	_ = fs.WalkDir(uiFS, "ui", func(p string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+	var err error
+	uiFiles, uiRevision, err = loadUIAssets(uiFS)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func loadUIAssets(source fs.FS) (map[string]uiAsset, string, error) {
+	files := map[string]uiAsset{}
+	bundle := sha256.New()
+	// WalkDir visits paths in lexical order. Include every embedded filename
+	// and content digest so a transitive module change versions the full graph.
+	err := fs.WalkDir(source, "ui", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
 			return nil
 		}
-		b, _ := uiFS.ReadFile(p)
+		b, err := fs.ReadFile(source, p)
+		if err != nil {
+			return err
+		}
 		sum := sha256.Sum256(b)
-		uiFiles[strings.TrimPrefix(p, "ui/")] = uiAsset{data: b, etag: `"` + hex.EncodeToString(sum[:8]) + `"`, ctyp: uiContentType(p)}
+		_, _ = io.WriteString(bundle, p+"\x00")
+		_, _ = bundle.Write(sum[:])
+		files[strings.TrimPrefix(p, "ui/")] = uiAsset{data: b, etag: `"` + hex.EncodeToString(sum[:8]) + `"`, ctyp: uiContentType(p)}
 		return nil
 	})
+	return files, hex.EncodeToString(bundle.Sum(nil)), err
 }
 
 func uiContentType(p string) string {
@@ -110,14 +132,26 @@ func isUIPath(p string) bool {
 	return strings.HasPrefix(p, "/ui/")
 }
 
-func (h *Host) serveUI(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" && r.Method != "HEAD" {
-		w.Header().Set("Allow", "GET, HEAD")
-		writeErr(w, 405, "method not allowed")
-		return
+func uiAssetPrefix(base string) string {
+	return base + "_assets/" + uiRevision + "/"
+}
+
+// Strip only this binary's exact revision, before any path normalization.
+func uiAssetName(asset string) (string, bool) {
+	if strings.HasPrefix(asset, "_assets/") {
+		revision, rest, ok := strings.Cut(strings.TrimPrefix(asset, "_assets/"), "/")
+		if !ok || revision != uiRevision {
+			return "", false
+		}
+		asset = rest
 	}
+	return asset, fs.ValidPath(asset) && !strings.Contains(asset, "\\")
+}
+
+func (h *Host) serveUI(w http.ResponseWriter, r *http.Request) {
 	p := r.URL.Path
 	var name string
+	versioned := false
 	switch p {
 	case "/", "/ui/", "/ui":
 		name = "index.html"
@@ -130,20 +164,47 @@ func (h *Host) serveUI(w http.ResponseWriter, r *http.Request) {
 	case "/apple-touch-icon.png":
 		name = "icons/apple-touch-icon.png"
 	default:
-		name = strings.TrimPrefix(path.Clean(strings.TrimPrefix(p, "/ui/")), "/")
-		if strings.Contains(name, "..") {
+		asset := strings.TrimPrefix(p, "/ui/")
+		versioned = strings.HasPrefix(asset, "_assets/")
+		var ok bool
+		name, ok = uiAssetName(asset)
+		if !ok {
 			writeErr(w, 404, "not found")
 			return
 		}
+	}
+	prefix := ""
+	if h.website != nil || versioned {
+		prefix = uiAssetPrefix("/ui/")
+	}
+	serveUIAsset(w, r, name, prefix)
+}
+
+func serveUIAsset(w http.ResponseWriter, r *http.Request, name, prefix string) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
 	}
 	a, ok := uiFiles[name]
 	if !ok {
 		writeErr(w, 404, "not found")
 		return
 	}
+	if prefix != "" && strings.HasSuffix(name, ".html") {
+		// Relative ES module imports keep this namespace automatically.
+		a.data = []byte(strings.NewReplacer(
+			"/ui/", prefix,
+			`"/manifest.webmanifest"`, `"`+prefix+`manifest.webmanifest"`,
+			`"/favicon.ico"`, `"`+prefix+`icons/favicon.ico"`,
+			`"/apple-touch-icon.png"`, `"`+prefix+`icons/apple-touch-icon.png"`,
+		).Replace(string(a.data)))
+		sum := sha256.Sum256(a.data)
+		a.etag = `"` + hex.EncodeToString(sum[:8]) + `"`
+	}
 	hd := w.Header()
 	hd.Set("Content-Type", a.ctyp)
-	hd.Set("Cache-Control", "no-cache") // revalidate with the ETag every time; the console is always current
+	hd.Set("Cache-Control", "no-cache") // origin revalidation; bundle URLs also isolate stale CDN/browser entries
 	hd.Set("ETag", a.etag)
 	if name == "billing.html" {
 		hd.Set("Content-Security-Policy", billingCSP) // only the checkout page may load Stripe.js
@@ -173,50 +234,16 @@ func (h *Host) serveHubConsole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	asset := strings.TrimPrefix(r.URL.Path, "/v1/console/")
-	if strings.Contains(asset, "..") || strings.ContainsAny(asset, "\\\\") {
-		writeErr(w, 404, "not found")
-		return
-	}
-	if asset == "" {
-		// The same embedded HTML is also served at / and /ui/. Rewrite only
-		// these trusted static asset prefixes to the native namespaced route.
-		// This is built into redxd (not a static overlay/proxy), and the root
-		// console keeps its existing /ui/* assets and service worker.
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			w.Header().Set("Allow", "GET, HEAD")
-			writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+	name := "index.html"
+	if asset != "" {
+		var ok bool
+		name, ok = uiAssetName(asset)
+		if !ok {
+			writeErr(w, http.StatusNotFound, "not found")
 			return
 		}
-		original := uiFiles["index.html"]
-		data := []byte(strings.NewReplacer(
-			"/ui/js/", "/v1/console/js/",
-			"/ui/css/", "/v1/console/css/",
-			"/ui/icons/", "/v1/console/icons/",
-		).Replace(string(original.data)))
-		sum := sha256.Sum256(data)
-		etag := `"` + hex.EncodeToString(sum[:8]) + `"`
-		header := w.Header()
-		header.Set("Content-Type", "text/html; charset=utf-8")
-		header.Set("Content-Security-Policy", uiCSP)
-		header.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-		header.Set("Cache-Control", "no-cache")
-		header.Set("ETag", etag)
-		if r.Header.Get("If-None-Match") == etag {
-			w.WriteHeader(http.StatusNotModified)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		if r.Method == http.MethodGet {
-			_, _ = w.Write(data)
-		}
-		return
 	}
-	next := r.Clone(r.Context())
-	u := *r.URL
-	u.Path = "/ui/" + asset
-	u.RawPath = ""
-	next.URL = &u
-	h.serveUI(w, next)
+	serveUIAsset(w, r, name, uiAssetPrefix("/v1/console/"))
 }
 
 // ---- first-run web setup ----
