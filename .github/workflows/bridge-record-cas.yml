@@ -1,0 +1,65 @@
+name: Bridge durable record CAS
+
+on:
+  pull_request:
+    branches: [main, 'codex/website-session-db']
+    paths:
+      - 'engine/cas.go'
+      - 'engine/cas_test.go'
+      - 'host/record_cas.go'
+      - 'host/record_cas_test.go'
+      - 'host/engineadapter/record_cas.go'
+      - 'host/server.go'
+      - 'docs/record-cas.md'
+      - '.github/workflows/bridge-record-cas.yml'
+  push:
+    branches: ['feature/bridge-durable-record-cas', 'codex/website-session-db']
+    paths:
+      - 'engine/cas.go'
+      - 'engine/cas_test.go'
+      - 'host/record_cas.go'
+      - 'host/record_cas_test.go'
+      - 'host/engineadapter/record_cas.go'
+      - 'host/server.go'
+      - 'docs/record-cas.md'
+      - '.github/workflows/bridge-record-cas.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  record-cas:
+    name: ${{ matrix.os }} record CAS
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS validation is deferred; this workflow makes no macOS claim.
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Keep checkout line endings LF
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          cache: true
+      - name: Check formatting of the new Go files
+        run: |
+          set -euo pipefail
+          out="$(gofmt -l engine/cas.go engine/cas_test.go host/record_cas.go host/record_cas_test.go host/engineadapter/record_cas.go)"
+          if [ -n "$out" ]; then
+            printf 'gofmt required:\n%s\n' "$out"
+            exit 1
+          fi
+      - name: Race test the native durable record contract
+        run: go test -race -count=1 -timeout=4m ./engine ./host ./host/engineadapter -run '^TestRecordCAS'
+      - name: Build redxd without deployment or publishing
+        run: go build ./cmd/redxd
