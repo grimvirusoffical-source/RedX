@@ -114,6 +114,9 @@ type Cluster struct {
 	h   *Host
 	log *OpLog
 	dir string
+	// A record operation must finish before a role, fence or membership change.
+	// Commit hooks may acquire mu; acquire this gate before mu, never inside it.
+	recordGate sync.RWMutex
 
 	mu            sync.Mutex
 	st            nodeState
@@ -484,6 +487,8 @@ func (c *Cluster) handleSuperseded(w http.ResponseWriter, r *http.Request) {
 		ParentID  string `json:"parent_id"`
 	}
 	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<14)).Decode(&b)
+	c.recordGate.Lock()
+	defer c.recordGate.Unlock()
 	c.mu.Lock()
 	if c.st.Role != "leader" {
 		c.mu.Unlock()
@@ -1077,6 +1082,8 @@ func (c *Cluster) handleJoin(w http.ResponseWriter, r *http.Request) {
 	}
 	secret := "rxn_" + randBase62(43)
 	ssum := sha256.Sum256([]byte(secret))
+	c.recordGate.Lock()
+	defer c.recordGate.Unlock()
 	c.mu.Lock()
 	c.members[jr.NodeID] = &Member{ID: jr.NodeID, Addr: jr.Addr, Role: "follower", LastSeen: time.Now().UTC(), SecretHash: hex.EncodeToString(ssum[:]), Joined: time.Now().UTC()}
 	c.saveMembers()
@@ -1092,6 +1099,8 @@ func (c *Cluster) handlePromote(w http.ResponseWriter, r *http.Request, p *Princ
 	// Wait for a snapshot install in flight (it holds pause): promoting halfway through one would record the
 	// wrong parent history and let the install overwrite the new replication id.
 	c.h.pause.Lock()
+	c.recordGate.Lock()
+	defer c.recordGate.Unlock()
 	unlock := func() { c.mu.Unlock(); c.h.pause.Unlock() }
 	c.mu.Lock()
 	if c.st.Role == "leader" {
@@ -1174,6 +1183,8 @@ func (c *Cluster) Repoint(ctx context.Context, leaderURL, joinToken, pin string)
 		st.NodeSecret = c.st.NodeSecret // keep (e.g. static cluster_secret in use)
 		c.mu.Unlock()
 	}
+	c.recordGate.Lock()
+	defer c.recordGate.Unlock()
 	c.mu.Lock()
 	wasLeader := c.st.Role == "leader"
 	c.st = st // also clears Fenced / Former
