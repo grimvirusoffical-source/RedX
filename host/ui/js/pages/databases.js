@@ -29,7 +29,7 @@ export default async function render() {
   if (isAccountTenant()) name.maxLength = 50;
   name.addEventListener('keydown', (e) => { if (e.key === 'Enter') create(); });
   const owner = websiteDeployment() && state.who?.owner === true;
-  root.append(pageHead(owner ? 'All databases · owner access' : 'Databases', owner ? 'Tenant, application and system databases visible to your verified owner session. Access is audited.' : 'A database is a folder of native RedX files. Create one per app or project.'),
+  mount(root, pageHead(owner ? 'All databases · owner access' : 'Databases', owner ? 'Tenant, application and system databases visible to your verified owner session. Access is audited.' : 'A database is a folder of native RedX files. Create one per app or project.'),
     canManageDatabases() ? h('div', { class: 'card create-db', style: { marginBottom: '16px' } },
       h('div', { class: 'create-db-heading' }, h('div', null, h('h3', null, 'Create your database'),
         h('p', { class: 'muted small' }, owner ? 'Create an application or system database with owner access.' : 'A private workspace for your app, protected by the native database permissions.'))),

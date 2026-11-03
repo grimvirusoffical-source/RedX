@@ -15,7 +15,7 @@ export default async function render() {
     const keysPanel = h('div', { class: 'card', id: 'tenant-key-status' },
       h('h3', null, icon('key', 18), ' API keys'),
       h('p', { class: 'muted small' }, 'Checking keys for your account…'));
-    root.append(
+    mount(root,
       pageHead(owner ? 'Owner database workspace' : developer ? 'Database key workspace' : 'Your database workspace',
         owner ? 'Manage tenant, application and system databases with audited owner access.' : developer ? 'Use native RedX files and BoxQL on databases permitted by the selected developer key.' : 'Build with native RedX files, BoxQL and private application keys.',
         canManageDatabases() ? h('a', { class: 'btn primary', href: '#/databases' }, icon('plus', 16), ' New database') : h('a', { class: 'btn primary', href: '#/data' }, 'Open Data Explorer')),

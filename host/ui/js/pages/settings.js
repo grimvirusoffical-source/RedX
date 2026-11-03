@@ -21,7 +21,7 @@ export default async function render() {
   if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistration().then((r) => { swState.textContent = r ? 'Offline shell installed (the console UI opens without a connection; data always comes from the host).' : 'Not installed (service workers need HTTPS or localhost).'; });
   else swState.textContent = 'Not supported by this browser.';
 
-  root.append(pageHead(websiteDeployment() ? 'DB preferences' : 'Settings', websiteDeployment() ? 'Database editor preferences, account access and native language documentation.' : 'Console preferences and the running configuration of this host.'),
+  mount(root, pageHead(websiteDeployment() ? 'DB preferences' : 'Settings', websiteDeployment() ? 'Database editor preferences, account access and native language documentation.' : 'Console preferences and the running configuration of this host.'),
     h('div', { class: 'grid g2' },
       h('div', { class: 'card' }, h('h3', null, 'This browser'),
         row('Theme', themeSel), row('Mode', modeSel, 'Simple hides the expert pages.'),
