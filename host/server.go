@@ -258,6 +258,8 @@ func (h *Host) visibleDBs(pr *Principal) []string {
 
 func (h *Host) dbRoute(w http.ResponseWriter, r *http.Request, db, sub string) {
 	switch {
+	case strings.HasPrefix(sub, "record-cas/"):
+		h.recordCASHandler(w, r, db, strings.TrimPrefix(sub, "record-cas/"))
 	case strings.HasPrefix(sub, "path/"):
 		h.pathHandler(w, r, db, strings.TrimPrefix(sub, "path/"))
 	case sub == "query" && r.Method == "POST":
