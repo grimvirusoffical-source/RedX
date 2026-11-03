@@ -14,7 +14,10 @@ func checkpoint(body string) []byte {
 	return []byte(body + fmt.Sprintf("<< REDX-CKPT v1 lsn=42 walgen=3 len=%d crc32c=%08x >>\n", len(body), crc32.Checksum([]byte(body), crc32.MakeTable(crc32.Castagnoli))))
 }
 
-func matching(t *testing.T, r map[string]any) []any { t.Helper(); return r["matching_records"].([]any) }
+func matching(t *testing.T, r map[string]any) []any {
+	t.Helper()
+	return r["matching_candidates"].([]any)
+}
 
 func TestInspectorFixtureAndJSONRecord(t *testing.T) {
 	// Baseline private-value fixture from account-inspector-src/main_test.go.
@@ -34,7 +37,7 @@ func TestInspectorFixtureAndJSONRecord(t *testing.T) {
 	if !bytes.Equal(data, before) {
 		t.Fatal("input was changed")
 	}
-	if r["wal_replayed"] != false || r["checkpoint_valid"] != true || r["matching_record_count"] != 2 || r["readable_record_count"] != 5 {
+	if r["wal_replayed"] != false || r["checkpoint_valid"] != true || r["matching_candidate_count"] != 2 || r["readable_candidate_count"] != 5 {
 		t.Fatal("wrong fixture counts", r)
 	}
 	if !reflect.DeepEqual(r["record_value_types"], map[string]int{"box": 2, "string": 4}) {
@@ -104,7 +107,7 @@ func TestRejectInvalidAndKeepErrorsFixed(t *testing.T) {
 func TestWalkNestedBoxesAndArrays(t *testing.T) {
 	body := `{Container = [ {Records[]} = ;[ [ {Record} = "{\"username\":\"fixture\"}" ] ]: ]};`
 	r, e := inspect(checkpoint(body), "fixture")
-	if e != nil || r["matching_record_count"] != 1 {
+	if e != nil || r["matching_candidate_count"] != 1 {
 		t.Fatal("nested record not found", e)
 	}
 }
@@ -123,7 +126,7 @@ func TestExactDirectEmailMatchingAndPrivacy(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if r["matching_record_count"] != 2 {
+	if r["matching_candidate_count"] != 2 {
 		t.Fatal("direct email match was not exact and case insensitive")
 	}
 	j, _ := json.Marshal(r)
@@ -133,7 +136,41 @@ func TestExactDirectEmailMatchingAndPrivacy(t *testing.T) {
 		}
 	}
 	r, e = inspect(checkpoint(body), "absent@example.invalid")
-	if e != nil || r["matching_record_count"] != 0 {
+	if e != nil || r["matching_candidate_count"] != 0 {
 		t.Fatal("wrong email matched")
+	}
+}
+
+func TestNativeKeyedCandidatesAndNoDuplicateMatch(t *testing.T) {
+	body := `{PRIVATE_NATIVE_KEY[ID=8123]} = "{\"username\":\"fixture\",\"email\":\"native@example.invalid\",\"activatedMs\":1700000000002,\"passwordHash\":\"PRIVATE_HASH\"}";
+{PRIVATE_BOX_KEY[ID=9234]= [ {username[]} = "FIXTURE", {email[]} = "box@example.invalid", {emailVerified[]} = True, {activatedMs[]} = 1700000000003 ]};
+{Record[ID=4567]} = "{\"username\":\"fixture\",\"email\":\"fixture\",\"emailOK\":false}";
+{PRIVATE_WRONG_KEY} = "{\"username\":\"someone-else\",\"wrongOnlyField\":\"WRONG_SECRET\"}";
+{PRIVATE_NESTED_KEY} = "{\"nested\":{\"username\":\"fixture\"},\"nestedOnlyField\":true}";
+{PRIVATE_EMPTY_KEY} = "{}";
+{PRIVATE_TRAILER_KEY} = "{\"username\":\"fixture\",\"trailerOnlyField\":true} {}";
+{fixture} = "fixture";
+{PRIVATE_NULL_KEY} = "null";
+{PRIVATE_ARRAY_KEY} = "[]";
+`
+	r, e := inspect(checkpoint(body), "Fixture")
+	if e != nil {
+		t.Fatal(e)
+	}
+	if r["matching_candidate_count"] != 3 || r["readable_candidate_count"] != 6 || r["walked_entry_count"] != 14 || r["wal_replayed"] != false {
+		t.Fatal("candidate counts incorrect or candidate matched twice", r)
+	}
+	if !reflect.DeepEqual(r["record_value_types"], map[string]int{"string": 1}) || !reflect.DeepEqual(r["candidate_value_types"], map[string]int{"string": 5, "box": 1}) {
+		t.Fatal("candidate/Record counts conflated")
+	}
+	j, _ := json.Marshal(r)
+	for _, private := range []string{"PRIVATE_", "8123", "9234", "4567", "@", "someone-else", "WRONG_SECRET", "wrongOnlyField", "nestedOnlyField", "trailerOnlyField", "1700000000002", "1700000000003"} {
+		if strings.Contains(string(j), private) {
+			t.Fatal("native entry key, ID or value leaked")
+		}
+	}
+	r, e = inspect(checkpoint(body), "NATIVE@EXAMPLE.INVALID")
+	if e != nil || r["matching_candidate_count"] != 1 {
+		t.Fatal("native JSON email did not match exactly")
 	}
 }

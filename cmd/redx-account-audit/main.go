@@ -50,8 +50,9 @@ func inspect(data []byte, target string) (map[string]any, error) {
 		return nil, invalid
 	}
 	types := map[string]int{}
+	candidateTypes := map[string]int{}
 	matches := []any{}
-	readable := 0
+	readable, entries := 0, 0
 	var walk func(box.Value)
 	walk = func(v box.Value) {
 		if v.Kind == box.KindArray {
@@ -63,76 +64,88 @@ func inspect(data []byte, target string) (map[string]any, error) {
 			return
 		}
 		for _, e := range v.Box.Entries() {
+			entries++
 			if e.Key == "Record" {
 				types[e.Value.Kind.String()]++
-				var raw []byte
-				if e.Value.Kind == box.KindString {
-					raw = []byte(e.Value.Str)
-				} else if e.Value.Kind == box.KindBox {
-					raw, _ = e.Value.MarshalJSON()
+			}
+			var raw []byte
+			if e.Value.Kind == box.KindString {
+				raw = []byte(e.Value.Str)
+			} else if e.Value.Kind == box.KindBox && directLoginBox(e.Value.Box) {
+				raw, _ = e.Value.MarshalJSON()
+			}
+			var fields map[string]json.RawMessage
+			if json.Unmarshal(raw, &fields) == nil && fields != nil {
+				readable++
+				candidateTypes[e.Value.Kind.String()]++
+				found := false
+				for k, v := range fields {
+					var s string
+					if (strings.EqualFold(k, "username") || strings.EqualFold(k, "email")) && json.Unmarshal(v, &s) == nil && strings.EqualFold(s, target) {
+						found = true
+					}
 				}
-				var fields map[string]json.RawMessage
-				if json.Unmarshal(raw, &fields) == nil && fields != nil {
-					readable++
-					found := false
+				if found {
+					names := []string{}
+					flags := map[string]bool{}
+					hidden := 0
 					for k, v := range fields {
-						var s string
-						if (strings.EqualFold(k, "username") || strings.EqualFold(k, "email")) && json.Unmarshal(v, &s) == nil && strings.EqualFold(s, target) {
-							found = true
+						if safe.MatchString(k) {
+							names = append(names, k)
+						} else {
+							hidden++
+						}
+						if k == "emailVerified" || k == "email_verified" || k == "emailOK" {
+							var b *bool
+							if json.Unmarshal(v, &b) == nil && b != nil {
+								flags[k] = *b
+							}
 						}
 					}
-					if found {
-						names := []string{}
-						flags := map[string]bool{}
-						hidden := 0
-						for k, v := range fields {
-							if safe.MatchString(k) {
-								names = append(names, k)
-							} else {
-								hidden++
-							}
-							if k == "emailVerified" || k == "email_verified" || k == "emailOK" {
-								var b *bool
-								if json.Unmarshal(v, &b) == nil && b != nil {
-									flags[k] = *b
-								}
-							}
+					sort.Strings(names)
+					v, present := fields["activatedMs"]
+					kind := "absent"
+					positive := false
+					if present {
+						var x any
+						d := json.NewDecoder(bytes.NewReader(v))
+						d.UseNumber()
+						d.Decode(&x)
+						switch t := x.(type) {
+						case nil:
+							kind = "null"
+						case bool:
+							kind = "bool"
+						case string:
+							kind = "string"
+						case []any:
+							kind = "array"
+						case map[string]any:
+							kind = "object"
+						case json.Number:
+							kind = "number"
+							num := strings.SplitN(strings.ToLower(string(t)), "e", 2)[0]
+							positive = !strings.HasPrefix(num, "-") && strings.ContainsAny(num, "123456789")
 						}
-						sort.Strings(names)
-						v, present := fields["activatedMs"]
-						kind := "absent"
-						positive := false
-						if present {
-							var x any
-							d := json.NewDecoder(bytes.NewReader(v))
-							d.UseNumber()
-							d.Decode(&x)
-							switch t := x.(type) {
-							case nil:
-								kind = "null"
-							case bool:
-								kind = "bool"
-							case string:
-								kind = "string"
-							case []any:
-								kind = "array"
-							case map[string]any:
-								kind = "object"
-							case json.Number:
-								kind = "number"
-								num := strings.SplitN(strings.ToLower(string(t)), "e", 2)[0]
-								positive = !strings.HasPrefix(num, "-") && strings.ContainsAny(num, "123456789")
-							}
-						}
-						matches = append(matches, map[string]any{"field_names": names, "suppressed_field_names": hidden, "verification_boolean_values": flags, "activatedMs": map[string]any{"present": present, "type": kind, "positive": positive}})
 					}
+					matches = append(matches, map[string]any{"field_names": names, "suppressed_field_names": hidden, "verification_boolean_values": flags, "activatedMs": map[string]any{"present": present, "type": kind, "positive": positive}})
 				}
 			}
 			walk(e.Value)
 		}
 	}
 	walk(box.BoxValue(root))
-	return map[string]any{"checkpoint_valid": true, "wal_replayed": false, "record_value_types": types, "readable_record_count": readable, "matching_record_count": len(matches), "matching_records": matches}, nil
+	return map[string]any{"checkpoint_valid": true, "wal_replayed": false, "walked_entry_count": entries, "record_value_types": types, "candidate_value_types": candidateTypes, "readable_candidate_count": readable, "matching_candidate_count": len(matches), "matching_candidates": matches}, nil
+}
+
+func directLoginBox(b *box.Box) bool {
+	for _, e := range b.Entries() {
+		_, hasID := e.ID()
+		if !hasID && e.Value.Kind == box.KindString && (strings.EqualFold(e.Key, "username") || strings.EqualFold(e.Key, "email")) {
+			return true
+		}
+	}
+	return false
 }
 
 func main() {

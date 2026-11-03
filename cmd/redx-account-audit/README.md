@@ -15,10 +15,16 @@ grammar before inspecting records. Errors omit paths and private parser input.
 
 The supplied target must exactly match a direct string `username` or `email`
 field, ignoring case. There are no substring, alias, or provider-specific email
-rules. Box-valued and JSON-object-string `Record` entries are supported. Nested
-Box containers and arrays are visited; links are not followed.
+rules. Every string entry that wholly decodes as a non-null JSON object is a
+candidate, regardless of its entry key. A Box-valued entry is a candidate when
+its own object has a direct string username or email field. Each entry is
+processed once. Nested Box containers and arrays are visited; links are not
+followed. Outer entry keys and IDs are never printed.
 
-Output contains Record-type/readable/matching counts, sorted safe field names,
+Output contains explicit `walked_entry_count`, `candidate_value_types`,
+`readable_candidate_count`, `matching_candidate_count`, and `matching_candidates`.
+`record_value_types` counts only entries literally named `Record`; an empty map
+does not mean there are no accounts. Candidate output contains sorted safe field names,
 and only boolean values of `emailVerified`, `email_verified`, and `emailOK`.
 `activatedMs` is reduced to presence, type, and whether its numeric value is
 positive. Usernames, addresses, IDs, timestamps, credentials, and other field
