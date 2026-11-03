@@ -141,44 +141,44 @@ func (s *store) ReadCASRecord(p host.SecPrincipal, path string) (host.CASRecord,
 	return host.CASRecord{}, fmt.Errorf("%w: ledger changed during durability verification", host.ErrUnavailable)
 }
 
-func (s *store) CompareAndSwapRecord(p host.SecPrincipal, path string, expectedRevision uint64, next host.CASRecord) error {
+func (s *store) CompareAndSwapRecord(p host.SecPrincipal, path string, expectedRevision uint64, next host.CASRecord) (uint64, error) {
 	if err := s.casAvailable(path); err != nil {
-		return err
+		return 0, err
 	}
 	if expectedRevision >= host.MaxRecordRevision || next.Revision != expectedRevision+1 {
-		return fmt.Errorf("%w: next revision must increase by exactly one", host.ErrInvalid)
+		return 0, fmt.Errorf("%w: next revision must increase by exactly one", host.ErrInvalid)
 	}
 	v, err := recordValue(next)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if err := s.casReadAllowed(p, path, v); err != nil {
-		return err
+		return 0, err
 	}
 	if err := s.SecWrite(p, path, v.String(), false); err != nil {
-		return err
+		return 0, err
 	}
 	tx := s.db.Begin()
 	defer tx.Rollback()
 	current, err := tx.Get(path)
 	if err == nil {
 		if err := s.casReadAllowed(p, path, current); err != nil {
-			return err
+			return 0, err
 		}
 		r, err := decodeRecord(current)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		if expectedRevision == 0 || r.Revision != expectedRevision || r.Key != next.Key {
-			return host.ErrConflict
+			return 0, host.ErrConflict
 		}
 	} else if !errors.Is(err, engine.ErrNotFound) {
-		return mapErr(err)
+		return 0, mapErr(err)
 	} else if expectedRevision != 0 {
-		return host.ErrConflict
+		return 0, host.ErrConflict
 	}
 	if err := tx.Set(path, v, engine.SetOpts{}); err != nil {
-		return mapErr(err)
+		return 0, mapErr(err)
 	}
 	// The unchanged native engine validates the observed record version under
 	// its own table lock, including against ordinary REST/BoxQL writers, and
@@ -186,11 +186,23 @@ func (s *store) CompareAndSwapRecord(p host.SecPrincipal, path string, expectedR
 	if err := tx.Commit(); err != nil {
 		switch {
 		case errors.Is(err, engine.ErrConflict):
-			return host.ErrConflict
+			return 0, host.ErrConflict
 		default:
-			return mapErr(err)
+			return 0, mapErr(err)
 		}
 	}
 	s.observePath(path)
-	return nil
+	// The host commit hook may fail independently of the native WAL. Capture
+	// the exact file's existing native LSN instead of an unrelated host offset.
+	// A concurrent ordinary writer may be included; checkpoint after capture
+	// makes this a durable watermark covering at least our committed write.
+	parsed, _ := box.ParsePath(path)
+	_, localSeq, err := s.db.ExportSnapshot(parsed.File)
+	if err != nil || localSeq == 0 || localSeq > host.MaxRecordRevision {
+		return 0, fmt.Errorf("%w: record committed but native watermark capture failed", host.ErrUnavailable)
+	}
+	if err := s.db.Checkpoint(); err != nil {
+		return 0, fmt.Errorf("%w: record committed but native watermark durability barrier failed", host.ErrUnavailable)
+	}
+	return localSeq, nil
 }

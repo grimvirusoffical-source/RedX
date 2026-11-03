@@ -9,11 +9,14 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+	"unsafe"
 
 	"redx/box"
 	"redx/host"
@@ -109,15 +112,18 @@ func startRecordNodeDecorated(t *testing.T, dir, durability string, decorate fun
 type blockedRecordCommit struct {
 	host.RecordCASBackend
 	block            atomic.Bool
+	receipt          atomic.Uint64
 	entered, release chan struct{}
 }
 
-func (b *blockedRecordCommit) CompareAndSwapRecord(p host.SecPrincipal, path string, expected uint64, next host.CASRecord) error {
+func (b *blockedRecordCommit) CompareAndSwapRecord(p host.SecPrincipal, path string, expected uint64, next host.CASRecord) (uint64, error) {
+	seq, err := b.RecordCASBackend.CompareAndSwapRecord(p, path, expected, next)
+	b.receipt.Store(seq)
 	if b.block.CompareAndSwap(true, false) {
 		close(b.entered)
 		<-b.release
 	}
-	return b.RecordCASBackend.CompareAndSwapRecord(p, path, expected, next)
+	return seq, err
 }
 
 func TestRecordCASHTTPRepointWaitsForActualOperation(t *testing.T) {
@@ -152,6 +158,9 @@ func TestRecordCASHTTPRepointWaitsForActualOperation(t *testing.T) {
 	}()
 	select {
 	case <-blocked.entered:
+		if blocked.receipt.Load() == 0 {
+			t.Fatal("operation did not capture a native receipt before role transition")
+		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("commit was not entered")
 	}
@@ -210,6 +219,54 @@ func TestRecordCASHTTPRefusesConfiguredReplication(t *testing.T) {
 	}
 }
 
+func TestRecordCASHTTPLocalReceiptIgnoresFailedHostOpLog(t *testing.T) {
+	n := startRecordNode(t, t.TempDir(), "group")
+	// Fault only the fixture-owned host log. The native WAL remains open and
+	// usable. The unchanged legacy commit hook swallows this append failure.
+	field := reflect.ValueOf(n.H.Cluster).Elem().FieldByName("log")
+	log := reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem().Interface().(*host.OpLog)
+	for i := 0; i < 8; i++ {
+		if _, err := log.Append(host.LogEntry{Op: "fixture-unrelated"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	staleOffset := n.H.Cluster.Offset()
+	if err := log.Close(); err != nil {
+		t.Fatal(err)
+	}
+	u := recordURL(n, "default", recordTestPath)
+	status, body, headers := do(t, "POST", u, n.Key, recordBody(0, "bridge-platform-v1", "native-despite-host-log-failure"))
+	ack := jsonOf(t, body)
+	// Bootstrap is native LSN 1, and this replacement is native LSN 2.
+	if status != 200 || ack["local_seq"] != float64(2) || ack["seq"] != ack["local_seq"] || ack["sequence_scope"] != "native-file" || headers.Get("X-Redx-Local-Seq") != "2" {
+		t.Fatalf("native receipt: %d %s", status, body)
+	}
+	if n.H.Cluster.Offset() != staleOffset || staleOffset == 2 {
+		t.Fatal("fixture did not distinguish a stale positive host offset from native LSN")
+	}
+	if headers.Get("X-Redx-Seq") != "" || headers.Get("X-Redx-Replicas-Acked") != "" {
+		t.Fatal("local write claimed replication acknowledgement")
+	}
+	status, _, headers = do(t, "GET", u, n.Key, "")
+	if status != 200 || headers.Get("X-Redx-Applied") != "" || headers.Get("X-Redx-Seq") != "" {
+		t.Fatal("local read claimed host replication watermark")
+	}
+}
+
+func TestRecordCASHTTPRejectsReplicaExpectationBeforeMutation(t *testing.T) {
+	n := startRecordNode(t, t.TempDir(), "sync")
+	u := recordURL(n, "default", recordTestPath)
+	for _, header := range []string{"X-Redx-Wait-Replicas", "X-Redx-Wait-Seq"} {
+		status, _, _ := do(t, "POST", u, n.Key, recordBody(0, "bridge-platform-v1", "must-not-commit"), header, "1")
+		if status != 400 {
+			t.Fatalf("%s accepted: %d", header, status)
+		}
+		if status, body, _ := do(t, "GET", u, n.Key, ""); status != 404 || codeOf(t, body) != "record_not_found" {
+			t.Fatal("replica expectation rejection changed the ledger")
+		}
+	}
+}
+
 func provisionRecordFile(t *testing.T, n *node, db string) {
 	t.Helper()
 	path := "rxa-bridge-platform.red-xai.db:Record[ID=0]"
@@ -248,8 +305,9 @@ func TestRecordCASHTTPLifecycleAndNativeEnvelope(t *testing.T) {
 	}
 	payload := "{\"key\":\"bridge-platform-v1\",\"schema\":1,\"revision\":1,\"message\":\"quoted \\\" text 雪\\n\"}"
 	status, body, headers := do(t, "POST", u, n.Key, recordBody(0, "bridge-platform-v1", payload), "Content-Type", "application/json")
-	seq, _ := jsonOf(t, body)["seq"].(float64)
-	if status != 200 || jsonOf(t, body)["revision"] != float64(1) || jsonOf(t, body)["ok"] != true || seq <= 0 || seq > float64(host.MaxRecordRevision) || headers.Get("X-Redx-Record-CAS") != "1" {
+	ack := jsonOf(t, body)
+	seq, _ := ack["seq"].(float64)
+	if status != 200 || ack["revision"] != float64(1) || ack["ok"] != true || seq <= 0 || seq > float64(host.MaxRecordRevision) || ack["local_seq"] != seq || ack["sequence_scope"] != "native-file" || headers.Get("X-Redx-Local-Seq") != strconv.FormatUint(uint64(seq), 10) || headers.Get("X-Redx-Record-CAS") != "1" {
 		t.Fatalf("create: %d %s", status, body)
 	}
 	r := readRecord(t, n, n.Key)

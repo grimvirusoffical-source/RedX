@@ -3,6 +3,7 @@ package engineadapter
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"reflect"
 	"sync"
 	"testing"
@@ -142,7 +143,8 @@ func TestRecordCASTransactionNativeConcurrencyAndIsolation(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			out <- s.CompareAndSwapRecord(host.SecPrincipal{}, txnRecordPath, 0, host.CASRecord{Key: "bridge-platform-v1", Revision: 1, Payload: "winner"})
+			_, err := s.CompareAndSwapRecord(host.SecPrincipal{}, txnRecordPath, 0, host.CASRecord{Key: "bridge-platform-v1", Revision: 1, Payload: "winner"})
+			out <- err
 		}()
 	}
 	wg.Wait()
@@ -165,6 +167,59 @@ func TestRecordCASTransactionNativeConcurrencyAndIsolation(t *testing.T) {
 	}
 	if _, err := s.ReadCASRecord(host.SecPrincipal{}, txnRecordPath); !errors.Is(err, host.ErrUnavailable) {
 		t.Fatalf("mixed database accepted: %v", err)
+	}
+}
+
+func TestRecordCASTransactionNativeReceiptAndUnknownCommit(t *testing.T) {
+	for _, failBarrier := range []bool{false, true} {
+		name := "durable-receipt"
+		if failBarrier {
+			name = "committed-checkpoint-failure"
+		}
+		t.Run(name, func(t *testing.T) {
+			s := transactionFixture(t, "group")
+			tables := reflect.ValueOf(s.db).Elem().FieldByName("tables")
+			file := tables.MapIndex(reflect.ValueOf(txnRecordFile)).Elem().FieldByName("path").String()
+			if failBarrier {
+				// Block only the snapshot destination: WAL commit and native LSN
+				// capture still succeed, but the later receipt barrier must fail.
+				if err := os.Mkdir(file+".tmp", 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			seq, err := s.CompareAndSwapRecord(host.SecPrincipal{}, txnRecordPath, 0, host.CASRecord{Key: "bridge-platform-v1", Revision: 1, Payload: "committed"})
+			if failBarrier {
+				if seq != 0 || !errors.Is(err, host.ErrUnavailable) || errors.Is(err, host.ErrConflict) {
+					t.Fatalf("unknown commit must not invite mutation replay: seq=%d err=%v", seq, err)
+				}
+				if err := os.Remove(file + ".tmp"); err != nil {
+					t.Fatal(err)
+				}
+			} else if err != nil || seq != 2 {
+				t.Fatalf("native file watermark: seq=%d err=%v", seq, err)
+			}
+			_, captured, err := s.db.ExportSnapshot(txnRecordFile)
+			if err != nil || captured != 2 {
+				t.Fatalf("committed native LSN: %d %v", captured, err)
+			}
+			if _, err := s.CompareAndSwapRecord(host.SecPrincipal{}, txnRecordPath, 0, host.CASRecord{Key: "bridge-platform-v1", Revision: 1, Payload: "replay"}); !errors.Is(err, host.ErrConflict) {
+				t.Fatalf("original mutation did not commit: %v", err)
+			}
+			if err := s.Close(); err != nil {
+				t.Fatal(err)
+			}
+			b, err := Opener(Config{Durability: "group"})(filepath.Dir(file), false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer b.Close()
+			reopened := b.(*store)
+			r, err := reopened.ReadCASRecord(host.SecPrincipal{}, txnRecordPath)
+			_, restored, snapErr := reopened.db.ExportSnapshot(txnRecordFile)
+			if err != nil || snapErr != nil || r.Revision != 1 || r.Payload != "committed" || restored < captured {
+				t.Fatalf("native receipt lost across restart: record=%+v lsn=%d errors=%v/%v", r, restored, err, snapErr)
+			}
+		})
 	}
 }
 

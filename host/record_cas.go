@@ -4,14 +4,12 @@ package host
 // and stub backends cannot silently substitute a racy Get+Set implementation.
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
-	"time"
 )
 
 const MaxRecordRevision uint64 = 9007199254740991 // exact in JS and Box numbers
@@ -25,11 +23,12 @@ type CASRecord struct {
 }
 
 // RecordCASBackend must use native atomic durable commits and apply complete
-// read/write policy checks. Replication must use the native engine commit hook.
+// read/write policy checks. Writes return a durable watermark of the exact
+// native file, not a host replication offset or a claim of replica durability.
 type RecordCASBackend interface {
 	ReplBackend
 	ReadCASRecord(SecPrincipal, string) (CASRecord, error)
-	CompareAndSwapRecord(SecPrincipal, string, uint64, CASRecord) error
+	CompareAndSwapRecord(SecPrincipal, string, uint64, CASRecord) (uint64, error)
 }
 
 func (h *Host) withRecordCAS(db string, operation func(RecordCASBackend) error) error {
@@ -80,7 +79,16 @@ func (h *Host) recordCASHandler(w http.ResponseWriter, r *http.Request, db, path
 		need = ScopeWrite
 	}
 	pr, ok := h.authz(w, r, need, db, path, false)
-	if !ok || h.maybeForward(w, r) {
+	if !ok {
+		return
+	}
+	// This capability has only local native-file durability. Refuse replica
+	// expectations before reading a body or committing any application change.
+	if r.Header.Get("X-Redx-Wait-Replicas") != "" || r.Header.Get("X-Redx-Wait-Seq") != "" {
+		writeErr(w, 400, "record CAS supports local native-file durability only")
+		return
+	}
+	if h.maybeForward(w, r) {
 		return
 	}
 	sp := secPrincipal(&pr.Key)
@@ -101,7 +109,6 @@ func (h *Host) recordCASHandler(w http.ResponseWriter, r *http.Request, db, path
 			}
 			return
 		}
-		w.Header().Set("X-Redx-Applied", strconv.FormatUint(h.Cluster.Offset(), 10))
 		writeJSON(w, 200, map[string]interface{}{"record": record})
 		return
 	}
@@ -123,9 +130,20 @@ func (h *Host) recordCASHandler(w http.ResponseWriter, r *http.Request, db, path
 	if !h.checkStorageQuota(w, pr, int64(len(req.Record.Payload))) {
 		return
 	}
+	var localSeq uint64
 	if err := h.withRecordCAS(db, func(backend RecordCASBackend) error {
 		w.Header().Set("X-Redx-Record-CAS", "1")
-		return backend.CompareAndSwapRecord(sp, path, *req.Expected, *req.Record)
+		var err error
+		localSeq, err = backend.CompareAndSwapRecord(sp, path, *req.Expected, *req.Record)
+		if err != nil {
+			return err
+		}
+		if localSeq == 0 || localSeq > MaxRecordRevision {
+			// A commit may already exist. Never label receipt uncertainty as a
+			// conflict: callers must reconcile instead of replaying a mutation.
+			return fmt.Errorf("%w: record committed but local durability acknowledgement unavailable", ErrUnavailable)
+		}
+		return nil
 	}); err != nil {
 		h.auditPolicy(r, pr, db, err)
 		if errors.Is(err, ErrConflict) {
@@ -136,19 +154,8 @@ func (h *Host) recordCASHandler(w http.ResponseWriter, r *http.Request, db, path
 		return
 	}
 	h.noteStorage(pr, int64(len(req.Record.Payload)))
-	seq := h.Cluster.Offset()
-	if seq == 0 || seq > MaxRecordRevision {
-		// The record may already be committed. Do not fabricate a sequence or
-		// a successful acknowledgement; a client must reconcile from state.
-		writeErr(w, 503, "record committed but replication acknowledgement unavailable")
-		return
-	}
-	w.Header().Set("X-Redx-Seq", strconv.FormatUint(seq, 10))
-	if count, err := strconv.Atoi(r.Header.Get("X-Redx-Wait-Replicas")); err == nil && count > 0 {
-		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-		acked := h.Cluster.WaitReplicas(ctx, seq, count)
-		cancel()
-		w.Header().Set("X-Redx-Replicas-Acked", strconv.Itoa(acked))
-	}
-	writeJSON(w, 200, map[string]interface{}{"ok": true, "revision": req.Record.Revision, "seq": seq})
+	// The receipt was captured and validated while role/fence transitions were
+	// excluded. A later transition does not alter that completed local commit.
+	w.Header().Set("X-Redx-Local-Seq", strconv.FormatUint(localSeq, 10))
+	writeJSON(w, 200, map[string]interface{}{"ok": true, "revision": req.Record.Revision, "local_seq": localSeq, "sequence_scope": "native-file", "seq": localSeq})
 }
