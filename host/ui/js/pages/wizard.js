@@ -1,5 +1,6 @@
+import { accountTab } from '../account-storage.js';
 import { h, icon, chip, mount, toast, field, copy, spinner, emptyState } from '../util.js';
-import { api, enc, pathURL } from '../api.js';
+import { api, enc, pathURL, websiteDeployment } from '../api.js';
 import { state, loadDbs, setDb, gs, wizard, ID_RE, isHostAdmin, isAccountTenant, canManageDatabases, dbDisplayName, setMode } from '../state.js';
 import { page } from './shared.js';
 import { loadPresets, applyPreset } from './presets.js';
@@ -51,13 +52,13 @@ export default async function render() {
         h('div', { class: 'grid g2 tcards' }, TEMPLATES.map((t) => h('button', { class: 'card pcard' + (t.id === S.tpl ? ' on' : ''), onclick: () => { S.tpl = t.id; paint(); } }, h('h3', null, icon(t.ico, 18), ' ', t.title), h('p', { class: 'muted' }, t.blurb), S.adv && t.file ? h('div', { class: 'small' }, h('code', null, t.file), ' · box ', h('code', null, t.box)) : h('div', { class: 'small muted' }, t.what)))),
         tpl().seeds.length ? h('label', { class: 'check', style: { marginTop: '12px' } }, h('input', { type: 'checkbox', checked: S.seed, onchange: (e) => { S.seed = e.target.checked; } }), ' Add ' + tpl().seeds.length + ' example record' + (tpl().seeds.length === 1 ? '' : 's')) : null);
     } else if (S.step === 2) {
-      if (isAccountTenant()) {
+      if (isAccountTenant() || websiteDeployment()) {
         S.profile = '';
         mount(body, h('h2', null, 'Hosted on Red-XAI'),
           h('p', { class: 'muted' }, 'Your workspace runs in private account-isolated hosting. The service manages infrastructure and enforces your plan and quotas.'),
           h('div', { class: 'card' }, h('h3', null, icon('shield', 18), ' Private by design'),
             h('p', null, 'Other accounts cannot read your database. Share access with scoped API keys under API Keys.'),
-            h('a', { href: 'https://red-xai.com/hosting', class: 'btn small' }, 'Manage hosting plan')));
+            h('a', { href: '/products/subscriptions', target: '_top', class: 'btn small' }, 'Database subscriptions')));
         mount(nav, h('button', { class: 'btn', onclick: () => { S.step--; paint(); } }, 'Back'),
           h('div', { class: 'grow' }), h('button', { class: 'btn primary', onclick: next }, 'Next'));
         return;
@@ -124,7 +125,7 @@ export default async function render() {
         gs.set('record');
         log.push(['ok', 'Added ' + t.seeds.length + ' example record' + (t.seeds.length === 1 ? '' : 's')]);
       }
-      if (!isAccountTenant() && S.profile && S.profile !== 'edge') {
+      if (!websiteDeployment() && !isAccountTenant() && S.profile && S.profile !== 'edge') {
         try { const r = await applyPreset(S.profile, {}, '', false); log.push(['ok', 'Saved profile "' + S.profile + '" (' + r.changes.filter((c) => c.changed).length + ' settings changed). Restart redxd to use it.']); if (r.skipped && r.skipped.length) log.push(['info', r.skipped.map((s) => s.key + ': ' + s.reason).join(' ')]); } catch (e) { log.push(['err', 'Profile not applied: ' + e.message]); }
       }
       wizard.finish();
@@ -136,7 +137,7 @@ export default async function render() {
         h('h3', null, 'Next'),
         h('div', { class: 'grid g2' },
           h('a', { class: 'card linkcard', href: '#/data' + (t2.file ? '?db=' + enc(dbName) + '&file=' + enc(t2.file) : '') }, h('b', null, icon('table', 16), ' Look at your data'), h('p', { class: 'muted small' }, 'Browse and edit records.')),
-          h('a', { class: 'card linkcard', href: '#/studio', onclick: () => { if (t2.query) sessionStorage.setItem('redx.studio.q', t2.query); } }, h('b', null, icon('terminal', 16), ' Run a query'), h('p', { class: 'muted small' }, 'Try BoxQL on your data.')),
+          h('a', { class: 'card linkcard', href: '#/studio', onclick: () => { if (t2.query) accountTab.setItem('redx.studio.q', t2.query); } }, h('b', null, icon('terminal', 16), ' Run a query'), h('p', { class: 'muted small' }, 'Try BoxQL on your data.')),
           h('a', { class: 'card linkcard', href: '#/keys' }, h('b', null, icon('key', 16), ' Make a key for your app'), h('p', { class: 'muted small' }, 'Give your app its own limited key.')),
           h('a', { class: 'card linkcard', href: '#/' }, h('b', null, icon('home', 16), ' Go to the dashboard'), h('p', { class: 'muted small' }, 'Status and the Get-started list.'))));
       mount(nav);

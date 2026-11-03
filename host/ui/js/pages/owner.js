@@ -1,7 +1,7 @@
 // Owner page: every Red-XAI Account (from the master accounts DB), every hosted database and the owner audit
 // trail. Only owner logins (owner email + verified + signed in with 2FA) can open it; every read is audit-logged.
 import { h, icon, chip, table, errorBox, spinner, mount, debounce, fmtTime, dialog, confirmTyped, toast, field } from '../util.js';
-import { api } from '../api.js';
+import { api, websiteDeployment } from '../api.js';
 import { state, setDb } from '../state.js';
 import { pageHead, page } from './shared.js';
 
@@ -15,14 +15,15 @@ export default async function render({ navigate }) {
   }
   let ov;
   try { ov = await api('GET', '/v1/owner/overview'); } catch (e) { root.append(pageHead('Owner', ''), errorBox(e.message)); return root; }
-  root.append(pageHead('Owner', 'Everything on this host, for moderation. Every view here is written to the audit log with your name.'),
-    h('div', { class: 'grid g4', id: 'owner-stats' },
-      stat('Red-XAI Accounts', ov.accounts < 0 ? '–' : String(ov.accounts), 'in the master accounts DB'),
+  const website = websiteDeployment();
+  root.append(pageHead(website ? 'Database administration' : 'Owner', website ? 'Owner overview of tenant and system databases. Every privileged view is audited.' : 'Everything on this host, for moderation. Every view here is written to the audit log with your name.'),
+    h('div', { class: 'grid ' + (website ? 'g3' : 'g4'), id: 'owner-stats' },
+      !website ? stat('Red-XAI Accounts', ov.accounts < 0 ? '–' : String(ov.accounts), 'in the master accounts DB') : null,
       stat('Hosted databases', String(ov.databases), 'on this host'),
       stat('Master DB', ov.master_db, ov.master_exists ? 'protected: owners only' : 'not created yet'),
       stat('Signed in as', state.who.account.username || state.who.account.email, 'owner · 2FA')));
 
-  const tabs = [['accounts', 'Accounts'], ['dbs', 'Databases'], ['audit', 'Owner audit trail']];
+  const tabs = website ? [['dbs', 'Databases'], ['audit', 'Access audit']] : [['accounts', 'Accounts'], ['dbs', 'Databases'], ['audit', 'Owner audit trail']];
   const body = h('div', { id: 'owner-body' });
   const bar = h('div', { class: 'tabs', role: 'tablist' }, tabs.map(([id, label]) => h('button', { class: 'tab', role: 'tab', id: 'owner-tab-' + id, 'data-tab': id, onclick: () => show(id) }, label)));
   root.append(bar, body);
@@ -94,7 +95,7 @@ export default async function render({ navigate }) {
       show('accounts');
     } catch (e) { toast((e.body && e.body.message) || e.message, 'err'); }
   }
-  show('accounts');
+  show(website ? 'dbs' : 'accounts');
   return root;
 }
 

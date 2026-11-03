@@ -22,7 +22,7 @@ test('all old customer tools and both website destinations remain visible in the
  }
  assert.match(main,/title: 'All Red-XAI apps'/);
  assert.match(main,/title: 'Red-XAI Host'/);
- assert.match(main,/https:\/\/red-xai\.com\/hosting/);
+ assert.match(main,/https:\/\/red-xai\.com\/host'/);
  assert.match(main,/https:\/\/red-xai\.com\/store/);
  assert.match(main,/const groups = \[/);
  assert.match(main,/function refreshNav\(/);

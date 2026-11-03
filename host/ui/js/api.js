@@ -1,15 +1,37 @@
-// Talks to the redxd HTTP API with a bearer key kept in the browser: sessionStorage by default,
-// localStorage only when the user ticks "remember this device". Keys are never logged or sent anywhere else.
+// Website mode uses the existing same-origin account cookie. Standalone and
+// explicit developer mode retain the existing browser-held bearer credentials.
 
 const K = 'redx.key';
+let websiteConfigured = false;
+let developerSelected = false;
+let requestEpoch = 0;
+let websiteLogin = '/signin';
+let websiteAccount = '/settings';
+export const websiteAuthentication = () => websiteConfigured && !developerSelected;
+// Presentation stays a website workspace even after an explicit developer-key
+// selection. A credential change must not turn the DB page into a Host panel.
+export const websiteDeployment = () => websiteConfigured;
+// The return destination is fixed, never copied from a query or fragment.
+export const websiteLoginURL = () => websiteLogin + '?next=' + encodeURIComponent('/db');
+export const websiteAccountURL = () => websiteAccount;
+export function invalidateRequests() { requestEpoch++; }
+export function configureAuthentication(config) {
+  websiteConfigured = config?.enabled === true && config.mode === 'website';
+  developerSelected = false;
+  // These are operator-supplied same-site pages, never an arbitrary redirect.
+  websiteLogin = config?.website_login === '/signin' ? config.website_login : '/signin';
+  websiteAccount = config?.website_account === '/settings' ? config.website_account : '/settings';
+  if (websiteConfigured) session.clear();
+}
 export const session = {
-  get key() { return sessionStorage.getItem(K) || localStorage.getItem(K) || ''; },
-  get remembered() { return !!localStorage.getItem(K); },
+  get key() { return websiteAuthentication() ? '' : sessionStorage.getItem(K) || localStorage.getItem(K) || ''; },
+  get remembered() { return !websiteAuthentication() && !!localStorage.getItem(K); },
   set(key, remember) {
     this.clear();
+    developerSelected = true; // selected only after the explicit advanced flow succeeds
     (remember ? localStorage : sessionStorage).setItem(K, key);
   },
-  clear() { sessionStorage.removeItem(K); localStorage.removeItem(K); },
+  clear() { sessionStorage.removeItem(K); localStorage.removeItem(K); developerSelected = false; invalidateRequests(); },
 };
 
 export class ApiError extends Error {
@@ -26,6 +48,7 @@ export function setUnauthorizedHandler(fn) { onUnauthorized = fn; }
  * api('GET', path, {raw: true})                  -> Response (for blobs / headers)
  */
 export async function api(method, path, opts = {}) {
+  const epoch = requestEpoch;
   const headers = { ...(opts.headers || {}) };
   const key = opts.key !== undefined ? opts.key : session.key;
   if (key) headers.Authorization = 'Bearer ' + key;
@@ -37,14 +60,16 @@ export async function api(method, path, opts = {}) {
   const t0 = performance.now();
   let res;
   try {
-    res = await fetch(path, { method, headers, body, cache: 'no-store', signal: opts.signal });
+    res = await fetch(path, { method, headers, body, credentials: 'same-origin', cache: 'no-store', signal: opts.signal });
   } catch (e) {
     if (e.name === 'AbortError') throw e;
     throw new ApiError(0, 'Cannot reach the RedX host. Is redxd still running?');
   }
   if (opts.timing) opts.timing.ms = performance.now() - t0;
+  if (epoch !== requestEpoch) throw new ApiError(0, 'The account changed while this request was running.');
   if (opts.raw) return res;
   const txt = await res.text();
+  if (epoch !== requestEpoch) throw new ApiError(0, 'The account changed while this request was running.');
   let data = null;
   if (txt) { try { data = JSON.parse(txt); } catch { data = txt; } }
   if (!res.ok) {
@@ -60,7 +85,8 @@ export function wsURL(path, params = {}) {
   u.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
   // browsers cannot set headers on a WebSocket: the API accepts the key as access_token for upgrades only
-  u.searchParams.set('access_token', session.key);
+  if (!websiteAuthentication() && session.key) u.searchParams.set('access_token', session.key);
+  else u.searchParams.delete('access_token');
   return u.toString();
 }
 

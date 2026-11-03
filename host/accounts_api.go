@@ -46,6 +46,10 @@ func (h *Host) authRoute(w http.ResponseWriter, r *http.Request) {
 		h.authConfig(w)
 		return
 	}
+	if h.website != nil && h.Cfg.AccountsIssuer == "" {
+		acctErr(w, 404, "website_account", "Manage your existing Red-XAI website account at /settings.")
+		return
+	}
 	if !h.AccountsEnabled() {
 		acctErr(w, 404, "not_enabled", "Red-XAI Accounts sign-in is not set up on this host. Sign in with an API key.")
 		return
@@ -93,6 +97,11 @@ func (h *Host) authRoute(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Host) authConfig(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store")
+	if h.website != nil {
+		writeJSON(w, 200, map[string]interface{}{"enabled": true, "mode": "website", "website_login": "/signin", "website_account": "/settings"})
+		return
+	}
 	if !h.AccountsEnabled() {
 		writeJSON(w, 200, map[string]interface{}{"enabled": false})
 		return

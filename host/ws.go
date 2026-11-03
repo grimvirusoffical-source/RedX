@@ -33,7 +33,9 @@ func (h *Host) subscribeHandler(w http.ResponseWriter, r *http.Request, db strin
 		writeErr(w, 400, err.Error())
 		return
 	}
-	if !pr.Key.Allows(ScopeRead, db, path) {
+	// authzScope has already checked an account's tenant ownership and plan.
+	// Account sessions intentionally have no reusable API-key scope.
+	if !pr.isTenant() && !pr.Key.Allows(ScopeRead, db, path) {
 		h.Audit.Log(AuditEvent{Event: "auth.denied", KeyID: pr.Key.ID, DB: db, Remote: remoteIP(r), Method: r.Method, Route: routeOf(r), Reason: "scope/db/prefix"})
 		writeErr(w, http.StatusForbidden, "forbidden")
 		return

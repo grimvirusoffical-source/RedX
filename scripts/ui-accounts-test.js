@@ -152,6 +152,10 @@ const OWNER = 'owner@example.com'; // placeholder; real owner addresses live in 
     expect(/grim_player1/.test(await p.textContent('.who')), 'signed in: the account name is shown');
     expect(await p.$('.nav-item[data-id="owner"]') === null, 'a regular account has no Owner page');
     expect(await p.isVisible('#account-card'), 'regular dashboard explains the account has no databases yet');
+    expect(await p.evaluate(() => [...document.querySelectorAll('main, main .page')].every((root) =>
+      [...root.childNodes].filter((node) => node.nodeType === Node.TEXT_NODE)
+        .every((node) => !/^(?:(?:null|undefined|false)\s*)+$/.test(node.textContent.trim())))),
+      'regular dashboard omits absent conditional content instead of rendering placeholder text');
     const regStatus = await p.evaluate(async () => (await fetch('/v1/owner/accounts', { headers: { Authorization: 'Bearer ' + sessionStorage.getItem('redx.key') } })).status);
     expect(regStatus === 403, 'owner API refuses a regular account (403)');
     await p.click('.who');
@@ -164,6 +168,10 @@ const OWNER = 'owner@example.com'; // placeholder; real owner addresses live in 
     await p.click('#acct-signin');
     await p.waitForSelector('.shell', { timeout: 15000 });
     expect(await p.$('.nav-item[data-id="owner"]') === null && await p.isVisible('#owner-blocked'), 'owner email without 2FA gets no owner rights and is told why');
+    expect(await p.evaluate(() => [...document.querySelectorAll('main, main .page')].every((root) =>
+      [...root.childNodes].filter((node) => node.nodeType === Node.TEXT_NODE)
+        .every((node) => !/^(?:(?:null|undefined|false)\s*)+$/.test(node.textContent.trim())))),
+      'restricted-owner dashboard has no literal conditional placeholder text');
     await p.click('.who');
     await p.waitForSelector('#acct-signin', { timeout: 10000 });
 

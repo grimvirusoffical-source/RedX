@@ -43,7 +43,7 @@ export default async function render() {
     } catch (e) {
       mount(list, e.status === 403 && isAccountTenant()
         ? emptyState('key', 'A database plan is needed', 'Sign in with a hosted plan to create and manage keys for your own databases.',
-            h('a', { class: 'btn primary', href: 'https://red-xai.com/hosting' }, 'View hosting plans'))
+            h('a', { class: 'btn primary', href: '/products/subscriptions', target: '_top' }, 'Database subscriptions'))
         : errorBox(e.message, load));
     }
   }

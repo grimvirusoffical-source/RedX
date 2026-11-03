@@ -1,3 +1,4 @@
+import { accountLocal, accountTab } from '../account-storage.js';
 import { h, icon, terminalPanel, chip, mount, toast, dialog, field, copy, download, table, emptyState } from '../util.js';
 import { api, enc } from '../api.js';
 import { state, gs } from '../state.js';
@@ -35,8 +36,8 @@ const CHEAT = [
   ['TRUE  FALSE  NELL', 'Booleans and "no value".'],
 ];
 
-const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) || d; } catch { return d; } };
-const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* ignore */ } };
+const load = (k, d) => { try { return JSON.parse(accountLocal.getItem(k)) || d; } catch { return d; } };
+const save = (k, v) => { try { accountLocal.setItem(k, JSON.stringify(v)); } catch { /* ignore */ } };
 
 export default async function render(ctx) {
   const db = state.db;
@@ -48,8 +49,8 @@ export default async function render(ctx) {
   let last = null;
   let view = 'table';
 
-  let startQ = sessionStorage.getItem('redx.studio.q') || load('redx.studio.draft', '');
-  sessionStorage.removeItem('redx.studio.q');
+  let startQ = accountTab.getItem('redx.studio.q') || load('redx.studio.draft', '');
+  accountTab.removeItem('redx.studio.q');
 
   async function boxesOf(file) {
     if (boxCache.has(file)) return boxCache.get(file);
@@ -144,7 +145,7 @@ export default async function render(ctx) {
   async function run(explain = false) {
     const text = editor.getValue();
     if (!text.trim()) return toast('Write a command first', 'info');
-    if (/^\s*(<<[\s\S]*?>>\s*)*\{\s*Watch\s*\[/.test(text)) { sessionStorage.setItem('redx.watch.q', text); toast('Watch commands stream results. Opening Live Watch.', 'info'); location.hash = '#/watch'; return; }
+    if (/^\s*(<<[\s\S]*?>>\s*)*\{\s*Watch\s*\[/.test(text)) { accountTab.setItem('redx.watch.q', text); toast('Watch commands stream results. Opening Live Watch.', 'info'); location.hash = '#/watch'; return; }
     mount(status, 'Running…');
     const t0 = performance.now();
     editor.clearDiagnostics();

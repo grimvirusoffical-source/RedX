@@ -51,15 +51,59 @@ const PAGES = ['dashboard', 'databases', 'data', 'studio', 'keys', 'devices', 'b
           errbox: [...document.querySelectorAll('.errbox')].map((e) => e.textContent.trim().slice(0, 160)),
           text: (document.querySelector('main, #app') || document.body).innerText.trim().length,
           shell: !!document.querySelector('.shell'),
+          conditionalText: [...document.querySelectorAll('main, main .page')].flatMap((root) =>
+            [...root.childNodes].filter((node) => node.nodeType === Node.TEXT_NODE)
+              .map((node) => node.textContent.trim()).filter((text) => /^(?:(?:null|undefined|false)\s*)+$/.test(text))),
         }));
         if (info.theme !== theme) fail(`[${theme}/${pg}] theme is ${info.theme}`);
         if (!info.shell) fail(`[${theme}/${pg}] console shell did not render`);
         if (info.errbox.length) fail(`[${theme}/${pg}] error box on the page: ${info.errbox.join(' | ')}`);
         if (info.text < 20) fail(`[${theme}/${pg}] page is empty`);
+        if (info.conditionalText.length) fail(`[${theme}/${pg}] conditional placeholders rendered as page text: ${info.conditionalText.join(' | ')}`);
         if (pg === 'help') {
           const about = await p.evaluate(() => { const e = document.querySelector('#about .about-copy'); return e ? e.textContent : ''; });
           if (about !== ABOUT) fail(`[${theme}/help] About text differs: ${JSON.stringify(about)}`);
         }
+      }
+      // Exercise the real toolbar layout with the website's additional scope
+      // badge and a long selection. This changes presentation in this isolated
+      // fixture only; the daemon's authentication mode and permissions stay put.
+      await p.evaluate(() => {
+        document.querySelector('.shell').dataset.website = 'true';
+        const top = document.querySelector('.hub-toolbar');
+        const scope = document.createElement('span');
+        scope.className = 'chip db-access-scope';
+        scope.textContent = 'Owner · all databases';
+        top.insertBefore(scope, top.querySelector('.grow'));
+        const select = top.querySelector('.dbpick select');
+        const option = document.createElement('option');
+        option.value = 'layout-fixture';
+        option.textContent = 'layout-fixture-database-with-a-long-name';
+        select.append(option);
+        select.value = option.value;
+      });
+      for (const width of [1440, 1026, 390]) {
+        where = 'toolbar-' + width;
+        await p.setViewportSize({ width, height: 900 });
+        await p.waitForTimeout(100);
+        const layout = await p.evaluate(() => {
+          const top = document.querySelector('.hub-toolbar').getBoundingClientRect();
+          const selectors = ['.dbpick select', '.hub-create', '.seg', '.theme-seg', '.hub-profile', '.db-access-scope'];
+          const controlsFit = selectors.every((selector) => {
+            const element = document.querySelector('.hub-toolbar ' + selector);
+            if (!element || getComputedStyle(element).display === 'none') return false;
+            const rect = element.getBoundingClientRect();
+            return rect.width > 0 && rect.left >= top.left - 1 && rect.right <= top.right + 1
+              && rect.top >= top.top && rect.bottom <= top.bottom;
+          });
+          return { controlsFit, pageWidth: document.documentElement.scrollWidth,
+            viewport: document.documentElement.clientWidth,
+            selectorWidth: document.querySelector('.dbpick select').getBoundingClientRect().width };
+        });
+        if (!layout.controlsFit || layout.pageWidth > layout.viewport + 1)
+          fail(`[${theme}/${where}] toolbar controls overflow or disappear`);
+        if (width === 390 && layout.selectorWidth < 160)
+          fail(`[${theme}/${where}] database selector is too narrow to read`);
       }
       await ctx.close();
     }

@@ -1,36 +1,41 @@
 import { h, icon, terminalPanel, fmtBytes, fmtDur, ago, sparkline, chip, errorBox, spinner, copy, mount, confirmDialog } from '../util.js';
-import { api, session } from '../api.js';
-import { state, isHostAdmin, dbDisplayName, gs, wizard } from '../state.js';
+import { api, session, websiteDeployment } from '../api.js';
+import { state, isHostAdmin, canManageDatabases, dbDisplayName, gs, wizard } from '../state.js';
 import { pageHead, page } from './shared.js';
 import { navigate } from '../main.js';
 
 export default async function render() {
   const root = page();
-  if (!isHostAdmin() && state.who.account) {
-    const a = state.who.account;
+  if (websiteDeployment() || (!isHostAdmin() && state.who.account)) {
+    const a = state.who.account || {};
+    const owner = state.who.owner === true;
+    const developer = !state.who.account;
     const tenantDBs = state.dbs.map((d) => ({ id: d, label: dbDisplayName(d) }));
     const needPlan = state.dbAccessIssue === 'plan_required';
     const keysPanel = h('div', { class: 'card', id: 'tenant-key-status' },
       h('h3', null, icon('key', 18), ' API keys'),
       h('p', { class: 'muted small' }, 'Checking keys for your account…'));
-    root.append(
-      pageHead('Your database workspace',
-        'Build on Red-XAI with private, account-scoped databases and application keys.',
-        h('a', { class: 'btn primary', href: '#/databases' }, icon('plus', 16), ' New database')),
+    mount(root,
+      pageHead(owner ? 'Owner database workspace' : developer ? 'Database key workspace' : 'Your database workspace',
+        owner ? 'Manage tenant, application and system databases with audited owner access.' : developer ? 'Use native RedX files and BoxQL on databases permitted by the selected developer key.' : 'Build with native RedX files, BoxQL and private application keys.',
+        canManageDatabases() ? h('a', { class: 'btn primary', href: '#/databases' }, icon('plus', 16), ' New database') : h('a', { class: 'btn primary', href: '#/data' }, 'Open Data Explorer')),
       a.owner_blocked ? h('div', { class: 'callout warn', id: 'owner-blocked' }, icon('alert'),
         h('div', null, 'Owner administration is separate from your customer databases. Your personal tools remain available.')) : null,
+      owner ? h('div', { class: 'callout info', id: 'owner-database-scope' }, icon('shield'),
+        h('div', null, 'Your verified owner session can access tenant and system databases. Privileged requests are audited. ',
+          h('a', { href: '#/owner' }, 'Open database administration'))) : null,
       h('section', { class: 'customer-hero', id: 'account-card' },
         h('div', null,
-          h('div', { class: 'customer-eyebrow' }, 'RED-XAI · CONNECTED WORKSPACE'),
-          h('h2', null, 'Welcome, ', a.username || a.email || 'developer', '.'),
-          h('p', null, 'One account. Private data, powerful tools and scoped app credentials.'),
+          h('div', { class: 'customer-eyebrow' }, 'RED-XAI DB · NATIVE BOXQL'),
+          h('h2', null, developer ? 'Developer workspace' : ['Welcome, ', a.username || a.email || 'developer', '.']),
+          h('p', null, owner ? 'Database administration, native records and your complete BoxQL toolset.' : developer ? 'The selected key determines database, scope and path permissions.' : 'Your databases, native records and complete BoxQL toolset in one workspace.'),
           h('div', { class: 'row gap wrap' },
-            h('a', { class: 'btn primary', href: '#/wizard' }, 'Setup wizard'),
-            h('a', { class: 'btn', href: 'https://red-xai.com/hosting' }, 'Hosting & plans'))),
+            canManageDatabases() ? h('a', { class: 'btn primary', href: '#/wizard' }, 'Setup wizard') : h('a', { class: 'btn primary', href: '#/studio' }, 'Open BoxQL Studio'),
+            h('a', { class: 'btn', href: '#/help/boxql' }, 'BoxQL documentation'))),
         h('div', { class: 'hero-mark', 'aria-hidden': 'true' }, '×')),
       needPlan ? h('div', { class: 'callout warn', role: 'status' }, icon('alert'),
         h('div', null, 'A hosted database plan is needed to create databases and API keys. ',
-          h('a', { href: 'https://red-xai.com/hosting' }, 'View plans'))) : null,
+          h('a', { href: '/products/subscriptions', target: '_top' }, 'View database subscriptions'))) : null,
       state.dbAccessIssue === 'readonly' ? h('div', { class: 'callout warn' },
         icon('info'), h('div', null, 'This plan is currently read-only. Your data is preserved.')) : null,
       h('div', { class: 'grid g3 customer-cards' },
@@ -52,22 +57,21 @@ export default async function render() {
             href: '#/databases', class: 'tenant-db-row'
           }, h('span', { class: 'tenant-db-dot' }), h('b', null, d.label),
              h('span', { class: 'muted small' }, 'Manage →'))) :
-          h('p', { class: 'muted' }, 'No databases visible yet. Create one or activate a hosting plan.'),
+          h('p', { class: 'muted' }, 'No databases visible yet. Create a database or review your database subscription.'),
           h('a', { class: 'btn small', href: '#/databases' }, 'View databases')),
         keysPanel),
       h('div', { class: 'workspace-resources' },
         h('a', { href: '#/keys' }, 'API credentials'),
         h('a', { href: '#/raw' }, 'Raw editor'),
-        h('a', { href: '#/help' }, 'Documentation'),
-        h('a', { href: 'https://red-xai.com/store' }, 'All Red-XAI apps')));
+        h('a', { href: '#/help' }, 'Documentation')));
     try {
       const res = await api('GET', '/v1/keys');
       const mine = Array.isArray(res.keys) ? res.keys : [];
       mount(keysPanel,
-        h('h3', null, icon('key', 18), ' Your API keys'),
+        h('h3', null, icon('key', 18), owner ? ' Database API keys' : ' Your API keys'),
         h('div', { class: 'customer-count' },
           String(mine.filter((k) => k.status === 'active').length)),
-        h('p', { class: 'muted' }, 'Active keys scoped to databases owned by your account.'),
+        h('p', { class: 'muted' }, owner ? 'Database keys visible to your owner account.' : developer ? 'Database keys visible to the selected developer credential.' : 'Active keys scoped to databases owned by your account.'),
         h('a', { class: 'btn small', href: '#/keys' }, 'Create, rotate and revoke keys'));
     } catch {
       mount(keysPanel, h('h3', null, icon('key', 18), ' Your API keys'),

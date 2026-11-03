@@ -5,10 +5,24 @@ import { mountCheckout } from './checkout-engine.js';
 
 var K = "redx.key";
 var KEY = "";
-try { KEY = sessionStorage.getItem(K) || localStorage.getItem(K) || ""; } catch (e) { /* storage blocked */ }
+var authReady;
+function checkoutAuthentication() {
+  if (!authReady) authReady = (async function () {
+    var response = await fetch('/v1/auth/config', { credentials: 'same-origin', cache: 'no-store' });
+    if (!response.ok) throw new Error('Account sign-in settings could not be loaded.');
+    var config = await response.json();
+    // Website checkout uses the authenticated website cookie. A stored
+    // developer credential must not silently select a different billing account.
+    if (config.enabled && config.mode === 'website') return;
+    try { KEY = sessionStorage.getItem(K) || localStorage.getItem(K) || ""; } catch (e) { /* storage blocked */ }
+  })();
+  return authReady;
+}
 
 async function call(method, path, body) {
-  var o = { method: method, headers: { Authorization: "Bearer " + KEY } };
+  await checkoutAuthentication();
+  var o = { method: method, headers: {}, credentials: 'same-origin', cache: 'no-store' };
+  if (KEY) o.headers.Authorization = "Bearer " + KEY;
   if (body) { o.headers["Content-Type"] = "application/json"; o.body = JSON.stringify(body); }
   var r = await fetch(path, o);
   var d = await r.json().catch(function () { return {}; });

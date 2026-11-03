@@ -8,7 +8,7 @@ let cfgCache = null;
 /** GET /v1/auth/config (cached); {enabled:false} when this host has no Red-XAI Accounts sign-in. */
 export async function accountsConfig() {
   if (cfgCache) return cfgCache;
-  try { cfgCache = await api('GET', '/v1/auth/config', { key: '', noAuthRedirect: true }); } catch { cfgCache = { enabled: false }; }
+  try { cfgCache = await api('GET', '/v1/auth/config', { key: '', noAuthRedirect: true }); } catch { return { enabled: false, unavailable: true }; }
   return cfgCache;
 }
 
