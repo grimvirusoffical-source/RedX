@@ -86,7 +86,7 @@ export function renderAccountUnavailable(msg, onRetry, onDone) {
     h('h2', null, 'Database workspace unavailable'),
     h('p', { role: 'status' }, msg || 'Your website account could not be verified. Try again when the account service is available.'),
     h('button', { class: 'btn primary', type: 'button', onclick: onRetry }, 'Retry workspace'),
-    h('p', { class: 'muted small' }, h('a', { href: websiteAccountURL() }, 'Open website account')),
+    h('p', { class: 'muted small' }, h('a', { href: websiteAccountURL(), target: '_top' }, 'Open website account')),
     onDone ? developerKeyLogin('', onDone, websiteAuthentication()) : null));
 }
 

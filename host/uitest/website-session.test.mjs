@@ -329,3 +329,34 @@ test('revocation or an unverifiable website identity removes all previous accoun
     assert.equal(accountTab.getItem('redx.studio.q'), null);
   }
 });
+
+test('an embedded DB sends a confirmed website sign-out to its same-origin outer shell', async t => {
+  fixture();
+  configureAuthentication(website);
+  const previous = globalThis.window;
+  t.after(() => { if (previous === undefined) delete globalThis.window; else globalThis.window = previous; });
+  location.origin = 'https://red-xai.com';
+  location.search = '?embed=site';
+  const parentRedirects = [];
+  location.replace = () => assert.fail('embedded login must not create a nested sign-in screen');
+  globalThis.window = { parent: { location: { origin: location.origin, replace: value => parentRedirects.push(value) } } };
+  globalThis.fetch = async () => new Response('{"error":"signed_out"}', { status: 401 });
+  assert.equal(await redirectWebsiteSignIn({ status: 401 }), true);
+  assert.deepEqual(parentRedirects, ['/signin?next=%2Fdb']);
+});
+
+test('embedding never redirects a different-origin parent or grants database identity', async t => {
+  fixture();
+  configureAuthentication(website);
+  const previous = globalThis.window;
+  t.after(() => { if (previous === undefined) delete globalThis.window; else globalThis.window = previous; });
+  location.origin = 'https://red-xai.com';
+  location.search = '?embed=site';
+  const local = [];
+  location.replace = value => local.push(value);
+  globalThis.window = { parent: { location: { origin: 'https://other.invalid', replace: () => assert.fail('cross-origin navigation') } } };
+  globalThis.fetch = async () => new Response('{"error":"signed_out"}', { status: 401 });
+  assert.equal(await redirectWebsiteSignIn({ status: 401 }), true);
+  assert.deepEqual(local, ['/signin?next=%2Fdb']);
+  assert.equal(state.who, null);
+});

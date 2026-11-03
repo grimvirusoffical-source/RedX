@@ -1,5 +1,5 @@
 import { h, icon, terminalPanel, fmtBytes, ago, chip, errorBox, spinner, mount, toast, confirmTyped, emptyState, field, table, dialog } from '../util.js';
-import { api, enc } from '../api.js';
+import { api, enc, websiteDeployment } from '../api.js';
 import { state, isHostAdmin, isAccountTenant, canManageDatabases, dbDisplayName, loadDbs, setDb, gs, ID_RE } from '../state.js';
 import { pageHead, page, listFiles, typeChip } from './shared.js';
 import { navigate } from '../main.js';
@@ -28,10 +28,11 @@ export default async function render() {
   };
   if (isAccountTenant()) name.maxLength = 50;
   name.addEventListener('keydown', (e) => { if (e.key === 'Enter') create(); });
-  root.append(pageHead('Databases', 'A database is a folder of files. Create one per app or project.'),
+  const owner = websiteDeployment() && state.who?.owner === true;
+  root.append(pageHead(owner ? 'All databases · owner access' : 'Databases', owner ? 'Tenant, application and system databases visible to your verified owner session. Access is audited.' : 'A database is a folder of native RedX files. Create one per app or project.'),
     canManageDatabases() ? h('div', { class: 'card create-db', style: { marginBottom: '16px' } },
       h('div', { class: 'create-db-heading' }, h('div', null, h('h3', null, 'Create your database'),
-        h('p', { class: 'muted small' }, 'A private workspace for your app. Other accounts cannot see it.'))),
+        h('p', { class: 'muted small' }, owner ? 'Create an application or system database with owner access.' : 'A private workspace for your app, protected by the native database permissions.'))),
       h('div', { class: 'row gap wrap' }, h('div', { style: { flex: 1, minWidth: '220px' } }, name),
         h('button', { class: 'btn primary', onclick: create }, icon('plus', 16), ' Create database')), err) : null,
     list, detail,
@@ -45,7 +46,7 @@ export default async function render() {
         const needingPlan = isAccountTenant() && state.dbAccessIssue === 'plan_required';
         mount(list, emptyState('db', needingPlan ? 'Activate your hosted database plan' : 'No databases yet',
           needingPlan ? 'Your account is signed in. Choose a RedX Hosted plan to create databases; existing data stays protected.' : 'Create a private database above, or use the setup wizard.',
-          needingPlan ? h('a', { class: 'btn primary', href: 'https://red-xai.com/hosting' }, 'Explore hosting plans')
+          needingPlan ? h('a', { class: 'btn primary', href: '/products/subscriptions', target: '_top' }, 'Database subscriptions')
             : h('button', { class: 'btn primary', onclick: () => navigate('wizard') }, icon('wand', 16), ' Setup wizard')));
         return;
       }

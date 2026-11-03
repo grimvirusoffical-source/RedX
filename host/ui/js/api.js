@@ -8,6 +8,9 @@ let requestEpoch = 0;
 let websiteLogin = '/signin';
 let websiteAccount = '/settings';
 export const websiteAuthentication = () => websiteConfigured && !developerSelected;
+// Presentation stays a website workspace even after an explicit developer-key
+// selection. A credential change must not turn the DB page into a Host panel.
+export const websiteDeployment = () => websiteConfigured;
 // The return destination is fixed, never copied from a query or fragment.
 export const websiteLoginURL = () => websiteLogin + '?next=' + encodeURIComponent('/db');
 export const websiteAccountURL = () => websiteAccount;

@@ -1,4 +1,5 @@
 import { websiteAuthentication, websiteLoginURL } from './api.js';
+import { websiteNavigationLocation } from './workspace-mode.js';
 
 const SIGNIN_ATTEMPT = 'redx.website.signinAttempt';
 
@@ -17,7 +18,7 @@ export async function redirectWebsiteSignIn(error, isCurrent = () => true) {
     if (response.status !== 401 || result?.error !== 'signed_out' || !isCurrent() || !websiteAuthentication()) return false;
     if (sessionStorage.getItem(SIGNIN_ATTEMPT) === 'attempted') return false;
     sessionStorage.setItem(SIGNIN_ATTEMPT, 'attempted');
-    location.replace(websiteLoginURL());
+    websiteNavigationLocation(true, location, typeof window === 'undefined' ? undefined : window).replace(websiteLoginURL());
     return true;
   } catch {
     // If verification, storage or navigation fails, show recovery. Never loop.

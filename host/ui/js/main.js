@@ -1,18 +1,19 @@
 import { h, icon, mount, toast, $, clear } from './util.js';
-import { api, session, setUnauthorizedHandler, exchangePairingCode, configureAuthentication, websiteAuthentication, websiteAccountURL, invalidateRequests } from './api.js';
+import { api, session, setUnauthorizedHandler, exchangePairingCode, configureAuthentication, websiteAuthentication, websiteDeployment, websiteAccountURL, invalidateRequests } from './api.js';
 import { state, subscribe, setMode, setTheme, setDb, applyTheme, loadWho, loadDbs, isHostAdmin, dbDisplayName, wizard, resetAccountState, identityOf } from './state.js';
 import { redirectWebsiteSignIn, resetWebsiteSignIn } from './website-session.js';
+import { databaseNavigation, databasePageAvailable, databaseAccessLabel, embeddedDatabase, websiteNavigationLocation } from './workspace-mode.js';
 
 const NAV = [
   { id: 'dashboard', title: 'Dashboard', icon: 'home' },
   { id: 'databases', title: 'Databases', icon: 'db' },
   { id: 'data', title: 'Data Explorer', icon: 'table' },
   { id: 'studio', title: 'BoxQL Studio', icon: 'terminal' },
-  { id: 'keys', title: 'API Keys', icon: 'key' },
+  { id: 'keys', title: 'API Keys', websiteTitle: 'Database API keys', icon: 'key' },
   { id: 'devices', title: 'Add a device', icon: 'phone' },
-  { id: 'apps', title: 'Connected apps', icon: 'link' },
-  { id: 'backups', title: 'Backups', icon: 'backup' },
-  { id: 'settings', title: 'Settings', icon: 'gear' },
+  { id: 'apps', title: 'Connected apps', websiteTitle: 'Database integrations', websiteAdmin: true, icon: 'link' },
+  { id: 'backups', title: 'Backups', websiteAdmin: true, icon: 'backup' },
+  { id: 'settings', title: 'Settings', websiteTitle: 'DB preferences', icon: 'gear' },
   { id: 'help', title: 'Help', icon: 'book' },
   // These are customer destinations, not owner routes. The actual Host
   // service independently authenticates each request.
@@ -23,7 +24,7 @@ const NAV = [
   { id: 'policy', title: 'Security · Rules · Code', icon: 'shield', adv: true },
   { id: 'cluster', title: 'Cluster & nodes', icon: 'nodes', adv: true },
   { id: 'presets', title: 'Presets', icon: 'compare', adv: true },
-  { id: 'owner', title: 'Owner', icon: 'shield', owner: true },
+  { id: 'owner', title: 'Owner', websiteTitle: 'Database administration', icon: 'shield', owner: true },
 ];
 const PAGES = new Set([...NAV.filter((n) => !n.external).map((n) => n.id), 'join', 'wizard', 'connect']);
 
@@ -54,14 +55,6 @@ async function boot() {
   // pairing link:  #/login?code=RP-XXXXX-XXXXX  (from a QR code; the code is single-use, expires in 5 minutes and is not a key.
   // The fragment is never sent to a server and is removed from the address bar before the exchange.)
   const dl = parseHash();
-  // Join instructions are public and do not select an authentication method.
-  if (dl.page === 'join') {
-    const { renderJoin } = await import('./pages/auth.js');
-    clear(app);
-    app.className = 'plain';
-    app.append(renderJoin(dl.query));
-    return;
-  }
   const { accountsConfig } = await import('./pages/account.js');
   const authConfig = await accountsConfig();
   if (authConfig.unavailable) {
@@ -72,6 +65,15 @@ async function boot() {
     return;
   }
   configureAuthentication(authConfig);
+  // Local replica instructions remain public on standalone installations.
+  // Website mode keeps daemon controls out of the DB workspace.
+  if (dl.page === 'join' && !websiteDeployment()) {
+    const { renderJoin } = await import('./pages/auth.js');
+    clear(app);
+    app.className = 'plain';
+    app.append(renderJoin(dl.query));
+    return;
+  }
   // The website owns the root service worker and cache namespace. Do not
   // register the standalone console worker (which clears other caches) here.
   if (!websiteAuthentication() && 'serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
@@ -184,12 +186,14 @@ export async function showLogin(msg, failure) {
 // ---------- shell ----------
 let shell;
 export async function startShell(firstRun = false) {
-  if (isHostAdmin()) { try { state.status = await api('GET', '/v1/admin/status'); } catch { /* ignore */ } }
+  if (isHostAdmin() && !websiteDeployment()) { try { state.status = await api('GET', '/v1/admin/status'); } catch { /* ignore */ } }
   await loadDbs();
   if (!state.who) return;
   teardownWorkspace();
   clear(app);
   app.className = 'shell';
+  app.dataset.website = String(websiteDeployment());
+  app.dataset.embedded = String(embeddedDatabase(websiteDeployment(), location, window));
   shell = buildShell();
   app.append(shell.root);
   app.hidden = false;
@@ -198,7 +202,7 @@ export async function startShell(firstRun = false) {
   window.addEventListener('hashchange', route);
   // a connect link (#/connect?...) must survive the first-run setup and sign-in: never send it to the wizard
   const connecting = parseHash().page === 'connect';
-  if (!connecting && (firstRun || (!wizard.done() && isHostAdmin() && state.dbs.length <= 1 && (!location.hash || location.hash === '#/')))) {
+  if (!connecting && (firstRun || (!websiteDeployment() && !wizard.done() && isHostAdmin() && state.dbs.length <= 1 && (!location.hash || location.hash === '#/')))) {
     location.hash = '#/wizard';
   }
   route();
@@ -237,18 +241,18 @@ function buildShell() {
       h('img', { src: location.pathname.startsWith('/v1/console/')
         ? '/v1/console/icons/redx-128.png' : '/ui/icons/redx-128.png',
         width: 44, height: 44, alt: '' }),
-      h('span', null, h('b', null, 'RED-XAI'), h('small', null, 'YOUR DEVELOPMENT HUB'))),
+      h('span', null, h('b', null, websiteDeployment() ? 'RED-XAI DB' : 'RED-XAI'), h('small', null, websiteDeployment() ? 'BOXQL WORKSPACE' : 'YOUR DEVELOPMENT HUB'))),
     h('div', { class: 'hub-side-search' }, icon('search', 15), navSearch),
     nav,
     h('div', { class: 'side-foot' },
-      h('div', { class: 'hub-side-status' }, h('span', { class: 'workspace-pulse', 'aria-hidden': 'true' }), 'Red-XAI workspace'),
+      h('div', { class: 'hub-side-status' }, h('span', { class: 'workspace-pulse', 'aria-hidden': 'true' }), websiteDeployment() ? 'Database workspace' : 'Red-XAI workspace'),
       h('span', { class: 'muted small', id: 'ver' }, 'v' + (state.who && state.who.version || ''))));
   const dbSel = h('select', { class: 'select', 'aria-label': 'Active database',
     onchange: e => setDb(e.target.value) });
   const modeBtn = h('button', { class: 'seg', role: 'group', 'aria-label': 'Developer tools mode' },
     h('span', { class: 'seg-opt', 'data-m': 'simple', onclick: () => setMode('simple') }, 'Essentials'),
     h('span', { class: 'seg-opt', 'data-m': 'advanced', onclick: () => setMode('advanced') }, 'All tools'));
-  modeBtn.title = 'All tools adds raw records, cluster status, rules, watch and presets';
+  modeBtn.title = websiteDeployment() ? 'All tools adds raw records, database rules and live queries' : 'All tools adds raw records, cluster status, rules, watch and presets';
   const themeBtn = themeSwitcher();
   const who = h('button', { class: 'chip who hub-profile', title: websiteAuthentication() ? 'Manage website account' : 'Sign out of Red-XAI console',
     onclick: signOut });
@@ -256,12 +260,16 @@ function buildShell() {
     onclick: () => root.classList.toggle('open') }, icon('menu', 18));
   const workspaceTitle = h('span', { class: 'workspace-topline' },
     h('span', { class: 'workspace-pulse', 'aria-hidden': 'true' }),
-    'RED-XAI', h('span', { class: 'workspace-slash' }, '/'), 'WORKSPACE');
+    'RED-XAI', h('span', { class: 'workspace-slash' }, '/'), websiteDeployment() ? 'DB' : 'WORKSPACE');
   const createDB = h('button', { class: 'btn primary small hub-create',
     title: 'Create your database', onclick: () => navigate('databases') },
     icon('plus', 15), ' New database');
+  const accessScope = websiteDeployment() ? h('span', {
+    class: 'chip db-access-scope', id: 'database-access-scope',
+    title: state.who?.owner ? 'Your verified owner session can access all tenant and system databases. Privileged requests are audited.' : 'The native API enforces account or developer-key database, scope and path permissions.'
+  }, databaseAccessLabel(state.who)) : null;
   const top = h('header', { class: 'top hub-toolbar' }, menu, workspaceTitle,
-    h('div', { class: 'grow' }),
+    accessScope, h('div', { class: 'grow' }),
     h('label', { class: 'dbpick' },
       h('span', { class: 'muted small' }, 'Database'), dbSel),
     createDB, modeBtn, themeBtn, who);
@@ -291,7 +299,8 @@ function buildShell() {
   function refreshNav() {
     clear(nav);
     const term = navSearch.value.trim().toLowerCase();
-    const byID = id => NAV.find(n => n.id === id);
+    const available = databaseNavigation(NAV, { website: websiteDeployment(), owner: state.who?.owner === true, admin: isHostAdmin() });
+    const byID = id => available.find(n => n.id === id);
     for (const [title, ids] of groups) {
       const items = ids.map(byID).filter(n => n && (!n.owner || (state.who && state.who.owner))
         && (!term || n.title.toLowerCase().includes(term)));
@@ -300,7 +309,7 @@ function buildShell() {
       nav.append(...items.map(itemLink));
     }
     if (state.mode === 'advanced' || term) {
-      const advanced = NAV.filter(n => n.adv && (!term || n.title.toLowerCase().includes(term)));
+      const advanced = available.filter(n => n.adv && (!term || n.title.toLowerCase().includes(term)));
       if (advanced.length) {
         nav.append(h('div', { class: 'nav-sep hub-nav-group' }, 'ADVANCED'));
         nav.append(...advanced.map(itemLink));
@@ -310,8 +319,8 @@ function buildShell() {
         onclick: () => setMode('advanced') }, icon('plus', 14), 'Show all developer tools'));
     }
     if (state.who && state.who.owner && (!term || 'owner'.includes(term))) {
-      nav.append(h('div', { class: 'nav-sep hub-nav-group' }, 'ACCOUNT ADMINISTRATION'));
-      const item = NAV.find(n => n.id === 'owner');
+      nav.append(h('div', { class: 'nav-sep hub-nav-group' }, websiteDeployment() ? 'DATABASE ADMINISTRATION' : 'ACCOUNT ADMINISTRATION'));
+      const item = byID('owner');
       if (item) nav.append(itemLink(item));
     }
     if (term && !nav.querySelector('.nav-item')) {
@@ -346,7 +355,7 @@ function buildShell() {
 }
 
 async function signOut() {
-  if (websiteAuthentication()) { location.assign(websiteAccountURL()); return; }
+  if (websiteAuthentication()) { websiteNavigationLocation(websiteDeployment(), location, window).assign(websiteAccountURL()); return; }
   // A deliberate sign-out must not trigger immediate automatic sign-in on
   // the same still-authenticated browser session.
   try { sessionStorage.setItem('redx.hub.autoSSO', 'attempted'); } catch {}
@@ -410,8 +419,18 @@ async function route() {
   if (current && current.destroy) { try { current.destroy(); } catch { /* ignore */ } }
   current = null;
   const main = shell.main;
+  if (!databasePageAvailable(id, websiteDeployment())) {
+    document.title = 'Local database administration · Red-XAI DB';
+    mount(main, h('div', { class: 'page db-service-boundary' },
+      h('h1', null, 'Local database administration'),
+      h('p', { class: 'muted' }, 'Replica installation and database-service configuration are managed in Red-XAI DB Local or the RedX CLI.'),
+      h('a', { class: 'btn', href: '#/databases' }, 'Open databases'),
+      h('a', { class: 'btn ghost', href: '#/help/clustering' }, 'Database replication documentation')));
+    return;
+  }
   mount(main, h('div', { class: 'loading' }, h('span', { class: 'spin' }), 'Loading…'));
-  document.title = (NAV.find((n) => n.id === id)?.title || (id === 'connect' ? 'Connect an app' : 'RedX')) + ' · RedX Console';
+  const pageMeta = NAV.find((n) => n.id === id);
+  document.title = ((websiteDeployment() && pageMeta?.websiteTitle) || pageMeta?.title || (id === 'connect' ? 'Connect an app' : 'RedX')) + (websiteDeployment() ? ' · Red-XAI DB' : ' · RedX Console');
   try {
     const mod = await import('./pages/' + id + '.js');
     if (seq !== routeSeq) return;

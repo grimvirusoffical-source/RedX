@@ -1,8 +1,9 @@
-import { h, icon, terminalPanel, chip, mount, toast, errorBox, spinner, copy, confirmDialog, table } from '../util.js';
-import { api, session, websiteAuthentication, websiteAccountURL } from '../api.js';
+import { h, icon, terminalPanel, chip, mount, toast, errorBox, spinner, copy, confirmDialog, table, fmtBytes } from '../util.js';
+import { api, session, websiteAuthentication, websiteDeployment, websiteAccountURL } from '../api.js';
 import { accountLocal } from '../account-storage.js';
 import { state, setTheme, setMode, isHostAdmin, gs, wizard } from '../state.js';
 import { pageHead, page } from './shared.js';
+import { websiteNavigationLocation } from '../workspace-mode.js';
 
 const GROUPS = [
   ['Network', ['listen', 'tls', 'advertise', 'role', 'peers', 'heartbeat_seconds', 'repl_log_max']],
@@ -20,25 +21,28 @@ export default async function render() {
   if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistration().then((r) => { swState.textContent = r ? 'Offline shell installed (the console UI opens without a connection; data always comes from the host).' : 'Not installed (service workers need HTTPS or localhost).'; });
   else swState.textContent = 'Not supported by this browser.';
 
-  root.append(pageHead('Settings', 'Console preferences and the running configuration of this host.'),
+  root.append(pageHead(websiteDeployment() ? 'DB preferences' : 'Settings', websiteDeployment() ? 'Database editor preferences, account access and native language documentation.' : 'Console preferences and the running configuration of this host.'),
     h('div', { class: 'grid g2' },
       h('div', { class: 'card' }, h('h3', null, 'This browser'),
         row('Theme', themeSel), row('Mode', modeSel, 'Simple hides the expert pages.'),
         row('Signed in as', h('span', null, chip(state.who.scope, 'acc'), ' ', state.who.label || state.who.id || '', ' ', chip(websiteAuthentication() ? 'website account session' : session.remembered ? 'remembered on this device' : 'this tab only', session.remembered ? 'warn' : 'ok'))),
-        row('Offline shell', swState),
+        !websiteDeployment() ? row('Offline shell', swState) : null,
         h('div', { class: 'row gap wrap', style: { marginTop: '12px' } },
           websiteAuthentication()
-            ? h('a', { class: 'btn', href: websiteAccountURL() }, 'Manage website account')
+            ? h('a', { class: 'btn', href: websiteAccountURL(), target: '_top' }, 'Manage website account')
             : h('button', { class: 'btn', onclick: async () => { if (await confirmDialog('Sign out?', 'The key is removed from this browser. It still works elsewhere until you revoke it.', { ok: 'Sign out' })) { session.clear(); location.hash = '#/'; location.reload(); } } }, 'Sign out'),
           h('button', { class: 'btn', onclick: () => { gs.reset(); accountLocal.removeItem('redx.gs.dismissed'); accountLocal.removeItem('redx.wizard'); toast('Get-started checklist reset', 'ok'); } }, 'Reset Get-started'),
           h('button', { class: 'btn', onclick: () => { ['redx.hist', 'redx.saved', 'redx.studio.draft'].forEach((k) => accountLocal.removeItem(k)); toast('Saved queries and history cleared', 'ok'); } }, 'Clear saved queries'))),
       h('div', { class: 'card' }, h('h3', null, 'Documentation'),
-        ['box-grammar:Box file grammar', 'boxql:BoxQL guide', 'hosting:Hosting guide', 'clustering:Clustering', 'connect:Connecting apps', 'console:This console'].map((x) => { const [id, t] = x.split(':'); return h('div', null, h('a', { href: '#/help/' + id }, icon('book', 14), ' ', t)); }),
-        h('p', { class: 'muted small' }, 'Everything is built into the host, so it works offline.'))),
+        (websiteDeployment()
+          ? ['box-grammar:Native Box file grammar', 'boxql:BoxQL language guide', 'connect:Database integrations', 'console:Database console']
+          : ['box-grammar:Box file grammar', 'boxql:BoxQL guide', 'hosting:Hosting guide', 'clustering:Clustering', 'connect:Connecting apps', 'console:This console']).map((x) => { const [id, t] = x.split(':'); return h('div', null, h('a', { href: '#/help/' + id }, icon('book', 14), ' ', t)); }),
+        h('p', { class: 'muted small' }, 'Native RedX and BoxQL documentation is included in this workspace.'))),
     hostedPlanCard(),
     cfgBox,
-    terminalPanel([{ label: 'Check the configuration', cmd: 'redxd doctor' }, { label: 'Same, with the client', cmd: 'redx doctor' }, { label: 'Config file', cmd: 'redxd run --config /etc/redx/redx.toml' }, { label: 'Show a preset', cmd: 'redx preset show server' }], 'Configuration lives in a TOML file; environment variables and flags override it.'));
+    !websiteDeployment() ? terminalPanel([{ label: 'Check the configuration', cmd: 'redxd doctor' }, { label: 'Same, with the client', cmd: 'redx doctor' }, { label: 'Config file', cmd: 'redxd run --config /etc/redx/redx.toml' }, { label: 'Show a preset', cmd: 'redx preset show server' }], 'Configuration lives in a TOML file; environment variables and flags override it.') : null);
 
+  if (websiteDeployment()) return root;
   if (!isHostAdmin()) { mount(cfgBox, h('p', { class: 'muted' }, 'Host configuration needs an admin key.')); return root; }
   mount(cfgBox, spinner());
   try {
@@ -76,7 +80,7 @@ function hostedPlanCard() {
     try { plans = await api('GET', '/v1/billing/plans', { noAuthRedirect: true }); } catch { return; }
     if (!plans || !plans.enabled) return;
     try { me = await api('GET', '/v1/billing/me', { noAuthRedirect: true }); } catch { me = null; }
-    const card = h('div', { class: 'card', style: { marginTop: '12px' } }, h('h3', null, icon('db', 18), ' RedX Hosted plan'));
+    const card = h('div', { class: 'card', style: { marginTop: '12px' } }, h('h3', null, icon('db', 18), websiteDeployment() ? ' Database subscription' : ' RedX Hosted plan'));
     if (!me) {
       card.append(h('p', { class: 'muted' }, 'Sign in with your Red-XAI Account to choose a RedX Hosted plan.'));
     } else if (me.active) {
@@ -86,16 +90,15 @@ function hostedPlanCard() {
       card.append(h('p', null, ...bits));
       if (me.usage && me.quota) {
         const u = me.usage, q = me.quota;
-        const gb = (n) => n >= (1 << 40) ? ((n / (1 << 40)).toFixed(1) + ' TB') : ((n / (1 << 30)).toFixed(2) + ' GB');
         const sw = q.hostSwitches < 0 ? (u.hostSwitches + ' switches (unlimited)') : (u.hostSwitches + ' / ' + q.hostSwitches + ' switches');
         card.append(h('p', { class: 'muted small' },
-          'This month: ', gb(u.trafficBytes), ' / ', gb(q.trafficBytes), ' traffic · ',
-          gb(u.storageBytes), ' / ', gb(q.storageBytes), ' storage · ', sw));
+          'This month: ', fmtBytes(u.trafficBytes), ' / ', fmtBytes(q.trafficBytes), ' traffic · ',
+          fmtBytes(u.storageBytes), ' / ', fmtBytes(q.storageBytes), ' storage', !websiteDeployment() ? ' · ' + sw : ''));
       }
       card.append(h('button', { class: 'btn', onclick: () => portal() }, 'Manage billing'));
     } else {
       card.append(h('p', { class: 'muted' }, 'No RedX Hosted plan on this account yet.'),
-        h('div', { class: 'row gap wrap' }, h('a', { class: 'btn primary', href: '/ui/billing.html' }, 'Choose a plan'),
+        h('div', { class: 'row gap wrap' }, h('a', { class: 'btn primary', href: websiteDeployment() ? '/products/subscriptions' : '/ui/billing.html', target: websiteDeployment() ? '_top' : null }, 'Choose a plan'),
           me.portal ? h('button', { class: 'btn', onclick: () => portal() }, 'Billing history') : null));
     }
     box.append(card);
@@ -104,5 +107,5 @@ function hostedPlanCard() {
 }
 
 async function portal() {
-  try { const r = await api('POST', '/v1/billing/portal', { json: {} }); if (r && r.url) location.href = r.url; } catch (e) { toast(e.message || String(e), 'err'); }
+  try { const r = await api('POST', '/v1/billing/portal', { json: {} }); if (r && r.url) websiteNavigationLocation(websiteDeployment(), location, window).href = r.url; } catch (e) { toast(e.message || String(e), 'err'); }
 }

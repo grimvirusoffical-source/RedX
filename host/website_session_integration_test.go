@@ -30,10 +30,12 @@ func TestWebsiteAccountsUseNativeTenantGatesWithoutKeys(t *testing.T) {
 			return
 		}
 		roles := []string{"user"}
+		amr := []string{"pwd"}
 		if c.Value == "owner" {
 			roles = []string{"owner"}
+			amr = append(amr, "call")
 		}
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{"account": map[string]interface{}{"id": "canonical-" + c.Value, "email": "shared-fixture@example.invalid", "username": c.Value, "roles": roles}, "amr": []string{"pwd", "call"}, "expiresMs": time.Now().Add(time.Hour).UnixMilli()})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"account": map[string]interface{}{"id": "canonical-" + c.Value, "email": "shared-fixture@example.invalid", "username": c.Value, "roles": roles}, "amr": amr, "expiresMs": time.Now().Add(time.Hour).UnixMilli()})
 	}))
 	defer authority.Close()
 	n := startNode(t, t.TempDir(), nil)
@@ -85,6 +87,17 @@ func TestWebsiteAccountsUseNativeTenantGatesWithoutKeys(t *testing.T) {
 	if st, _ = call("PUT", "/v1/db/"+a+"/path/b:B.K", "beta", `{"value":"wrong"}`); st != 404 {
 		t.Fatalf("cross-tenant write: %d", st)
 	}
+	for _, path := range []string{"/v1/db/" + a + "/files", "/v1/db/" + a + "/stats", "/v1/db/" + a + "/path/b:B.K"} {
+		if st, body = call("GET", path, "beta", ""); st != 404 || strings.Contains(body, "alpha-only") {
+			t.Fatalf("cross-tenant metadata route %s: %d %s", path, st, body)
+		}
+	}
+	if st, body = call("POST", "/v1/db/"+a+"/bx", "beta", `{"q":"{Get[]} = b:B[ID=*] -> *"}`); st != 404 || strings.Contains(body, "alpha-only") {
+		t.Fatalf("cross-tenant BoxQL: %d %s", st, body)
+	}
+	if st, _ = call("GET", "/v1/admin/status", "alpha", ""); st != 403 {
+		t.Fatalf("password-only tenant has service administration: %d", st)
+	}
 	if st, body = call("GET", "/v1/dbs", "alpha", ""); st != 200 || strings.Contains(body, b) {
 		t.Fatalf("list leaked beta: %d %s", st, body)
 	}
@@ -112,6 +125,14 @@ func TestWebsiteAccountsUseNativeTenantGatesWithoutKeys(t *testing.T) {
 	}
 	// Genuine native WebSocket plus cookie authentication; no query-string key.
 	u := "ws" + strings.TrimPrefix(n.URL, "http") + "/v1/db/" + a + "/subscribe?path=b:"
+	denied, deniedResponse, deniedErr := websocket.DefaultDialer.Dial(u, http.Header{"Cookie": []string{"redx_session=beta"}, "Origin": []string{n.URL}})
+	if denied != nil {
+		_ = denied.Close()
+	}
+	if deniedErr == nil || deniedResponse == nil || deniedResponse.StatusCode != http.StatusNotFound {
+		t.Fatal("cross-tenant watch did not fail closed as a missing database")
+	}
+	_ = deniedResponse.Body.Close()
 	ws, response, err := websocket.DefaultDialer.Dial(u, http.Header{"Cookie": []string{"redx_session=alpha"}, "Origin": []string{n.URL}})
 	if err != nil {
 		if response != nil {

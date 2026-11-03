@@ -177,10 +177,10 @@ func (h *Host) serveUI(w http.ResponseWriter, r *http.Request) {
 	if h.website != nil || versioned {
 		prefix = uiAssetPrefix("/ui/")
 	}
-	serveUIAsset(w, r, name, prefix)
+	serveUIAsset(w, r, name, prefix, h.website != nil && name == "index.html" && r.URL.Query().Get("embed") == "site")
 }
 
-func serveUIAsset(w http.ResponseWriter, r *http.Request, name, prefix string) {
+func serveUIAsset(w http.ResponseWriter, r *http.Request, name, prefix string, websiteFrame bool) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
 		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -209,7 +209,14 @@ func serveUIAsset(w http.ResponseWriter, r *http.Request, name, prefix string) {
 	if name == "billing.html" {
 		hd.Set("Content-Security-Policy", billingCSP) // only the checkout page may load Stripe.js
 	} else {
-		hd.Set("Content-Security-Policy", uiCSP)
+		policy := uiCSP
+		if websiteFrame && name == "index.html" {
+			// Only the configured website console may be framed, and only by
+			// the same origin. API authentication and CSRF checks are unchanged.
+			policy = strings.Replace(policy, "frame-ancestors 'none'", "frame-ancestors 'self'", 1)
+			hd.Set("X-Frame-Options", "SAMEORIGIN")
+		}
+		hd.Set("Content-Security-Policy", policy)
 	}
 	hd.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 	if name == "sw.js" {
@@ -243,7 +250,7 @@ func (h *Host) serveHubConsole(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	serveUIAsset(w, r, name, uiAssetPrefix("/v1/console/"))
+	serveUIAsset(w, r, name, uiAssetPrefix("/v1/console/"), h.website != nil && name == "index.html" && r.URL.Query().Get("embed") == "site")
 }
 
 // ---- first-run web setup ----
