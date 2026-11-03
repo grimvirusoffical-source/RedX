@@ -22,6 +22,7 @@ type websiteSessionAdapter struct {
 	ownerIDs          map[string]bool
 	now               func() time.Time
 	watchInterval     time.Duration
+	realms            bool
 }
 
 func websiteSessionFromEnv() *websiteSessionAdapter {
@@ -33,6 +34,9 @@ func websiteSessionFromEnv() *websiteSessionAdapter {
 		if id = strings.TrimSpace(id); id != "" {
 			owners[id] = true
 		}
+	}
+	if os.Getenv("REDX_WEBSITE_SESSION_REALMS") != "" {
+		panic("realm consumer prototype is not approved for runtime activation; persistent ownership namespace proof is pending")
 	}
 	return &websiteSessionAdapter{
 		authority: "http://127.0.0.1:4200/api/accounts/me", origin: "https://red-xai.com",
@@ -56,9 +60,10 @@ type websiteProfile struct {
 		EmailVerified     *bool    `json:"emailVerified"`
 		EmailVerifiedOIDC *bool    `json:"email_verified"`
 	} `json:"account"`
-	AMR       []string `json:"amr"`
-	ExpiresMs int64    `json:"expiresMs"`
-	Active    *bool    `json:"active"`
+	AMR           []string              `json:"amr"`
+	ExpiresMs     int64                 `json:"expiresMs"`
+	Active        *bool                 `json:"active"`
+	IdentityRealm *websiteRealmEnvelope `json:"identityRealm"`
 }
 
 func websiteSessionCookie(r *http.Request) (*http.Cookie, bool) {
@@ -76,7 +81,7 @@ func websiteSessionCookie(r *http.Request) (*http.Cookie, bool) {
 }
 
 func (s *websiteSessionAdapter) identity(r *http.Request) (*AccountIdentity, bool) {
-	cookie, ok := websiteSessionCookie(r)
+	cookies, ok := s.cookieHeader(r)
 	if !ok {
 		return nil, false
 	}
@@ -86,7 +91,7 @@ func (s *websiteSessionAdapter) identity(r *http.Request) (*AccountIdentity, boo
 	}
 	// Only the existing opaque account cookie crosses the loopback boundary.
 	// Never forward caller Authorization, identity headers or unrelated cookies.
-	req.AddCookie(&http.Cookie{Name: websiteCookie, Value: cookie.Value})
+	req.Header.Set("Cookie", cookies)
 	req.Header.Set("Accept", "application/json")
 	response, err := s.client.Do(req)
 	if err != nil {
@@ -102,6 +107,16 @@ func (s *websiteSessionAdapter) identity(r *http.Request) (*AccountIdentity, boo
 	}
 	var p websiteProfile
 	if json.Unmarshal(data, &p) != nil {
+		return nil, false
+	}
+	legacyRealm := true
+	if s.realms {
+		var valid bool
+		legacyRealm, valid = websiteRealmProfile(p)
+		if !valid {
+			return nil, false
+		}
+	} else if p.IdentityRealm != nil {
 		return nil, false
 	}
 	a := p.Account
@@ -126,7 +141,7 @@ func (s *websiteSessionAdapter) identity(r *http.Request) (*AccountIdentity, boo
 	// This opt-in website owner policy binds an immutable account ID to the
 	// authoritative owner role and MFA. Email is display/audit metadata, not the
 	// owner lookup key. The existing OIDC verified-email policy is unchanged.
-	id.Owner = s.ownerIDs[id.Sub] && containsStr(a.Roles, "owner") && mfa
+	id.Owner = legacyRealm && s.ownerIDs[id.Sub] && containsStr(a.Roles, "owner") && mfa
 	if !id.Owner && (id.Sub == "owner" || id.Sub == "__unassigned__") {
 		return nil, false
 	}
@@ -157,7 +172,7 @@ func (h *Host) websiteBoundary(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		_, cookie := websiteSessionCookie(r)
+		_, cookie := h.website.cookieHeader(r)
 		ws := strings.EqualFold(r.Header.Get("Upgrade"), "websocket")
 		if cookie && (ws || (r.Method != "GET" && r.Method != "HEAD" && r.Method != "OPTIONS")) && r.Header.Get("Origin") != h.website.origin {
 			writeErr(w, http.StatusForbidden, "same-origin website request required")
