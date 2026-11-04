@@ -2,15 +2,19 @@ package billing
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"redx/internal/accountscope"
 	"sync"
 	"time"
 )
 
 // Plan is one Red-XAI Account's RedX Hosted plan as last seen from Stripe.
 type Plan struct {
-	Account      string    `json:"account"` // Red-XAI Account sub
+	Account      string    `json:"account"` // exact legacy sub or private realm ownership key
+	OwnerIssuer  string    `json:"ownerIssuer,omitempty"`
+	OwnerSubject string    `json:"ownerSubject,omitempty"`
 	Tier         string    `json:"tier,omitempty"`
 	Interval     string    `json:"interval,omitempty"` // month | year (from Stripe price lookup key)
 	Status       string    `json:"status,omitempty"`   // Stripe subscription status
@@ -96,15 +100,32 @@ func (s *Store) Get(account string) (Plan, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, ok := s.Plans[account]
-	return p, ok
+	return p, ok && p.Account == account && accountscope.MetadataMatches(p.Account, p.OwnerIssuer, p.OwnerSubject)
 }
 
 // Put stores an account's plan.
 func (s *Store) Put(p Plan) error {
+	if !accountscope.MetadataMatches(p.Account, p.OwnerIssuer, p.OwnerSubject) {
+		return errors.New("invalid plan ownership metadata")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Plans[p.Account] = p
 	return s.saveLocked()
+}
+
+func (s *Store) HasAccount(account string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.Plans[account]
+	return ok
+}
+
+func (s *Store) bytes() []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	data, _ := json.MarshalIndent(s, "", " ")
+	return data
 }
 
 // seen records an event id and reports whether it was already processed.

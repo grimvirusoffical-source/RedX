@@ -49,7 +49,7 @@ export const dbDisplayName = (db) => state.dbLogical[db] || db;
 let identityGeneration = 0;
 let whoSequence = 0;
 export const identityOf = (who) => !who ? '' : JSON.stringify([
-  who.account?.sub ? 'account:' + who.account.sub : 'key:' + (who.id || ''),
+  who.account?.sub ? 'account:' + (who.account.storage_subject ?? who.account.sub) : 'key:' + (who.id || ''),
   who.owner === true, who.host_admin === true, who.scope || '', who.roles || [],
 ]);
 function clearAccountState() {
@@ -105,7 +105,7 @@ export async function loadWho() {
   }
   if (identityOf(who) !== identityOf(state.who)) {
     clearAccountState();
-    setAccountStorageScope(who?.account?.sub ?? null);
+    setAccountStorageScope(who?.account?.storage_subject ?? who?.account?.sub ?? null);
     state.db = accountLocal.getItem('redx.db') || 'default';
   }
   state.who = who;

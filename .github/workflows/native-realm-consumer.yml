@@ -1,0 +1,55 @@
+name: Native realm consumer prototype
+
+# Existing workflows target main. This source-only stack intentionally targets
+# the exact deployed native UI branch without importing advanced main's engine.
+on:
+  pull_request:
+    branches: ['feature/db-console-rebuild', 'codex/website-session-db']
+    paths:
+      - 'host/**'
+      - 'billing/**'
+      - 'internal/accountscope/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'docs/*REALM*.md'
+      - '.github/workflows/native-realm-consumer.yml'
+  push:
+    branches: ['feature/native-persistent-realms']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-realm-boundaries:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Preserve the pinned native engine and daemon core
+        run: git diff --exit-code 8512e1704e589d24535e08082c3ab9f832d7655d HEAD -- engine box cmd/redxd host/engineadapter
+      - name: Vet native consumer integration
+        run: go vet ./internal/accountscope ./billing ./host/... ./cmd/redxd/...
+      - name: Race-test ownership, restoration, native engine and legacy clients
+        run: go test -race -count=1 -timeout=10m ./internal/accountscope ./billing ./host/... ./cmd/redxd/...
+      - name: Browser module isolation and legacy console tests
+        run: node --test host/uitest/*.test.mjs
+      - name: Build native binaries without runtime credentials
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          mkdir -p stage
+          go build -trimpath -o stage/redxd ./cmd/redxd
+          go build -trimpath -o stage/redx ./cmd/redx
+
+# No release upload, deployment, environment, production secrets or activation.

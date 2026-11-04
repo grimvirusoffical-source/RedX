@@ -124,6 +124,36 @@ test('an old database list cannot repopulate state after a new account is loaded
   assert.deepEqual(state.dbLogical, {});
 });
 
+test('equal public subjects in distinct realms cannot share caches or in-flight data', async () => {
+  fixture();
+  configureAuthentication(website);
+  const publicSub = 'rxf1_public-hash-fixture';
+  let fresh = false;
+  let finish;
+  globalThis.fetch = async path => path === '/v1/ui/whoami'
+    ? json({ ...who(publicSub), account: { sub: publicSub, ...(fresh ? { storage_subject: ' rxf1:issuer.raw-subject' } : {}) } })
+    : new Promise(resolve => { finish = resolve; });
+  await loadWho();
+  accountLocal.setItem('redx.saved', 'legacy-private');
+  accountTab.setItem('redx.studio.q', 'legacy-draft');
+  setDb('legacy-db');
+  const oldList = loadDbs();
+  fresh = true;
+  await loadWho();
+  assert.equal(state.db, 'default');
+  assert.equal(accountLocal.getItem('redx.saved'), null);
+  assert.equal(accountTab.getItem('redx.studio.q'), null);
+  finish(json({ dbs: ['legacy-db'] }));
+  await oldList;
+  assert.deepEqual(state.dbs, []);
+  accountLocal.setItem('redx.saved', 'fresh-private');
+  fresh = false;
+  await loadWho();
+  assert.equal(state.db, 'legacy-db');
+  assert.equal(accountLocal.getItem('redx.saved'), 'legacy-private');
+  assert.equal(accountTab.getItem('redx.studio.q'), 'legacy-draft');
+});
+
 test('website identity requires a canonical account and rejection never falls back to a stored key', async () => {
   fixture();
   configureAuthentication(website);

@@ -61,9 +61,12 @@ func addBytes(tw *tar.Writer, name string, b []byte) error {
 // snapshotExtra is included in a host backup (online or offline) and omitted
 // from a cluster replication snapshot, which must not carry the signing key.
 type snapshotExtra struct {
-	signingKey  []byte
-	signingMeta []byte
-	tenants     []byte
+	signingKey   []byte
+	signingMeta  []byte
+	tenants      []byte
+	realmOwners  []byte
+	billingPlans []byte
+	billingUsage []byte
 }
 
 // WriteSnapshot writes the tar.gz to w. dbsRoot is <data>/dbs.
@@ -121,6 +124,16 @@ func writeSnapshot(w io.Writer, dbsRoot string, keys []KeyRecord, ttlJSON []byte
 				return err
 			}
 		}
+		for _, item := range []struct {
+			name string
+			data []byte
+		}{{"realm-owners.json", extra.realmOwners}, {"billing/plans.json", extra.billingPlans}, {"billing/usage.json", extra.billingUsage}} {
+			if len(item.data) > 0 {
+				if err := addBytes(tw, item.name, item.data); err != nil {
+					return err
+				}
+			}
+		}
 	}
 	if err := tw.Close(); err != nil {
 		return err
@@ -138,11 +151,14 @@ func ptrs(k []KeyRecord) []*KeyRecord {
 
 // SnapshotContents is what ExtractSnapshot found.
 type SnapshotContents struct {
-	Keys        []KeyRecord
-	TTL         []byte
-	SigningKey  []byte
-	SigningMeta []byte
-	Tenants     []byte
+	Keys         []KeyRecord
+	TTL          []byte
+	SigningKey   []byte
+	SigningMeta  []byte
+	Tenants      []byte
+	RealmOwners  []byte
+	BillingPlans []byte
+	BillingUsage []byte
 }
 
 // ExtractSnapshot unpacks a snapshot: db files go under destDBs; keys/ttl are returned.
@@ -195,6 +211,35 @@ func ExtractSnapshot(r io.Reader, destDBs string) (*SnapshotContents, error) {
 			if sc.Tenants, err = io.ReadAll(io.LimitReader(tr, 32<<20)); err != nil {
 				return nil, err
 			}
+		case name == "realm-owners.json" || name == "billing/plans.json" || name == "billing/usage.json":
+			if hdr.Typeflag != tar.TypeReg || hdr.Size < 0 || hdr.Size > 32<<20 {
+				return nil, errors.New("snapshot: invalid ownership metadata entry")
+			}
+			b, err := io.ReadAll(io.LimitReader(tr, (32<<20)+1))
+			if err != nil || len(b) > 32<<20 {
+				return nil, errors.New("snapshot: invalid ownership metadata size")
+			}
+			var object map[string]json.RawMessage
+			if json.Unmarshal(b, &object) != nil || object == nil {
+				return nil, errors.New("snapshot: invalid ownership metadata JSON")
+			}
+			switch name {
+			case "realm-owners.json":
+				if sc.RealmOwners != nil {
+					return nil, errors.New("snapshot: duplicate ownership metadata")
+				}
+				sc.RealmOwners = b
+			case "billing/plans.json":
+				if sc.BillingPlans != nil {
+					return nil, errors.New("snapshot: duplicate billing metadata")
+				}
+				sc.BillingPlans = b
+			case "billing/usage.json":
+				if sc.BillingUsage != nil {
+					return nil, errors.New("snapshot: duplicate usage metadata")
+				}
+				sc.BillingUsage = b
+			}
 		case strings.HasPrefix(name, "dbs/"):
 			rel := strings.TrimPrefix(name, "dbs/")
 			if rel == "" || strings.HasPrefix(rel, "/") || strings.Contains(rel, "..") || strings.Contains(rel, `\`) || filepath.IsAbs(rel) {
@@ -227,6 +272,9 @@ func ExtractSnapshot(r io.Reader, destDBs string) (*SnapshotContents, error) {
 		default:
 			return nil, fmt.Errorf("snapshot: unexpected entry %q", hdr.Name)
 		}
+	}
+	if err := validateSnapshotOwnership(sc); err != nil {
+		return nil, err
 	}
 	return sc, nil
 }
@@ -378,11 +426,17 @@ func (h *Host) buildHostBackup() (path string, offset uint64, err error) {
 func (h *Host) writeHostArchive(w io.Writer) error {
 	extra := &snapshotExtra{}
 	extra.signingKey, extra.signingMeta = h.signingKeyMaterial()
+	h.pause.Lock()
+	defer h.pause.Unlock()
+	registry, releaseRegistry := h.realmOwners.freezeSnapshot()
+	defer releaseRegistry()
+	extra.realmOwners = registry
 	if h.tenants != nil {
 		extra.tenants = h.tenants.bytes()
 	}
-	h.pause.Lock()
-	defer h.pause.Unlock()
+	if len(registry) > 0 {
+		extra.billingPlans, extra.billingUsage = h.billing.SnapshotMetadata()
+	}
 	h.checkpointAll()
 	_ = h.Tracker.Save()
 	ttl, _ := os.ReadFile(filepath.Join(h.Cfg.DataDir, "cluster", "ttl.json"))
@@ -457,7 +511,29 @@ func offlineCopy(dataDir string, w io.Writer, pass string) error {
 	key, _ := os.ReadFile(filepath.Join(dataDir, "updates", "signing.key"))
 	meta, _ := os.ReadFile(filepath.Join(dataDir, "updates", "signing.key.meta"))
 	tenants, _ := os.ReadFile(filepath.Join(dataDir, "tenants.json"))
-	return writeSnapshot(w, filepath.Join(dataDir, "dbs"), keys, ttl, &snapshotExtra{signingKey: key, signingMeta: meta, tenants: tenants})
+	readOptional := func(name string) ([]byte, error) {
+		data, err := os.ReadFile(filepath.Join(dataDir, filepath.FromSlash(name)))
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return data, err
+	}
+	realmOwners, err := readOptional("realm-owners.json")
+	if err != nil {
+		return err
+	}
+	var plans, usage []byte
+	if len(realmOwners) > 0 {
+		plans, err = readOptional("billing/plans.json")
+		if err != nil {
+			return err
+		}
+		usage, err = readOptional("billing/usage.json")
+		if err != nil {
+			return err
+		}
+	}
+	return writeSnapshot(w, filepath.Join(dataDir, "dbs"), keys, ttl, &snapshotExtra{signingKey: key, signingMeta: meta, tenants: tenants, realmOwners: realmOwners, billingPlans: plans, billingUsage: usage})
 }
 
 func requestLiveBackup(dataDir string, w io.Writer) error {
@@ -581,6 +657,19 @@ func OfflineRestore(dataDir string, r io.Reader, pass string, force bool) (moved
 	if err != nil {
 		return "", err
 	}
+	// Realm-bearing restores are accepted into a fresh metadata destination
+	// only. --force moves database files, but cannot safely merge/reassign a
+	// registry or leave an absent archive member's old billing row behind.
+	if _, statErr := os.Lstat(filepath.Join(dataDir, "realm-owners.json")); !os.IsNotExist(statErr) {
+		return "", errors.New("restore realm metadata into a fresh data dir; existing registry is preserved")
+	}
+	if sc.RealmOwners != nil {
+		for _, name := range []string{"keys.red-xai-keys", "tenants.json", "billing/plans.json", "billing/usage.json"} {
+			if _, statErr := os.Lstat(filepath.Join(dataDir, filepath.FromSlash(name))); !os.IsNotExist(statErr) {
+				return "", errors.New("restore realm metadata into a fresh data dir; existing ownership metadata is preserved")
+			}
+		}
+	}
 	if _, err := os.Stat(dbs); err == nil {
 		movedTo = dbs + ".pre-restore-" + time.Now().UTC().Format("20060102-150405")
 		if err := os.Rename(dbs, movedTo); err != nil {
@@ -620,6 +709,20 @@ func OfflineRestore(dataDir string, r io.Reader, pass string, force bool) (moved
 	if len(sc.Tenants) > 0 {
 		if err := os.WriteFile(filepath.Join(dataDir, "tenants.json"), sc.Tenants, 0o600); err != nil {
 			return movedTo, err
+		}
+	}
+	for _, item := range []struct {
+		name string
+		data []byte
+	}{{"realm-owners.json", sc.RealmOwners}, {"billing/plans.json", sc.BillingPlans}, {"billing/usage.json", sc.BillingUsage}} {
+		if len(item.data) > 0 {
+			target := filepath.Join(dataDir, filepath.FromSlash(item.name))
+			if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+				return movedTo, err
+			}
+			if err := os.WriteFile(target, item.data, 0o600); err != nil {
+				return movedTo, err
+			}
 		}
 	}
 	return movedTo, nil

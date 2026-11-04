@@ -173,6 +173,21 @@ func (s *Service) StoredPlan(account string) (Plan, bool) {
 	return s.store.Get(account)
 }
 
+// OwnerMetadataExists is a read-only collision check, including unusable old
+// rows. An unlabelled row cannot become a fresh entitlement by adoption.
+func (s *Service) OwnerMetadataExists(account string) bool {
+	return s != nil && s.store != nil && s.store.HasAccount(account)
+}
+
+// SnapshotMetadata copies only the integration metadata stores under their
+// locks. It contains no provider API credential or environment value.
+func (s *Service) SnapshotMetadata() (plans, usage []byte) {
+	if s == nil {
+		return nil, nil
+	}
+	return s.store.bytes(), s.usage.bytes()
+}
+
 // Usage returns the usage store (never nil after New).
 func (s *Service) Usage() *UsageStore { return s.usage }
 

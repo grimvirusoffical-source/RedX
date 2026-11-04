@@ -42,6 +42,7 @@ type Host struct {
 	website     *websiteSessionAdapter // optional same-site website account authority
 	billing     *billing.Service       // RedX Hosted plans on Stripe (billing_api.go)
 	tenants     *tenantStore           // which hosted account owns which database (tenant.go)
+	realmOwners *realmOwnerStore       // immutable integration-layer issuer/subject ownership claims
 	webSetup    bool                   // an empty keystore may be set up from the browser (loopback only)
 	bootMu      sync.Mutex             // serialises the web bootstrap
 	runMu       sync.Mutex
@@ -132,6 +133,10 @@ func New(cfg Config, opener Opener, logf func(string, ...interface{})) (*Host, e
 	if h.tenants, err = openTenants(filepath.Join(cfg.DataDir, "tenants.json")); err != nil {
 		return fail(err)
 	}
+	if h.realmOwners, err = openRealmOwners(filepath.Join(cfg.DataDir, "realm-owners.json")); err != nil {
+		return fail(err)
+	}
+	h.Auth.ownerMetadata = h.keyOwnershipAllowed
 	h.Tracker = NewTTLTracker(filepath.Join(cfg.DataDir, "cluster", "ttl.json"))
 	if h.Cluster, err = newCluster(h); err != nil {
 		return fail(err)
