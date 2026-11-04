@@ -53,3 +53,10 @@ jobs:
         run: go vet ./host/... ./cmd/redxd/...
       - name: Existing browser behavior
         run: node --test host/uitest/*.test.mjs
+      - name: Build source-only native binaries
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          mkdir -p stage
+          go build -trimpath -o stage/redxd ./cmd/redxd
+          go build -trimpath -o stage/redx ./cmd/redx
