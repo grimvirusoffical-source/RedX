@@ -65,9 +65,20 @@ func bearer(r *http.Request) string {
 
 // Errors returned by Authenticate (map to HTTP status in the server).
 var (
-	ErrUnauthorized = errors.New("unauthorized")
-	ErrThrottled    = errors.New("too many requests")
+	ErrUnauthorized     = errors.New("unauthorized")
+	ErrThrottled        = errors.New("too many requests")
+	ErrAuditUnavailable = errors.New("privileged audit unavailable")
 )
+
+// A server audit failure is not an invalid login. Keep the owner session intact
+// and return a retryable service error without a WWW-Authenticate challenge.
+func rejectAuditUnavailable(w http.ResponseWriter, err error) bool {
+	if !errors.Is(err, ErrAuditUnavailable) {
+		return false
+	}
+	writeErrCode(w, http.StatusServiceUnavailable, "audit_unavailable", "Privileged access is temporarily unavailable.")
+	return true
+}
 
 // Authenticate verifies the request's key. On success it applies the per-key
 // rate limit (returns ErrThrottled + retry hint). Failures are audited
@@ -147,7 +158,9 @@ func (a *Authenticator) accountResult(r *http.Request, ip string, pr *Principal)
 		if r.Method != "GET" && r.Method != "HEAD" {
 			ev = "owner.write"
 		}
-		a.audit.Log(AuditEvent{Event: ev, KeyID: pr.Key.ID, Actor: pr.Account.Email, Target: auditTarget(r), Remote: ip, Method: r.Method, Route: routeOf(r)})
+		if err := a.audit.LogRequired(AuditEvent{Event: ev, KeyID: pr.Key.ID, Actor: pr.Account.Email, Target: auditTarget(r), Remote: ip, Method: r.Method, Route: routeOf(r)}); err != nil {
+			return nil, 0, ErrAuditUnavailable
+		}
 	} else if a.auditOK {
 		a.audit.Log(AuditEvent{Event: "auth.ok", KeyID: pr.Key.ID, Remote: ip, Method: r.Method, Route: routeOf(r)})
 	}

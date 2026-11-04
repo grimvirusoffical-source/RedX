@@ -999,6 +999,10 @@ func (h *Host) connectSelfRevoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pr, _, err := h.Auth.Authenticate(r)
+	if errors.Is(err, ErrAuditUnavailable) {
+		connectErr(w, http.StatusServiceUnavailable, "audit_unavailable", "Privileged access is temporarily unavailable.")
+		return
+	}
 	if err != nil {
 		h.authBad.Add(1)
 		connectErr(w, 401, "unauthorized", "unauthorized")

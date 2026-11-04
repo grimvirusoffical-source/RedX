@@ -2,6 +2,8 @@ package host
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -28,9 +30,16 @@ type AuditEvent struct {
 type Auditor struct {
 	mu      sync.Mutex
 	path    string
-	f       *os.File
+	f       auditSink
 	size    int64
 	maxSize int64
+	failed  error
+}
+
+type auditSink interface {
+	Write([]byte) (int, error)
+	Sync() error
+	Close() error
 }
 
 // NewAuditor opens (appending) the log. path=="" discards events.
@@ -53,43 +62,121 @@ func (a *Auditor) open() error {
 	if err != nil {
 		return err
 	}
-	st, _ := f.Stat()
+	st, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return err
+	}
 	if st != nil {
 		a.size = st.Size()
+		if st.Size() > 0 {
+			// Preserve an interrupted append as evidence; do not join a new
+			// privileged event onto an unterminated fragment after restart.
+			reader, err := os.Open(a.path)
+			if err != nil {
+				a.failed = errors.New("audit tail unavailable")
+			} else {
+				var last [1]byte
+				readInfo, statErr := reader.Stat()
+				_, readErr := reader.ReadAt(last[:], st.Size()-1)
+				reader.Close()
+				if statErr != nil || readErr != nil || !os.SameFile(st, readInfo) {
+					a.failed = errors.New("audit tail unavailable")
+				} else if last[0] != '\n' {
+					a.failed = errors.New("audit tail is incomplete")
+				}
+			}
+		}
 	}
 	a.f = f
 	return nil
 }
 
-// Log records an event.
+// Log records a best-effort event. Privileged account authorization uses
+// LogRequired so an unavailable sink cannot silently permit owner access.
 func (a *Auditor) Log(ev AuditEvent) {
-	if a == nil || a.f == nil {
-		return
+	_ = a.log(ev, false)
+}
+
+// LogRequired appends and syncs an event before privileged access is granted.
+// Disabled, closed and failed sinks are errors, never successful audit writes.
+// A successful Sync is an OS acknowledgment, not a power-loss recovery proof.
+func (a *Auditor) LogRequired(ev AuditEvent) error { return a.log(ev, true) }
+
+func (a *Auditor) log(ev AuditEvent, required bool) error {
+	if a == nil {
+		if required {
+			return errors.New("audit unavailable")
+		}
+		return nil
 	}
 	if ev.Time.IsZero() {
 		ev.Time = time.Now().UTC()
 	}
-	b, _ := json.Marshal(ev)
+	b, err := json.Marshal(ev)
+	if err != nil {
+		return err
+	}
 	b = append(b, '\n')
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.f == nil {
+		if required {
+			return errors.New("audit unavailable")
+		}
+		return nil
+	}
+	if a.failed != nil {
+		return a.failed
+	}
 	if a.size+int64(len(b)) > a.maxSize {
-		a.f.Close()
-		_ = os.Rename(a.path, a.path+".1")
+		if err := a.f.Close(); err != nil {
+			a.f = nil
+			a.failed = err
+			return err
+		}
+		a.f = nil
+		if err := os.Rename(a.path, a.path+".1"); err != nil {
+			// Keep the existing file untouched and require normal sink
+			// reinitialization after an operator resolves the failure.
+			a.failed = err
+			return err
+		}
 		if err := a.open(); err != nil {
-			return
+			a.failed = err
+			return err
 		}
 	}
-	n, _ := a.f.Write(b)
+	n, err := a.f.Write(b)
 	a.size += int64(n)
+	if err != nil {
+		a.failed = err
+		return err
+	}
+	if n != len(b) {
+		a.failed = io.ErrShortWrite
+		return io.ErrShortWrite
+	}
+	if required {
+		if err := a.f.Sync(); err != nil {
+			a.failed = err
+			return err
+		}
+	}
+	return nil
 }
 
 // Close closes the file.
 func (a *Auditor) Close() error {
-	if a == nil || a.f == nil {
+	if a == nil {
 		return nil
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.f.Close()
+	if a.f == nil {
+		return nil
+	}
+	err := a.f.Close()
+	a.f = nil
+	return err
 }

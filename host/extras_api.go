@@ -47,6 +47,9 @@ var setNameRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 // key's path prefix itself (by filtering results).
 func (h *Host) authzScope(w http.ResponseWriter, r *http.Request, need, db string) (*Principal, bool) {
 	pr, wait, err := h.Auth.Authenticate(r)
+	if rejectAuditUnavailable(w, err) {
+		return nil, false
+	}
 	switch {
 	case errors.Is(err, ErrThrottled):
 		w.Header().Set("Retry-After", strconv.Itoa(int(wait/time.Second)+1))

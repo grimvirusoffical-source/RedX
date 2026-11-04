@@ -57,6 +57,9 @@ func (h *Host) updateFail(w http.ResponseWriter, err error) {
 func (h *Host) updateAuth(w http.ResponseWriter, r *http.Request, admin bool) (*Principal, bool) {
 	pr, wait, err := h.Auth.Authenticate(r)
 	switch {
+	case errors.Is(err, ErrAuditUnavailable):
+		writeUpdateErr(w, http.StatusServiceUnavailable, "audit_unavailable", "Privileged access is temporarily unavailable.")
+		return nil, false
 	case errors.Is(err, ErrThrottled):
 		w.Header().Set("Retry-After", strconv.Itoa(int(wait/time.Second)+1))
 		writeUpdateErr(w, http.StatusTooManyRequests, "forbidden", "rate limit exceeded")
