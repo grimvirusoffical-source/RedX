@@ -1,0 +1,62 @@
+name: Website global API key audit
+
+on:
+  pull_request:
+    branches: [feature/owner-audit-8512, main]
+    paths:
+      - host/auth.go
+      - host/host.go
+      - host/global_key_audit_test.go
+      - host/website_global_key_audit_test.go
+      - docs/WEBSITE-GLOBAL-KEY-AUDIT.md
+      - .github/workflows/website-global-key-audit.yml
+  push:
+    branches: [feature/website-global-key-audit]
+
+permissions:
+  contents: read
+
+jobs:
+  global-key-audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require exact reviewed parent and bounded source change
+        run: |
+          python3 - <<'PY'
+          import subprocess
+          base='8a6905999332a66ab7a77b2ffe9ea7d3a8e26a92'
+          subprocess.check_call(['git','merge-base','--is-ancestor',base,'HEAD'])
+          changed=set(subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines())
+          assert changed=={
+            '.github/workflows/website-global-key-audit.yml',
+            'docs/WEBSITE-GLOBAL-KEY-AUDIT.md',
+            'host/auth.go','host/host.go',
+            'host/global_key_audit_test.go','host/website_global_key_audit_test.go',
+          }
+          PY
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          cache: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Host, tenant, required audit and HTTP race tests
+        run: go test -race -count=1 -timeout=6m ./host/... ./cmd/redxd/...
+      - name: Vet existing integration
+        run: go vet ./host/... ./cmd/redxd/...
+      - name: Existing browser behavior
+        run: node --test host/uitest/*.test.mjs
+      - name: Build source-only native binaries
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          mkdir -p stage
+          go build -trimpath -o stage/redxd ./cmd/redxd
+          go build -trimpath -o stage/redx ./cmd/redx
