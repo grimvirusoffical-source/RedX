@@ -4,7 +4,7 @@ name: Native realm consumer prototype
 # the exact deployed native UI branch without importing advanced main's engine.
 on:
   pull_request:
-    branches: ['feature/db-console-rebuild', 'codex/website-session-db']
+    branches: ['feature/db-console-rebuild', 'codex/website-session-db', 'feature/native-persistent-realms']
     paths:
       - 'host/**'
       - 'billing/**'
