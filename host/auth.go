@@ -40,7 +40,9 @@ type Authenticator struct {
 	// accounts resolves console session tokens (rxs_...); master names the protected database. Set by Host.
 	accounts func(token string) (*Principal, bool)
 	website  func(*http.Request) (*Principal, bool)
-	master   func() string
+	// websiteMode follows the actual Host adapter, not the always-wired resolver.
+	websiteMode func() bool
+	master      func() string
 }
 
 // NewAuthenticator wires the pieces together.
@@ -119,7 +121,17 @@ func (a *Authenticator) Authenticate(r *http.Request) (*Principal, time.Duration
 		a.audit.Log(AuditEvent{Event: "ratelimit", KeyID: rec.ID, Remote: ip, Method: r.Method})
 		return &Principal{Key: *rec, master: a.masterDB()}, wait, ErrThrottled
 	}
-	if a.auditOK {
+	if rec.DB == AllDBs && a.websiteMode != nil && a.websiteMode() {
+		// This is a verified global-key request, before route ACLs or mutation.
+		// Key metadata is not evidence of an acting human identity.
+		target := routeOf(r)
+		if strings.HasPrefix(r.URL.Path, "/v1/db/") {
+			target = auditTarget(r)
+		}
+		if err := a.audit.LogRequired(AuditEvent{Event: "global_key.access_attempt", KeyID: rec.ID, Target: target, Remote: ip, Method: r.Method, Route: routeOf(r)}); err != nil {
+			return nil, 0, ErrAuditUnavailable
+		}
+	} else if a.auditOK {
 		a.audit.Log(AuditEvent{Event: "auth.ok", KeyID: rec.ID, Remote: ip, Method: r.Method, Route: routeOf(r)})
 	}
 	return &Principal{Key: *rec, master: a.masterDB()}, 0, nil

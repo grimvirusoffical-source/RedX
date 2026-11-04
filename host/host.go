@@ -124,6 +124,7 @@ func New(cfg Config, opener Opener, logf func(string, ...interface{})) (*Host, e
 	h.Auth.accounts = h.resolveAccount
 	h.website = websiteSessionFromEnv()
 	h.Auth.website = h.resolveWebsiteAccount
+	h.Auth.websiteMode = func() bool { return h.website != nil }
 	h.Auth.master = h.masterDB
 	h.connect = openConnectStore(cfg.DataDir)
 	if h.billing, err = newBilling(cfg, logf); err != nil {
