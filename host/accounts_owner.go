@@ -23,6 +23,9 @@ import (
 
 func (h *Host) ownerAuth(w http.ResponseWriter, r *http.Request) (*Principal, bool) {
 	pr, wait, err := h.Auth.Authenticate(r)
+	if rejectAuditUnavailable(w, err) {
+		return nil, false
+	}
 	switch {
 	case errors.Is(err, ErrThrottled):
 		w.Header().Set("Retry-After", strconv.Itoa(int(wait/time.Second)+1))

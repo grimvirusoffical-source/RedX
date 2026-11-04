@@ -146,6 +146,9 @@ func roleName(c *Cluster) string {
 // authz authenticates and authorizes. When hostLevel the key must be admin on db "*".
 func (h *Host) authz(w http.ResponseWriter, r *http.Request, need, db, path string, hostLevel bool) (*Principal, bool) {
 	pr, wait, err := h.Auth.Authenticate(r)
+	if rejectAuditUnavailable(w, err) {
+		return nil, false
+	}
 	switch {
 	case errors.Is(err, ErrThrottled):
 		w.Header().Set("Retry-After", strconv.Itoa(int(wait/time.Second)+1))
@@ -663,6 +666,9 @@ func (h *Host) dbsRoute(w http.ResponseWriter, r *http.Request) {
 // branch (tenant vs host admin) call it once so a denial is not counted twice.
 func (h *Host) authenticate(w http.ResponseWriter, r *http.Request) (*Principal, bool) {
 	pr, wait, err := h.Auth.Authenticate(r)
+	if rejectAuditUnavailable(w, err) {
+		return nil, false
+	}
 	switch {
 	case errors.Is(err, ErrThrottled):
 		w.Header().Set("Retry-After", strconv.Itoa(int(wait/time.Second)+1))
@@ -703,6 +709,9 @@ func canManage(p *Principal, db string) bool {
 
 func (h *Host) keysRoute(w http.ResponseWriter, r *http.Request) {
 	pr, wait, err := h.Auth.Authenticate(r)
+	if rejectAuditUnavailable(w, err) {
+		return
+	}
 	if err != nil {
 		if errors.Is(err, ErrThrottled) {
 			w.Header().Set("Retry-After", strconv.Itoa(int(wait/time.Second)+1))
