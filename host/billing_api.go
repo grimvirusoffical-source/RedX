@@ -58,6 +58,9 @@ func (h *Host) billingRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	h.billing.Handler(func(w http.ResponseWriter, r *http.Request) (billing.Identity, bool) {
 		pr, wait, err := h.Auth.Authenticate(r)
+		if rejectAuditUnavailable(w, err) {
+			return billing.Identity{}, false
+		}
 		switch {
 		case errors.Is(err, ErrThrottled):
 			w.Header().Set("Retry-After", strconv.Itoa(int(wait/time.Second)+1))

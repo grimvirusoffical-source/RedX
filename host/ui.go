@@ -385,6 +385,9 @@ func (h *Host) validateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, wait, err := h.Auth.Authenticate(r); err != nil {
+		if rejectAuditUnavailable(w, err) {
+			return
+		}
 		if errors.Is(err, ErrThrottled) {
 			_ = wait
 			writeErr(w, 429, "rate limit exceeded")
@@ -439,6 +442,9 @@ func (h *Host) whoami(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pr, wait, err := h.Auth.Authenticate(r)
+	if rejectAuditUnavailable(w, err) {
+		return
+	}
 	if err != nil {
 		if errors.Is(err, ErrThrottled) {
 			w.Header().Set("Retry-After", strconv.Itoa(int(wait/time.Second)+1))

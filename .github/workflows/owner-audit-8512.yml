@@ -1,0 +1,47 @@
+name: Deployed-source owner audit backport
+
+on:
+  pull_request:
+    branches: [feature/db-console-rebuild, main]
+    paths:
+      - 'host/**'
+      - 'docs/OWNER-AUDIT-GATE.md'
+      - '.github/workflows/owner-audit-8512.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit-backport:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require deployed source ancestry and unchanged engine
+        run: |
+          git merge-base --is-ancestor 8512e1704e589d24535e08082c3ab9f832d7655d HEAD
+          git diff --exit-code 8512e1704e589d24535e08082c3ab9f832d7655d HEAD -- engine box cmd/redxd host/engineadapter go.mod go.sum host/website_session.go host/tenant.go
+          test ! -e host/realm_ownership.go
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          cache: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Audit faults, website identity, tenant and native race tests
+        run: go test -race -count=1 -timeout=6m ./host/... ./cmd/redxd/...
+      - name: Vet integration
+        run: go vet ./host/... ./cmd/redxd/...
+      - name: Existing console behavior
+        run: node --test host/uitest/*.test.mjs
+      - name: Build source-only native binaries
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          mkdir -p stage
+          go build -trimpath -o stage/redxd ./cmd/redxd
+          go build -trimpath -o stage/redx ./cmd/redx
