@@ -22,6 +22,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"redx/internal/accountscope"
 	"strings"
 	"sync"
 	"time"
@@ -157,14 +158,18 @@ func emailASCII(s string) bool {
 
 // AccountIdentity is a signed-in Red-XAI Account (claims from a verified ID token).
 type AccountIdentity struct {
-	Sub           string    `json:"sub"`
-	Username      string    `json:"username,omitempty"`
-	Email         string    `json:"email,omitempty"`
-	EmailVerified bool      `json:"email_verified"`
-	AMR           []string  `json:"amr,omitempty"`
-	AgeBand       string    `json:"age_band,omitempty"`
-	Scopes        []string  `json:"scopes,omitempty"` // scopes granted on the access token (the "owner" scope matters)
-	Created       time.Time `json:"created"`
+	Sub string `json:"sub"`
+	// Set only by the validated realm adapter; never accepted from client JSON.
+	OwnershipIssuer  string    `json:"-"`
+	OwnershipSubject string    `json:"-"`
+	OwnershipKey     string    `json:"-"`
+	Username         string    `json:"username,omitempty"`
+	Email            string    `json:"email,omitempty"`
+	EmailVerified    bool      `json:"email_verified"`
+	AMR              []string  `json:"amr,omitempty"`
+	AgeBand          string    `json:"age_band,omitempty"`
+	Scopes           []string  `json:"scopes,omitempty"` // scopes granted on the access token (the "owner" scope matters)
+	Created          time.Time `json:"created"`
 	// set per request by the authenticator (not stored)
 	Owner        bool   `json:"owner"`
 	OwnerBlocked string `json:"owner_blocked,omitempty"` // why an owner email is not acting as owner (e.g. owner_2fa_required)
@@ -503,7 +508,7 @@ func (h *Host) resolveAccount(token string) (*Principal, bool) {
 		return nil, false
 	}
 	id, ok := h.accts.lookup(token)
-	if !ok {
+	if !ok || !accountscope.ValidLegacySubject(id.Sub) || id.OwnershipIssuer != "" {
 		return nil, false
 	}
 	id.Owner, id.OwnerBlocked = ownerStatus(id, h.Cfg.OwnerEmails)

@@ -3,6 +3,7 @@ package host
 import (
 	"errors"
 	"net/http"
+	"redx/internal/accountscope"
 	"strings"
 	"sync"
 	"time"
@@ -38,9 +39,10 @@ type Authenticator struct {
 	defBurst int
 	auditOK  bool
 	// accounts resolves console session tokens (rxs_...); master names the protected database. Set by Host.
-	accounts func(token string) (*Principal, bool)
-	website  func(*http.Request) (*Principal, bool)
-	master   func() string
+	accounts      func(token string) (*Principal, bool)
+	website       func(*http.Request) (*Principal, bool)
+	ownerMetadata func(KeyRecord) bool
+	master        func() string
 }
 
 // NewAuthenticator wires the pieces together.
@@ -98,6 +100,14 @@ func (a *Authenticator) Authenticate(r *http.Request) (*Principal, time.Duration
 			id = rec.ID
 		}
 		a.fail(r, ip, id, err.Error())
+		return nil, 0, ErrUnauthorized
+	}
+	ownershipOK := rec.OwnerIssuer != accountscope.FreshIssuer
+	if a.ownerMetadata != nil {
+		ownershipOK = a.ownerMetadata(*rec)
+	}
+	if !ownershipOK {
+		a.fail(r, ip, rec.ID, "invalid persistent ownership binding")
 		return nil, 0, ErrUnauthorized
 	}
 	rps, burst := rec.RateRPS, rec.RateBurst

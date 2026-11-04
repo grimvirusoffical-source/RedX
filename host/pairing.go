@@ -185,7 +185,7 @@ func (h *Host) pairingIssue(w http.ResponseWriter, r *http.Request, pr *Principa
 		writeErr(w, 409, "pairing codes are made on the leader ("+h.Cluster.LeaderURL()+"); open the console there")
 		return
 	}
-	spec := CreateSpec{DB: req.DB, Scope: req.Scope, Prefix: req.Prefix, Label: req.Label, Roles: req.Roles, TTL: ttl, RateRPS: req.RateRPS, RateBurst: req.RateBurst}
+	spec := CreateSpec{DB: req.DB, Scope: req.Scope, Prefix: req.Prefix, Label: req.Label, Roles: req.Roles, TTL: ttl, RateRPS: req.RateRPS, RateBurst: req.RateBurst, Owner: pr.Key.Owner, OwnerIssuer: pr.Key.OwnerIssuer, OwnerSubject: pr.Key.OwnerSubject}
 	if spec.Label == "" {
 		spec.Label = "paired device"
 	}

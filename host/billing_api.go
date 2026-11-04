@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"redx/billing"
@@ -73,6 +74,10 @@ func (h *Host) billingRoute(w http.ResponseWriter, r *http.Request) {
 			acctErr(w, 403, "account_required", "Sign in with your Red-XAI Account to manage RedX Hosted plans.")
 			return billing.Identity{}, false
 		}
-		return billing.Identity{Sub: pr.Account.Sub, Email: pr.Account.Email}, true
+		if pr.Account.OwnershipIssuer != "" && ((r.Method != "GET" && r.Method != "HEAD") || strings.Contains(r.URL.Path, "/checkout") || strings.Contains(r.URL.Path, "/portal")) {
+			acctErr(w, 503, "realm_billing_unavailable", "Fresh account billing changes are not enabled.")
+			return billing.Identity{}, false
+		}
+		return billing.Identity{Sub: pr.Account.ownershipKey(), Email: pr.Account.Email}, true
 	}).ServeHTTP(w, r)
 }

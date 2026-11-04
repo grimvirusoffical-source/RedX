@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"redx/internal/accountscope"
 	"sync"
 	"time"
 )
@@ -32,6 +33,8 @@ func QuotaFor(tier string) (Quota, bool) {
 // Usage is one account's counters for the current monthly quota window.
 type Usage struct {
 	Account      string    `json:"account"`
+	OwnerIssuer  string    `json:"ownerIssuer,omitempty"`
+	OwnerSubject string    `json:"ownerSubject,omitempty"`
 	CycleStart   time.Time `json:"cycleStart"`
 	TrafficBytes int64     `json:"trafficBytes"`
 	StorageBytes int64     `json:"storageBytes"`
@@ -95,6 +98,11 @@ func OpenUsageStore(path string) (*UsageStore, error) {
 		}
 		if s.Usage == nil {
 			s.Usage = map[string]Usage{}
+		}
+		for key, u := range s.Usage {
+			if u.Account != key || !accountscope.MetadataMatches(key, u.OwnerIssuer, u.OwnerSubject) {
+				return nil, errors.New("invalid usage ownership metadata")
+			}
 		}
 	} else if !os.IsNotExist(err) {
 		return nil, err
@@ -177,6 +185,9 @@ func (s *UsageStore) ensureLocked(account string, now, periodEnd time.Time) Usag
 			hosted = false
 		}
 		u = Usage{Account: account, CycleStart: start, StorageBytes: storage, HostedOn: hosted, Updated: now.UTC()}
+		if issuer, subject, fresh := accountscope.Decode(account); fresh {
+			u.OwnerIssuer, u.OwnerSubject = issuer, subject
+		}
 		s.Usage[account] = u
 	}
 	return u
@@ -315,6 +326,20 @@ func (s *UsageStore) Clear(account string) {
 	defer s.mu.Unlock()
 	delete(s.Usage, account)
 	_ = s.saveLocked()
+}
+
+func (s *UsageStore) KnownAccount(account string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.Usage[account]
+	return ok
+}
+
+func (s *UsageStore) bytes() []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	data, _ := json.MarshalIndent(s, "", " ")
+	return data
 }
 
 // ErrNoUsage is reserved for callers that require a row.

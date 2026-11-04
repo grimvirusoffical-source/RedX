@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"redx/internal/accountscope"
 	"sort"
 	"strings"
 	"sync"
@@ -65,23 +66,26 @@ func (p *Principal) isTenant() bool {
 }
 
 // tenantSub is the hosted account this caller belongs to.
-// A console session uses Account.Sub. An API key minted for that account uses
-// Key.Owner. Owners and host-admin keys are not tenants: an empty result means
+// A console session uses its validated ownership key (the exact legacy Sub or
+// private realm key). An API key minted for that account uses Key.Owner.
+// Owners and host-admin keys are not tenants: an empty result means
 // the ordinary key ACL applies and hosted quotas are not enforced.
 func (p *Principal) tenantSub() string {
 	if p == nil || p.IsOwner() || p.Key.IsHostAdmin() {
 		return ""
 	}
 	if p.Account != nil && p.Account.Sub != "" {
-		return p.Account.Sub
+		return p.Account.ownershipKey()
 	}
 	return p.Key.Owner
 }
 
 type tenantRec struct {
-	Account string    `json:"account"`
-	Logical string    `json:"logical"`
-	Created time.Time `json:"created"`
+	Account      string    `json:"account"`
+	OwnerIssuer  string    `json:"ownerIssuer,omitempty"`
+	OwnerSubject string    `json:"ownerSubject,omitempty"`
+	Logical      string    `json:"logical"`
+	Created      time.Time `json:"created"`
 }
 
 type tenantFile struct {
@@ -140,7 +144,7 @@ func (s *tenantStore) owns(account, db string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r, ok := s.dbs[db]
-	return ok && r.Account == account
+	return ok && r.Account == account && accountscope.MetadataMatches(r.Account, r.OwnerIssuer, r.OwnerSubject)
 }
 
 func (s *tenantStore) ownerOf(db string) (string, bool) {
@@ -164,7 +168,7 @@ func (s *tenantStore) list(account string) []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for name, r := range s.dbs {
-		if r.Account == account {
+		if r.Account == account && accountscope.MetadataMatches(r.Account, r.OwnerIssuer, r.OwnerSubject) {
 			out = append(out, name)
 		}
 	}
@@ -180,7 +184,7 @@ func (s *tenantStore) logical(account string) map[string]string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for name, r := range s.dbs {
-		if r.Account == account && r.Logical != "" {
+		if r.Account == account && accountscope.MetadataMatches(r.Account, r.OwnerIssuer, r.OwnerSubject) && r.Logical != "" {
 			out[name] = r.Logical
 		}
 	}
@@ -188,10 +192,24 @@ func (s *tenantStore) logical(account string) map[string]string {
 }
 
 func (s *tenantStore) put(name string, r tenantRec) error {
+	if !accountscope.MetadataMatches(r.Account, r.OwnerIssuer, r.OwnerSubject) {
+		return errors.New("invalid tenant ownership metadata")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.dbs[name] = r
 	return s.saveLocked()
+}
+
+func (s *tenantStore) hasAccount(account string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, r := range s.dbs {
+		if r.Account == account {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *tenantStore) bytes() []byte {
@@ -398,7 +416,7 @@ func dirBytes(root string) int64 {
 // ---- create / list / drop / keys for a paying account ----
 
 func (h *Host) tenantCreateDB(w http.ResponseWriter, r *http.Request, pr *Principal) {
-	mode, _ := h.tenantAccess(pr.Account.Sub)
+	mode, _ := h.tenantAccess(pr.tenantSub())
 	if mode != "full" {
 		if mode == "readonly" {
 			writeErrCode(w, http.StatusPaymentRequired, "plan_readonly",
@@ -420,7 +438,7 @@ func (h *Host) tenantCreateDB(w http.ResponseWriter, r *http.Request, pr *Princi
 		return
 	}
 	logical := strings.ToLower(strings.TrimSpace(b.Name))
-	phys, err := TenantPhysicalName(pr.Account.Sub, logical)
+	phys, err := TenantPhysicalName(pr.tenantSub(), logical)
 	if err != nil {
 		writeErr(w, 400, "invalid database name")
 		return
@@ -430,7 +448,7 @@ func (h *Host) tenantCreateDB(w http.ResponseWriter, r *http.Request, pr *Princi
 		return
 	}
 	if h.Reg.Exists(phys) {
-		if h.tenants.owns(pr.Account.Sub, phys) {
+		if h.tenants.owns(pr.tenantSub(), phys) {
 			writeErr(w, http.StatusConflict, "database already exists")
 			return
 		}
@@ -442,7 +460,7 @@ func (h *Host) tenantCreateDB(w http.ResponseWriter, r *http.Request, pr *Princi
 	if !h.checkHostSwitchQuota(w, pr) {
 		return
 	}
-	if err := h.tenants.put(phys, tenantRec{Account: pr.Account.Sub, Logical: logical, Created: time.Now().UTC()}); err != nil {
+	if err := h.tenants.put(phys, tenantRec{Account: pr.tenantSub(), OwnerIssuer: pr.Account.OwnershipIssuer, OwnerSubject: pr.Account.OwnershipSubject, Logical: logical, Created: time.Now().UTC()}); err != nil {
 		writeErr(w, 500, "internal error")
 		return
 	}
@@ -456,12 +474,12 @@ func (h *Host) tenantCreateDB(w http.ResponseWriter, r *http.Request, pr *Princi
 		h.mapErr(w, err)
 		return
 	}
-	h.Audit.Log(AuditEvent{Event: "db.create", KeyID: pr.Key.ID, Actor: pr.Account.Sub, DB: phys, Remote: remoteIP(r), Detail: "logical " + logical})
+	h.Audit.Log(AuditEvent{Event: "db.create", KeyID: pr.Key.ID, Actor: pr.tenantSub(), DB: phys, Remote: remoteIP(r), Detail: "logical " + logical})
 	writeJSON(w, http.StatusCreated, map[string]interface{}{"ok": true, "name": phys, "logical": logical, "seq": seq})
 }
 
 func (h *Host) tenantListDBs(w http.ResponseWriter, r *http.Request, pr *Principal) {
-	mode, known := h.tenantAccess(pr.Account.Sub)
+	mode, known := h.tenantAccess(pr.tenantSub())
 	if !known && mode == "none" {
 		h.Audit.Log(AuditEvent{Event: "auth.denied", KeyID: pr.Key.ID, DB: AllDBs, Remote: remoteIP(r), Method: r.Method, Route: routeOf(r), Reason: "scope"})
 		writeErr(w, http.StatusForbidden, "forbidden")
@@ -470,8 +488,8 @@ func (h *Host) tenantListDBs(w http.ResponseWriter, r *http.Request, pr *Princip
 	if !h.checkTrafficQuota(w, pr) {
 		return
 	}
-	names := h.tenants.list(pr.Account.Sub)
-	out := map[string]interface{}{"dbs": names, "logical": h.tenants.logical(pr.Account.Sub)}
+	names := h.tenants.list(pr.tenantSub())
+	out := map[string]interface{}{"dbs": names, "logical": h.tenants.logical(pr.tenantSub())}
 	if mode == "none" {
 		out["suspended"] = true
 	}
@@ -484,11 +502,11 @@ func (h *Host) tenantListDBs(w http.ResponseWriter, r *http.Request, pr *Princip
 }
 
 func (h *Host) tenantDropDB(w http.ResponseWriter, r *http.Request, pr *Principal, db string) {
-	if !h.tenants.owns(pr.Account.Sub, db) {
+	if !h.tenants.owns(pr.tenantSub(), db) {
 		writeErr(w, http.StatusNotFound, "database not found")
 		return
 	}
-	mode, known := h.tenantAccess(pr.Account.Sub)
+	mode, known := h.tenantAccess(pr.tenantSub())
 	if mode != "full" {
 		if mode == "readonly" {
 			writeErrCode(w, http.StatusPaymentRequired, "plan_readonly",
@@ -526,12 +544,12 @@ func (h *Host) tenantDropDB(w http.ResponseWriter, r *http.Request, pr *Principa
 		return
 	}
 	h.tenants.forget(db)
-	h.Audit.Log(AuditEvent{Event: "db.drop", KeyID: pr.Key.ID, Actor: pr.Account.Sub, DB: db, Remote: remoteIP(r)})
+	h.Audit.Log(AuditEvent{Event: "db.drop", KeyID: pr.Key.ID, Actor: pr.tenantSub(), DB: db, Remote: remoteIP(r)})
 	writeJSON(w, 200, map[string]interface{}{"ok": true, "name": db, "seq": seq})
 }
 
 func (h *Host) tenantKeys(w http.ResponseWriter, r *http.Request, pr *Principal) {
-	mode, known := h.tenantAccess(pr.Account.Sub)
+	mode, known := h.tenantAccess(pr.tenantSub())
 	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/keys"), "/")
 	creating := rest == "" && r.Method == "POST"
 	if !creating && !known && mode == "none" {
@@ -543,13 +561,19 @@ func (h *Host) tenantKeys(w http.ResponseWriter, r *http.Request, pr *Principal)
 	h.notePrincipal(r, pr)
 	now := time.Now()
 	ownsKey := func(k KeyRecord) bool {
+		if !accountscope.MetadataMatches(k.Owner, k.OwnerIssuer, k.OwnerSubject) {
+			return false
+		}
+		if pr.Account.OwnershipIssuer != "" && (k.OwnerIssuer != pr.Account.OwnershipIssuer || k.OwnerSubject != pr.Account.OwnershipSubject) {
+			return false
+		}
 		if k.DB == AllDBs || k.IsHostAdmin() {
 			return false
 		}
-		if k.Owner != "" && k.Owner != pr.Account.Sub {
+		if k.Owner != "" && k.Owner != pr.tenantSub() {
 			return false
 		}
-		return h.tenants.owns(pr.Account.Sub, k.DB)
+		return h.tenants.owns(pr.tenantSub(), k.DB)
 	}
 	switch {
 	case rest == "" && r.Method == "GET":
@@ -570,12 +594,12 @@ func (h *Host) tenantKeys(w http.ResponseWriter, r *http.Request, pr *Principal)
 			return
 		}
 		if req.DB == "" {
-			mine := h.tenants.list(pr.Account.Sub)
+			mine := h.tenants.list(pr.tenantSub())
 			if len(mine) == 1 {
 				req.DB = mine[0]
 			}
 		}
-		if req.DB == "" || req.DB == AllDBs || !h.tenants.owns(pr.Account.Sub, req.DB) {
+		if req.DB == "" || req.DB == AllDBs || !h.tenants.owns(pr.tenantSub(), req.DB) {
 			writeErr(w, http.StatusNotFound, "database not found")
 			return
 		}
@@ -594,12 +618,12 @@ func (h *Host) tenantKeys(w http.ResponseWriter, r *http.Request, pr *Principal)
 		if h.maybeForward(w, r) {
 			return
 		}
-		key, rec, err := h.KS.Create(CreateSpec{DB: req.DB, Scope: req.Scope, Prefix: req.Prefix, Label: req.Label, Roles: req.Roles, TTL: ttl, RateRPS: req.RateRPS, RateBurst: req.RateBurst, Owner: pr.Account.Sub})
+		key, rec, err := h.KS.Create(CreateSpec{DB: req.DB, Scope: req.Scope, Prefix: req.Prefix, Label: req.Label, Roles: req.Roles, TTL: ttl, RateRPS: req.RateRPS, RateBurst: req.RateBurst, Owner: pr.tenantSub(), OwnerIssuer: pr.Account.OwnershipIssuer, OwnerSubject: pr.Account.OwnershipSubject})
 		if err != nil {
 			writeErr(w, 400, err.Error())
 			return
 		}
-		h.Audit.Log(AuditEvent{Event: "key.create", KeyID: pr.Key.ID, Actor: pr.Account.Sub, DB: rec.DB, Remote: remoteIP(r), Detail: "new key " + rec.ID + " scope " + rec.Scope})
+		h.Audit.Log(AuditEvent{Event: "key.create", KeyID: pr.Key.ID, Actor: pr.tenantSub(), DB: rec.DB, Remote: remoteIP(r), Detail: "new key " + rec.ID + " scope " + rec.Scope})
 		writeJSON(w, http.StatusCreated, map[string]interface{}{"key": key, "id": rec.ID, "info": viewOf(rec, now), "warning": "this is the only time the key is shown; store it now"})
 	case rest == "pairing" && r.Method == "POST":
 		writeErr(w, http.StatusForbidden, "forbidden")
@@ -631,7 +655,7 @@ func (h *Host) tenantKeys(w http.ResponseWriter, r *http.Request, pr *Principal)
 				writeErr(w, 500, "internal error")
 				return
 			}
-			h.Audit.Log(AuditEvent{Event: "key.revoke", KeyID: pr.Key.ID, Actor: pr.Account.Sub, DB: rec.DB, Remote: remoteIP(r), Detail: "revoked " + id})
+			h.Audit.Log(AuditEvent{Event: "key.revoke", KeyID: pr.Key.ID, Actor: pr.tenantSub(), DB: rec.DB, Remote: remoteIP(r), Detail: "revoked " + id})
 			writeJSON(w, 200, viewOf(rec, now))
 		case len(parts) == 2 && parts[1] == "rotate" && r.Method == "POST":
 			var req struct {
@@ -651,7 +675,7 @@ func (h *Host) tenantKeys(w http.ResponseWriter, r *http.Request, pr *Principal)
 				writeErr(w, 409, err.Error())
 				return
 			}
-			h.Audit.Log(AuditEvent{Event: "key.rotate", KeyID: pr.Key.ID, Actor: pr.Account.Sub, DB: rec.DB, Remote: remoteIP(r), Detail: "rotated " + id + " -> " + rec.ID})
+			h.Audit.Log(AuditEvent{Event: "key.rotate", KeyID: pr.Key.ID, Actor: pr.tenantSub(), DB: rec.DB, Remote: remoteIP(r), Detail: "rotated " + id + " -> " + rec.ID})
 			writeJSON(w, http.StatusCreated, map[string]interface{}{"key": key, "id": rec.ID, "info": viewOf(rec, now), "replaces": id, "warning": "this is the only time the key is shown; store it now"})
 		default:
 			writeErr(w, 405, "method not allowed")

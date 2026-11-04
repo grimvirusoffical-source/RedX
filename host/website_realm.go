@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
+	"redx/internal/accountscope"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -31,13 +32,16 @@ func websiteCanonicalSubject(issuer, subject string) (string, bool) {
 		return "", false
 	}
 	if issuer == websiteLegacyIssuer {
-		if strings.HasPrefix(subject, websiteFreshPrefix) {
-			return "", false
-		}
 		return subject, true
 	}
 	sum := sha256.Sum256([]byte(issuer + "\x00" + subject))
 	return websiteFreshPrefix + hex.EncodeToString(sum[:]), true
+}
+
+// Preserve every valid legacy bare ID, including public DTO-shaped IDs. The
+// private ownership key, not this hash DTO, establishes realm disjointness.
+func websiteOwnershipKey(issuer, subject string) (string, bool) {
+	return accountscope.Key(issuer, subject)
 }
 
 func websiteRealmProfile(p websiteProfile) (legacy, ok bool) {

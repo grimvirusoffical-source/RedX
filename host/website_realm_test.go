@@ -23,8 +23,12 @@ func TestWebsiteRealmCanonicalSeparation(t *testing.T) {
 	if !ok || fresh == legacy || !strings.HasPrefix(fresh, websiteFreshPrefix) {
 		t.Fatal("realm collision")
 	}
-	if _, ok = websiteCanonicalSubject(websiteLegacyIssuer, fresh); ok {
-		t.Fatal("reserved legacy collision accepted")
+	if got, ok := websiteCanonicalSubject(websiteLegacyIssuer, fresh); !ok || got != fresh {
+		t.Fatal("valid legacy public-hash-shaped ID changed")
+	}
+	private, ok := websiteOwnershipKey(websiteFreshIssuer, "shared-subject")
+	if !ok || private == fresh || private == legacy {
+		t.Fatal("private ownership namespace collided with public IDs")
 	}
 	for _, sub := range []string{"", "has space", "bad\x00", strings.Repeat("ü", 101)} {
 		if _, ok := websiteCanonicalSubject(websiteFreshIssuer, sub); ok {

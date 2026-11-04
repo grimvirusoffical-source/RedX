@@ -24,6 +24,7 @@ import (
 
 	"github.com/gofrs/flock"
 	"golang.org/x/crypto/argon2"
+	"redx/internal/accountscope"
 )
 
 // API key format: rx_live_<43 base62 chars> (32 random bytes ≈ 256 bits).
@@ -81,13 +82,19 @@ type KeyRecord struct {
 	RateBurst   int        `json:"rate_burst,omitempty"`
 	RotatedFrom string     `json:"rotated_from,omitempty"`
 	Kind        string     `json:"kind,omitempty"` // "" = api key, "node" reserved
-	// Owner is the Red-XAI Account sub that minted this key (hosted tenants).
+	// Owner is the integration ownership key (exact legacy sub or private realm
+	// key) of the hosted tenant that minted this key.
 	// Empty for host-admin and self-hosted keys, which are not quota-capped.
-	Owner string `json:"owner,omitempty"`
+	Owner        string `json:"owner,omitempty"`
+	OwnerIssuer  string `json:"ownerIssuer,omitempty"`
+	OwnerSubject string `json:"ownerSubject,omitempty"`
 }
 
 // Active reports whether the record is usable at now.
 func (r *KeyRecord) Active(now time.Time) error {
+	if !accountscope.MetadataMatches(r.Owner, r.OwnerIssuer, r.OwnerSubject) {
+		return ErrKeyMalformed
+	}
 	if r.Revoked != nil {
 		return ErrKeyRevoked
 	}
@@ -130,15 +137,17 @@ func PathHasPrefix(path, prefix string) bool {
 
 // CreateSpec describes a key to create.
 type CreateSpec struct {
-	DB        string
-	Scope     string
-	Prefix    string
-	Label     string
-	Roles     []string      // names of roles declared in the db's .red-xai-sec (unknown names grant nothing)
-	TTL       time.Duration // 0 = no expiry
-	RateRPS   float64
-	RateBurst int
-	Owner     string // Red-XAI Account sub, hosted tenants only
+	DB           string
+	Scope        string
+	Prefix       string
+	Label        string
+	Roles        []string      // names of roles declared in the db's .red-xai-sec (unknown names grant nothing)
+	TTL          time.Duration // 0 = no expiry
+	RateRPS      float64
+	RateBurst    int
+	Owner        string // Red-XAI Account sub, hosted tenants only
+	OwnerIssuer  string
+	OwnerSubject string
 }
 
 // KeystoreOptions configure Open.
@@ -431,6 +440,9 @@ func (ks *Keystore) Create(sp CreateSpec) (string, KeyRecord, error) {
 }
 
 func (ks *Keystore) create(sp CreateSpec, rotatedFrom string) (string, KeyRecord, error) {
+	if !accountscope.MetadataMatches(sp.Owner, sp.OwnerIssuer, sp.OwnerSubject) {
+		return "", KeyRecord{}, errors.New("invalid key ownership metadata")
+	}
 	if sp.DB == "" {
 		sp.DB = AllDBs
 	}
@@ -460,7 +472,7 @@ func (ks *Keystore) create(sp CreateSpec, rotatedFrom string) (string, KeyRecord
 			r := &KeyRecord{ID: body[:keyIDLen], Salt: base64.RawStdEncoding.EncodeToString(salt),
 				Mem: ks.opts.ArgonMem, Time: ks.opts.ArgonTime, Threads: 1,
 				Scope: sp.Scope, DB: sp.DB, Prefix: sp.Prefix, Label: sp.Label, Roles: append([]string(nil), sp.Roles...), Created: now,
-				RateRPS: sp.RateRPS, RateBurst: sp.RateBurst, RotatedFrom: rotatedFrom, Owner: sp.Owner}
+				RateRPS: sp.RateRPS, RateBurst: sp.RateBurst, RotatedFrom: rotatedFrom, Owner: sp.Owner, OwnerIssuer: sp.OwnerIssuer, OwnerSubject: sp.OwnerSubject}
 			r.Hash = base64.RawStdEncoding.EncodeToString(hashKey(key, salt, r.Mem, r.Time, r.Threads))
 			if sp.TTL > 0 {
 				e := now.Add(sp.TTL)
@@ -614,7 +626,7 @@ func (ks *Keystore) Rotate(id string, grace time.Duration) (string, KeyRecord, e
 	if err := old.Active(ks.opts.Now()); err != nil {
 		return "", KeyRecord{}, fmt.Errorf("cannot rotate: %w", err)
 	}
-	sp := CreateSpec{DB: old.DB, Scope: old.Scope, Prefix: old.Prefix, Label: old.Label, Roles: old.Roles, RateRPS: old.RateRPS, RateBurst: old.RateBurst, Owner: old.Owner}
+	sp := CreateSpec{DB: old.DB, Scope: old.Scope, Prefix: old.Prefix, Label: old.Label, Roles: old.Roles, RateRPS: old.RateRPS, RateBurst: old.RateBurst, Owner: old.Owner, OwnerIssuer: old.OwnerIssuer, OwnerSubject: old.OwnerSubject}
 	if old.Expires != nil {
 		if rem := old.Expires.Sub(old.Created); rem > 0 {
 			sp.TTL = rem

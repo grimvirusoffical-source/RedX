@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"redx/internal/accountscope"
 	"strings"
 	"time"
 	"unicode"
@@ -129,6 +130,11 @@ func (s *websiteSessionAdapter) identity(r *http.Request) (*AccountIdentity, boo
 		return nil, false
 	}
 	id := &AccountIdentity{Sub: a.ID, Username: a.Username, Email: a.Email, AMR: p.AMR}
+	if s.realms && !legacyRealm {
+		id.OwnershipIssuer = p.IdentityRealm.Issuer
+		id.OwnershipSubject = p.IdentityRealm.Subject
+		id.OwnershipKey, _ = accountscope.Key(id.OwnershipIssuer, id.OwnershipSubject)
+	}
 	// Omitted verification metadata stays unknown/false. It is never fabricated.
 	id.EmailVerified = (a.EmailVerified != nil && *a.EmailVerified) || (a.EmailVerifiedOIDC != nil && *a.EmailVerifiedOIDC)
 	mfa := false
@@ -153,10 +159,10 @@ func (h *Host) resolveWebsiteAccount(r *http.Request) (*Principal, bool) {
 		return nil, false
 	}
 	id, ok := h.website.identity(r)
-	if !ok {
+	if !ok || !h.bindRealmIdentity(id) {
 		return nil, false
 	}
-	rec := KeyRecord{ID: "acct:" + id.Sub, Label: firstNonEmpty(id.Username, id.Email, id.Sub), Kind: "account", Scope: "none", DB: "-"}
+	rec := KeyRecord{ID: "acct:" + id.ownershipKey(), Label: firstNonEmpty(id.Username, id.Email, id.Sub), Kind: "account", Scope: "none", DB: "-"}
 	if id.Owner {
 		rec.Scope, rec.DB = ScopeAdmin, AllDBs
 	}
@@ -202,7 +208,7 @@ func (h *Host) websiteBoundary(next http.Handler) http.Handler {
 					return
 				case <-ticker.C:
 					current, ok := h.website.identity(r)
-					if !ok || current.Sub != identity.Sub || current.Owner != identity.Owner {
+					if !ok || current.ownershipKey() != identity.ownershipKey() || current.Owner != identity.Owner {
 						cancel()
 						return
 					}

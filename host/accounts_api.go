@@ -240,6 +240,10 @@ func (h *Host) authCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	// Granted scopes come from the token response (strict: an omitted scope list grants no owner scope).
 	id := AccountIdentity{Sub: cl.Sub, Username: cl.PreferredUsername, Email: cl.Email, AMR: cl.AMR, AgeBand: cl.AgeBand, Scopes: strings.Fields(tok.Scope)}
+	if id.ownershipKey() == "" {
+		fail("token")
+		return
+	}
 	if cl.EmailVerified != nil {
 		id.EmailVerified = *cl.EmailVerified
 	}
@@ -290,8 +294,14 @@ func accountView(a *AccountIdentity) map[string]interface{} {
 	if a == nil {
 		return nil
 	}
-	return map[string]interface{}{"sub": a.Sub, "username": a.Username, "email": a.Email, "email_verified": a.EmailVerified,
+	v := map[string]interface{}{"sub": a.Sub, "username": a.Username, "email": a.Email, "email_verified": a.EmailVerified,
 		"owner": a.Owner, "owner_blocked": a.OwnerBlocked, "two_factor_used": a.used2FA(), "owner_scope": containsStr(a.Scopes, OwnerScope)}
+	if a.OwnershipIssuer != "" {
+		// Public hash DTOs may equal a valid legacy bare ID. Scope browser caches
+		// with the authenticated private namespace, never the public DTO alone.
+		v["storage_subject"] = a.ownershipKey()
+	}
+	return v
 }
 
 // authHandoff trades the single-use code from the callback redirect for the console session token.

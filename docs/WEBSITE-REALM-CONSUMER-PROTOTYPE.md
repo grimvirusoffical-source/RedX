@@ -1,5 +1,10 @@
 # Source-only account realm consumer prototype
 
+Native ownership follow-up: [NATIVE-PERSISTENT-REALM-OWNERSHIP.md](NATIVE-PERSISTENT-REALM-OWNERSHIP.md)
+supersedes this initial prototype's native hash-only ownership and reserved-prefix
+discussion. Native legacy `rxf1_*` IDs remain valid; the follow-up persists an
+injective private issuer/subject namespace. Runtime activation remains refused.
+
 This work is **not deployed and is not approved for runtime activation**.
 The Host and Hub runtime entry points refuse a realm-prototype environment;
 the native DB environment factory refuses it too. The source consumers run

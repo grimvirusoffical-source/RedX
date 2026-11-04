@@ -768,7 +768,7 @@ func (h *Host) keysRoute(w http.ResponseWriter, r *http.Request) {
 		if h.maybeForward(w, r) {
 			return
 		}
-		key, rec, err := h.KS.Create(CreateSpec{DB: req.DB, Scope: req.Scope, Prefix: req.Prefix, Label: req.Label, Roles: req.Roles, TTL: ttl, RateRPS: req.RateRPS, RateBurst: req.RateBurst, Owner: pr.Key.Owner})
+		key, rec, err := h.KS.Create(CreateSpec{DB: req.DB, Scope: req.Scope, Prefix: req.Prefix, Label: req.Label, Roles: req.Roles, TTL: ttl, RateRPS: req.RateRPS, RateBurst: req.RateBurst, Owner: pr.Key.Owner, OwnerIssuer: pr.Key.OwnerIssuer, OwnerSubject: pr.Key.OwnerSubject})
 		if err != nil {
 			writeErr(w, 400, err.Error())
 			return
