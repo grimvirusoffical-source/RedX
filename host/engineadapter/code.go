@@ -43,6 +43,20 @@ type scriptRef struct {
 
 var fieldRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*(\.[A-Za-z_][A-Za-z0-9_-]*)*$`)
 
+// scriptGate is the owner/deploy bit for one script run. A missing value
+// refuses cert reads and idVerified writes.
+type scriptGate struct {
+	owner  bool
+	deploy bool
+}
+
+type scriptGateKey struct{}
+
+func scriptGateFrom(ctx context.Context) scriptGate {
+	g, _ := ctx.Value(scriptGateKey{}).(scriptGate)
+	return g
+}
+
 func (s *store) loadCode() {
 	st := &codeState{files: map[string]*code.File{}, scripts: map[string]scriptRef{}}
 	names, err := globFiles(s.dir, codeExt)
@@ -187,12 +201,20 @@ func (s *store) codeHost() (*code.Host, error) {
 						return nil, err
 					}
 					t, _, _ := recordArg(args, 2)
-					txt, err := s.Get(t + "." + args[1].(string))
+					field, _ := args[1].(string)
+					g := scriptGateFrom(ctx)
+					if !g.owner && host.ScriptCertReadBlocked(t, field) {
+						return nil, fmt.Errorf("%w: lifetime cert is owner-only", host.ErrForbidden)
+					}
+					txt, err := s.Get(t + "." + field)
 					if errors.Is(err, host.ErrNotFound) {
 						return nil, nil
 					}
 					if err != nil {
 						return nil, err
+					}
+					if !g.owner && host.TextIsLifetimeCert(txt) {
+						return nil, fmt.Errorf("%w: lifetime cert is owner-only", host.ErrForbidden)
 					}
 					v, err := box.ParseValue(txt)
 					if err != nil {
@@ -206,6 +228,7 @@ func (s *store) codeHost() (*code.Host, error) {
 						return nil, err
 					}
 					t, _, _ := recordArg(args, 3)
+					field, _ := args[1].(string)
 					raw, err := json.Marshal(args[2])
 					if err != nil {
 						return nil, err
@@ -214,7 +237,11 @@ func (s *store) codeHost() (*code.Host, error) {
 					if err != nil {
 						return nil, err
 					}
-					if err := s.Set(t+"."+args[1].(string), txt, host.SetOpts{}); err != nil {
+					g := scriptGateFrom(ctx)
+					if !g.owner && !g.deploy && host.AccountFlagWriteForbidden(t+"."+field, txt) {
+						return nil, fmt.Errorf("%w: idVerified is deploy/owner only", host.ErrForbidden)
+					}
+					if err := s.Set(t+"."+field, txt, host.SetOpts{}); err != nil {
 						return nil, err
 					}
 					return true, nil
@@ -240,6 +267,10 @@ func codeErr(err error) error {
 	switch {
 	case err == nil:
 		return nil
+	case errors.Is(err, host.ErrForbidden):
+		// Cert and idVerified refusals are already a static forbidden error.
+		// Do not wrap the host-function chain: its text must not reach the client.
+		return host.ErrForbidden
 	case errors.Is(err, sec.ErrDenied), errors.Is(err, code.ErrNotGranted):
 		return fmt.Errorf("%w: %v", host.ErrForbidden, err)
 	case errors.Is(err, code.ErrLimit), errors.Is(err, code.ErrBadArguments), errors.Is(err, code.ErrBadScript),
@@ -318,6 +349,7 @@ func (s *store) CodeRun(ctx context.Context, p host.SecPrincipal, script string,
 	if err != nil {
 		return host.CodeResult{}, err
 	}
+	ctx = context.WithValue(ctx, scriptGateKey{}, scriptGate{owner: p.Owner, deploy: p.AccountsDeploy})
 	res, err := ref.prog.Run(ctx, args, code.RunOptions{Principal: pr, Auth: keyAuthz{s}, Host: h})
 	out := host.CodeResult{Value: res.Value, Steps: res.Steps, HostCalls: res.HostCalls, ElapsedMS: float64(res.Elapsed.Microseconds()) / 1000}
 	for _, c := range res.Calls {

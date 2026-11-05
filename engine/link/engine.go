@@ -199,11 +199,20 @@ func (e *Engine) ResolveLink(l *box.Link) (box.Value, error) {
 	return e.Resolve(tgt)
 }
 
+// Copied is one link target substituted into an expansion.
+// Path is the field path of that link inside the root record
+// (dot-separated entry keys, "" when the record value itself is a link).
+type Copied struct {
+	Path   string
+	Target box.Ref
+}
+
 // Expansion is the result of Expand.
 type Expansion struct {
 	Entry    *box.Entry // copy of the record with link values replaced by their targets
 	Dangling []Dangling // links that could not be followed (left in place)
 	Cycles   []box.Ref  // links that point back into the chain being expanded (left in place)
+	Copied   []Copied   // targets actually substituted (not dangling or cyclic links)
 }
 
 // Expand returns a copy of the record in which every embedded link value is
@@ -227,7 +236,7 @@ func (e *Engine) Expand(a Addr, depth int) (Expansion, error) {
 	var out Expansion
 	x := &expander{e: e, out: &out, visiting: map[Addr]bool{a: true}, maxDepth: depth}
 	res := rec.Clone()
-	res.Value = x.value(a, rec.Value, "", 0)
+	res.Value = x.value(a, rec.Value, "", "", 0)
 	if x.err != nil {
 		return Expansion{}, x.err
 	}
@@ -243,13 +252,13 @@ type expander struct {
 	err      error
 }
 
-func (x *expander) value(owner Addr, v box.Value, path string, depth int) box.Value {
+func (x *expander) value(owner Addr, v box.Value, path, from string, depth int) box.Value {
 	switch v.Kind {
 	case box.KindLink:
 		if v.Link == nil {
 			return v
 		}
-		return x.follow(owner, v, path, depth)
+		return x.follow(owner, v, path, from, depth)
 	case box.KindBox:
 		if v.Box == nil {
 			return v
@@ -257,21 +266,21 @@ func (x *expander) value(owner Addr, v box.Value, path string, depth int) box.Va
 		nb := &box.Box{HasFlag: v.Box.HasFlag, Flag: v.Box.Flag, Meta: v.Box.Meta}
 		for _, c := range v.Box.Entries() {
 			cc := c.Clone()
-			cc.Value = x.value(owner, c.Value, joinPath(path, c.EKey().String()), depth)
+			cc.Value = x.value(owner, c.Value, joinPath(path, c.EKey().String()), joinPath(from, c.EKey().String()), depth)
 			nb.Put(cc)
 		}
 		return box.BoxValue(nb)
 	case box.KindArray:
 		arr := make([]box.Value, len(v.Arr))
 		for i, c := range v.Arr {
-			arr[i] = x.value(owner, c, fmt.Sprintf("%s[%d]", path, i), depth)
+			arr[i] = x.value(owner, c, fmt.Sprintf("%s[%d]", path, i), fmt.Sprintf("%s[%d]", from, i), depth)
 		}
 		return box.Array(arr...)
 	}
 	return v
 }
 
-func (x *expander) follow(owner Addr, v box.Value, path string, depth int) box.Value {
+func (x *expander) follow(owner Addr, v box.Value, path, from string, depth int) box.Value {
 	if x.err != nil {
 		return v
 	}
@@ -304,11 +313,13 @@ func (x *expander) follow(owner Addr, v box.Value, path string, depth int) box.V
 			x.out.Dangling = append(x.out.Dangling, Dangling{owner, via, tgt, ReasonMissingField})
 			return v
 		}
+		x.out.Copied = append(x.out.Copied, Copied{Path: from, Target: tgt})
 		return fv.Clone()
 	}
 	x.visiting[ta] = true
-	nv := x.value(ta, rec.Value, "", depth+1)
+	nv := x.value(ta, rec.Value, "", from, depth+1)
 	delete(x.visiting, ta)
+	x.out.Copied = append(x.out.Copied, Copied{Path: from, Target: tgt})
 	return nv
 }
 

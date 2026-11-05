@@ -425,16 +425,36 @@ func TestTrustedProxyClientIP(t *testing.T) {
 
 	// Sign-in limiter uses the same client IP. Twenty starts from one address
 	// do not lock a second address when the peer is the trusted proxy.
+	// Do not follow the redirect: the bucket refills one token a second, and
+	// chasing the authorize redirect to the console page is slow enough on
+	// some hosts that the 21st start is allowed again.
+	login := func(xff string) (int, string) {
+		t.Helper()
+		req, err := http.NewRequest("GET", trusted.URL+"/v1/auth/login", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("X-Forwarded-For", xff)
+		resp, err := (&http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		}}).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
 	for i := 0; i < 20; i++ {
-		st, b := rawReq(t, "GET", trusted.URL+"/v1/auth/login", "", "", "X-Forwarded-For", "203.0.113.50")
+		st, b := login("203.0.113.50")
 		if st == 429 {
 			t.Fatalf("login %d limited early: %s", i, b)
 		}
 	}
-	if st, b := rawReq(t, "GET", trusted.URL+"/v1/auth/login", "", "", "X-Forwarded-For", "203.0.113.50"); st != 429 || !strings.Contains(b, "rate_limited") {
+	if st, b := login("203.0.113.50"); st != 429 || !strings.Contains(b, "rate_limited") {
 		t.Fatalf("login limit: %d %s", st, b)
 	}
-	if st, b := rawReq(t, "GET", trusted.URL+"/v1/auth/login", "", "", "X-Forwarded-For", "203.0.113.51"); st == 429 {
+	if st, b := login("203.0.113.51"); st == 429 {
 		t.Fatalf("other sign-in IP limited: %d %s", st, b)
 	}
 	_ = f

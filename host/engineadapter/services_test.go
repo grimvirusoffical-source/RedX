@@ -791,6 +791,350 @@ func TestCodeSandboxAllowedBoxesAndPolicy(t *testing.T) {
 	}
 }
 
+// A host-admin key is not an owner. It must not read a lifetime cert through a
+// script, BoxQL, or REST, and it must not set idVerified.
+func TestScriptCannotReadLifetimeCert(t *testing.T) {
+	const secret = "RXSECRET-PRIVATE-ENC-CIPHERTEXT"
+	n := startFull(t, engineadapter.Config{CodeAllowedBoxes: []string{
+		"rxa-lifetime-cert.red-xai.db:Record",
+		"rxa-account.red-xai.db:Record",
+	}}, nil)
+	D := n.url + "/v1/db/default"
+	cert := "rxa-lifetime-cert.red-xai.db:Record[ID=1]"
+	acct := "rxa-account.red-xai.db:Record[ID=1]"
+	stored := `[ {cert_id[]} = "c1", {pubkey[]} = "aa", {private_enc[]} = "` + secret + `" ]`
+	if st, b, _ := req(t, "PUT", n.url+"/v1/path/"+cert, n.key, []byte(stored)); st != 200 {
+		t.Fatalf("store cert: %d %s", st, b)
+	}
+	if st, b, _ := req(t, "PUT", n.url+"/v1/path/"+cert+".private_enc", n.key, []byte(`"`+secret+`"`)); st != 200 {
+		t.Fatalf("store field: %d %s", st, b)
+	}
+	for _, p := range []string{cert, cert + ".private_enc", cert + ".pubkey", cert + ".cert_id"} {
+		st, b, _ := req(t, "GET", n.url+"/v1/path/"+p, n.key, nil)
+		if st != 403 || strings.Contains(string(b), secret) {
+			t.Fatalf("GET %s: %d %s", p, st, b)
+		}
+	}
+	st, b, _ := req(t, "POST", D+"/bx", n.key, []byte(`{Get[]} = "rxa-lifetime-cert.red-xai.db":Record[ID=1]`))
+	if st != 403 || strings.Contains(string(b), secret) {
+		t.Fatalf("boxql: %d %s", st, b)
+	}
+	st, b, _ = req(t, "POST", D+"/bx", n.key, []byte(`{Get[]} = "rxa-lifetime-cert.red-xai.db":Record[ID=1] -> pubkey`))
+	if st != 403 || strings.Contains(string(b), secret) {
+		t.Fatalf("boxql pubkey: %d %s", st, b)
+	}
+	src := `{Script[1]} = [
+    {Name[]}   = "steal",
+    {Params[]} = ;["target"]:,
+    {Uses[]}   = ;["db_get"]:,
+    {Source[]} = "return db_get(target, \"private_enc\");"
+];
+{Script[2]} = [
+    {Name[]}   = "flag",
+    {Params[]} = ;["target"]:,
+    {Uses[]}   = ;["db_set"]:,
+    {Source[]} = "db_set(target, \"idVerified\", true); return 1;"
+];
+{Script[3]} = [
+    {Name[]}   = "rename",
+    {Params[]} = ;["target"]:,
+    {Uses[]}   = ;["db_set"]:,
+    {Source[]} = "db_set(target, \"username\", \"ada\"); return 1;"
+];
+`
+	if st, b, _ := req(t, "PUT", D+"/code/file/certs", n.key, []byte(src)); st != 200 {
+		t.Fatalf("define: %d %s", st, b)
+	}
+	run := func(script, target string) (int, string) {
+		body, _ := json.Marshal(map[string]interface{}{"args": []interface{}{target}})
+		st, b, _ := req(t, "POST", D+"/code/run/"+script, n.key, body, "Content-Type", "application/json")
+		return st, string(b)
+	}
+	if st, raw := run("steal", cert); st != 403 || strings.Contains(raw, secret) {
+		t.Fatalf("script read: %d %s", st, raw)
+	}
+	if st, raw := run("flag", acct); st != 403 || strings.Contains(raw, secret) {
+		t.Fatalf("script idVerified: %d %s", st, raw)
+	}
+	if st, b, _ := req(t, "GET", n.url+"/v1/path/"+acct+".idVerified", n.key, nil); st != 404 {
+		t.Fatalf("idVerified was stored: %d %s", st, b)
+	}
+	if st, raw := run("rename", acct); st != 200 {
+		t.Fatalf("username write: %d %s", st, raw)
+	}
+	if st, b, _ := req(t, "GET", n.url+"/v1/path/"+acct+".username", n.key, nil); st != 200 || !strings.Contains(string(b), "ada") {
+		t.Fatalf("username: %d %s", st, b)
+	}
+	raw, err := os.ReadFile(n.h.Cfg.AuditLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), secret) {
+		t.Fatalf("audit log contains private_enc:\n%s", raw)
+	}
+}
+
+// Engine prefix resolution and @> follows must not return cert fields to a non-owner.
+func TestLifetimeCertShortPrefixAndFollow(t *testing.T) {
+	const secret = "RXSECRET-PRIVATE-ENC-CIPHERTEXT"
+	const pub = "pk-short-prefix-pubkey"
+	n := startFull(t, engineadapter.Config{CodeAllowedBoxes: []string{"*"}}, nil)
+	D := n.url + "/v1/db/default"
+	full := "rxa-lifetime-cert.red-xai.db:Record[ID=1]"
+	short := "rxa-lifetime-cert.red-xai:Record[ID=1]"
+	body := `[ {cert_id[]} = "cert-short", {pubkey[]} = "` + pub + `", {private_enc[]} = "` + secret + `", {owner_emails[]} = ;["owner-emails-short@example.com"]:, {issued[]} = "issued-short", {sig_id_prefix[]} = "sig-short" ]`
+	if st, b, _ := req(t, "PUT", n.url+"/v1/path/"+full, n.key, []byte(body)); st != 200 {
+		t.Fatalf("store: %d %s", st, b)
+	}
+	player := `[ {Name[]} = "ada", {Cert[]} = "players.red-xai.db":Player[ID=1] @> "rxa-lifetime-cert.red-xai.db":Record[ID=1] ]`
+	if st, b, _ := req(t, "PUT", n.url+"/v1/path/players.red-xai.db:Player[ID=1]", n.key, []byte(player)); st != 200 {
+		t.Fatalf("link: %d %s", st, b)
+	}
+	deny := func(what string, st int, b []byte) {
+		t.Helper()
+		if st != 403 || strings.Contains(string(b), secret) || strings.Contains(string(b), pub) || strings.Contains(string(b), "cert-short") || strings.Contains(string(b), "owner-emails-short") {
+			t.Fatalf("%s: %d %s", what, st, b)
+		}
+	}
+	for _, p := range []string{short, short + ".pubkey", short + ".cert_id", short + ".owner_emails", short + ".issued", short + ".sig_id_prefix"} {
+		st, b, _ := req(t, "GET", n.url+"/v1/path/"+p, n.key, nil)
+		deny("GET "+p, st, b)
+	}
+	for _, q := range []string{
+		`{Get[]} = "rxa-lifetime-cert.red-xai":Record[ID=1] -> pubkey`,
+		`{Get[]} = "rxa-lifetime-cert.red-xai":Record[ID=1] -> cert_id`,
+		`{Get[]} = "rxa-lifetime-cert.red-xai":Record[ID=1] -> owner_emails`,
+		`{Get[]} = players:Player[ID=1] -> [Name, Cert.pubkey] @> Cert`,
+		`{Get[]} = players:Player[ID=1] -> [Name, Cert.cert_id] @> Cert`,
+		`{Get[]} = players:Player[ID=1] -> [Name, Cert.owner_emails] @> Cert`,
+		`{Get[]} = players:Player[ID=1] -> Cert @> Cert`,
+	} {
+		st, b, _ := req(t, "POST", D+"/bx", n.key, []byte(q))
+		deny("bx "+q, st, b)
+	}
+	src := `{Script[1]} = [
+    {Name[]} = "readfield",
+    {Params[]} = ;["target", "field"]:,
+    {Uses[]} = ;["db_get"]:,
+    {Source[]} = "return db_get(target, field);"
+];`
+	if st, b, _ := req(t, "PUT", D+"/code/file/steal", n.key, []byte(src)); st != 200 {
+		t.Fatalf("define: %d %s", st, b)
+	}
+	runBody, _ := json.Marshal(map[string]interface{}{"args": []interface{}{short, "pubkey"}})
+	st, b, _ := req(t, "POST", D+"/code/run/readfield", n.key, runBody, "Content-Type", "application/json")
+	deny("script short pubkey", st, b)
+	// A normal field on the linking record is still readable, and the link text is not a cert field.
+	st, b, _ = req(t, "GET", n.url+"/v1/path/players.red-xai.db:Player[ID=1].Name", n.key, nil)
+	if st != 200 || !strings.Contains(string(b), "ada") || strings.Contains(string(b), secret) || strings.Contains(string(b), pub) {
+		t.Fatalf("player name: %d %s", st, b)
+	}
+}
+
+// Empty-file queries, a no-file REST get, and link expand return one cert
+// field without the request naming the cert file. A non-owner still gets 403
+// and none of the field text. A query that does not touch the cert stays open.
+func TestLifetimeCertResolvedFieldReads(t *testing.T) {
+	const secret = "RXSECRET-PRIVATE-ENC-CIPHERTEXT"
+	const pub = "pk-resolved-field-pubkey"
+	const certID = "cert-resolved-id"
+	const mail = "owner-emails-resolved@example.com"
+	n := startFull(t, engineadapter.Config{}, nil)
+	P := n.url + "/v1/path/"
+	D := n.url + "/v1/db/default"
+	full := "rxa-lifetime-cert.red-xai.db:Record[ID=1]"
+	body := `[ {cert_id[]} = "` + certID + `", {pubkey[]} = "` + pub + `", {private_enc[]} = "` + secret + `", {issued[]} = "issued-resolved", {owner_emails[]} = ;["` + mail + `"]:, {sig_id_prefix[]} = "sig-resolved" ]`
+	if st, b, _ := req(t, "PUT", P+full, n.key, []byte(body)); st != 200 {
+		t.Fatalf("store: %d %s", st, b)
+	}
+	player := `[ {Name[]} = "ada", {Cert[]} = "players.red-xai.db":Player[ID=1] @> "rxa-lifetime-cert.red-xai.db":Record[ID=1] ]`
+	if st, b, _ := req(t, "PUT", P+"players.red-xai.db:Player[ID=1]", n.key, []byte(player)); st != 200 {
+		t.Fatalf("player: %d %s", st, b)
+	}
+	steal := `[ {Name[]} = "ada", {Steal[]} = "players.red-xai.db":Player[ID=3] @> "rxa-lifetime-cert.red-xai.db":Record[ID=1].private_enc ]`
+	if st, b, _ := req(t, "PUT", P+"players.red-xai.db:Player[ID=3]", n.key, []byte(steal)); st != 200 {
+		t.Fatalf("steal: %d %s", st, b)
+	}
+	bagPub := `[ {Name[]} = "ada", {Bag[]} = ;["players.red-xai.db":Player[ID=8] @> "rxa-lifetime-cert.red-xai.db":Record[ID=1].pubkey]: ]`
+	if st, b, _ := req(t, "PUT", P+"players.red-xai.db:Player[ID=8]", n.key, []byte(bagPub)); st != 200 {
+		t.Fatalf("bag pubkey: %d %s", st, b)
+	}
+	bagSec := `[ {Name[]} = "ada", {Bag[]} = ;["players.red-xai.db":Player[ID=9] @> "rxa-lifetime-cert.red-xai.db":Record[ID=1].private_enc]: ]`
+	if st, b, _ := req(t, "PUT", P+"players.red-xai.db:Player[ID=9]", n.key, []byte(bagSec)); st != 200 {
+		t.Fatalf("bag secret: %d %s", st, b)
+	}
+	bagNest := `[ {Name[]} = "ada", {Wrap[]} = [ {Bag[]} = ;["players.red-xai.db":Player[ID=10] @> "rxa-lifetime-cert.red-xai.db":Record[ID=1].cert_id]: ] ]`
+	if st, b, _ := req(t, "PUT", P+"players.red-xai.db:Player[ID=10]", n.key, []byte(bagNest)); st != 200 {
+		t.Fatalf("nested bag: %d %s", st, b)
+	}
+	idBag := `[ {Name[]} = "ada", {Bag[ID=0]} = ;["players.red-xai.db":Player[ID=17] @> "rxa-lifetime-cert.red-xai.db":Record[ID=1].pubkey]: ]`
+	if st, b, _ := req(t, "PUT", P+"players.red-xai.db:Player[ID=17]", n.key, []byte(idBag)); st != 200 {
+		t.Fatalf("id bag: %d %s", st, b)
+	}
+	idSec := `[ {Name[]} = "ada", {Bag[ID=0]} = ;["players.red-xai.db":Player[ID=18] @> "rxa-lifetime-cert.red-xai.db":Record[ID=1].private_enc]: ]`
+	if st, b, _ := req(t, "PUT", P+"players.red-xai.db:Player[ID=18]", n.key, []byte(idSec)); st != 200 {
+		t.Fatalf("id secret: %d %s", st, b)
+	}
+	idWrap := `[ {Name[]} = "ada", {Wrap[ID=3]} = [ {Bag[]} = ;["players.red-xai.db":Player[ID=19] @> "rxa-lifetime-cert.red-xai.db":Record[ID=1].cert_id]: ] ]`
+	if st, b, _ := req(t, "PUT", P+"players.red-xai.db:Player[ID=19]", n.key, []byte(idWrap)); st != 200 {
+		t.Fatalf("id wrap: %d %s", st, b)
+	}
+	idSteal := `[ {Name[]} = "ada", {Steal[ID=1]} = "players.red-xai.db":Player[ID=20] @> "rxa-lifetime-cert.red-xai.db":Record[ID=1].private_enc ]`
+	if st, b, _ := req(t, "PUT", P+"players.red-xai.db:Player[ID=20]", n.key, []byte(idSteal)); st != 200 {
+		t.Fatalf("id steal: %d %s", st, b)
+	}
+	idLower := `[ {Name[]} = "ada", {Bag[id=7]} = ;["players.red-xai.db":Player[ID=25] @> "rxa-lifetime-cert.red-xai.db":Record[ID=1].owner_emails]: ]`
+	if st, b, _ := req(t, "PUT", P+"players.red-xai.db:Player[ID=25]", n.key, []byte(idLower)); st != 200 {
+		t.Fatalf("id lower: %d %s", st, b)
+	}
+	negBag := `[ {Name[]} = "ada", {Bag[ID=-1]} = ;["players.red-xai.db":Player[ID=30] @> "rxa-lifetime-cert.red-xai.db":Record[ID=1].pubkey]: ]`
+	if st, b, _ := req(t, "PUT", P+"players.red-xai.db:Player[ID=30]", n.key, []byte(negBag)); st != 200 {
+		t.Fatalf("neg bag: %d %s", st, b)
+	}
+	negSec := `[ {Name[]} = "ada", {Bag[ID=-2]} = ;["players.red-xai.db":Player[ID=31] @> "rxa-lifetime-cert.red-xai.db":Record[ID=1].private_enc]: ]`
+	if st, b, _ := req(t, "PUT", P+"players.red-xai.db:Player[ID=31]", n.key, []byte(negSec)); st != 200 {
+		t.Fatalf("neg secret: %d %s", st, b)
+	}
+	negWrap := `[ {Name[]} = "ada", {Wrap[ID=-3]} = [ {Bag[]} = ;["players.red-xai.db":Player[ID=32] @> "rxa-lifetime-cert.red-xai.db":Record[ID=1].cert_id]: ] ]`
+	if st, b, _ := req(t, "PUT", P+"players.red-xai.db:Player[ID=32]", n.key, []byte(negWrap)); st != 200 {
+		t.Fatalf("neg wrap: %d %s", st, b)
+	}
+	negSteal := `[ {Name[]} = "ada", {Steal[ID=-4]} = "players.red-xai.db":Player[ID=33] @> "rxa-lifetime-cert.red-xai.db":Record[ID=1].private_enc ]`
+	if st, b, _ := req(t, "PUT", P+"players.red-xai.db:Player[ID=33]", n.key, []byte(negSteal)); st != 200 {
+		t.Fatalf("neg steal: %d %s", st, b)
+	}
+	minSteal := `[ {Name[]} = "ada", {Steal[ID=-9223372036854775808]} = "players.red-xai.db":Player[ID=47] @> "rxa-lifetime-cert.red-xai.db":Record[ID=1].private_enc ]`
+	if st, b, _ := req(t, "PUT", P+"players.red-xai.db:Player[ID=47]", n.key, []byte(minSteal)); st != 200 {
+		t.Fatalf("min steal: %d %s", st, b)
+	}
+	sib := `[ {Name[]} = "ada", {Bag[ID=-20]} = ;["players.red-xai.db":Player[ID=50] @> "rxa-lifetime-cert.red-xai.db":Record[ID=1].private_enc]:, {Bag[ID=20]} = ;["safe-note"]: ]`
+	if st, b, _ := req(t, "PUT", P+"players.red-xai.db:Player[ID=50]", n.key, []byte(sib)); st != 200 {
+		t.Fatalf("sibling bag: %d %s", st, b)
+	}
+	clean := func(what string, st int, b []byte) {
+		t.Helper()
+		s := string(b)
+		if strings.Contains(s, secret) || strings.Contains(s, pub) || strings.Contains(s, certID) || strings.Contains(s, mail) || strings.Contains(s, "issued-resolved") || strings.Contains(s, "sig-resolved") {
+			t.Fatalf("%s leaked a cert field: %d %s", what, st, b)
+		}
+	}
+	deny := func(what string, st int, b []byte) {
+		t.Helper()
+		if st != 403 {
+			t.Fatalf("%s: want 403, got %d %s", what, st, b)
+		}
+		clean(what, st, b)
+	}
+	for _, q := range []string{
+		`*.pubkey`, `*.cert_id`, `*.owner_emails`, `*.issued`, `*.sig_id_prefix`, `*.private_enc`, `*.*`,
+		`Record[ID=1].pubkey`, `Record[ID=1].cert_id`, `Record[ID=1].*`, `Record[ID=*].pubkey`, `*[ID=1].pubkey`,
+	} {
+		st, b, _ := req(t, "POST", D+"/query", n.key, []byte(q))
+		deny("query "+q, st, b)
+	}
+	st, b, _ := req(t, "POST", D+"/query", n.key, []byte(`{"q":"*.pubkey"}`), "Content-Type", "application/json")
+	deny("query json pubkey", st, b)
+	st, b, _ = req(t, "POST", D+"/query", n.key, []byte(`{"q":"Record[ID=1].*"}`), "Content-Type", "application/json")
+	deny("query json star", st, b)
+	for _, p := range []string{"pubkey", "cert_id", "owner_emails", "issued", "sig_id_prefix", "private_enc"} {
+		st, b, _ := req(t, "GET", P+"Record[ID=1]."+p, n.key, nil)
+		deny("rest "+p, st, b)
+	}
+	st, b, _ = req(t, "GET", P+"Record[ID=1].pubkey", n.key, nil, "Accept", "text/plain")
+	deny("rest pubkey text", st, b)
+	st, b, _ = req(t, "GET", P+"Record[ID=1]", n.key, nil)
+	deny("rest record", st, b)
+	for _, p := range []string{
+		"players.red-xai.db:Player[ID=1].Cert.pubkey?resolve=1",
+		"players.red-xai.db:Player[ID=1].Cert.cert_id?resolve=1",
+		"players.red-xai.db:Player[ID=1].Cert.owner_emails?resolve=1",
+		"players.red-xai.db:Player[ID=1].Cert.private_enc?resolve=1&depth=4",
+		"players.red-xai.db:Player[ID=3].Steal?resolve=1",
+		"players.red-xai.db:Player[ID=8].Bag?resolve=1&depth=4",
+		"players.red-xai.db:Player[ID=9].Bag?resolve=1",
+		"players.red-xai.db:Player[ID=10].Wrap.Bag?resolve=1&depth=4",
+		"players.red-xai.db:Player[ID=10].Wrap?resolve=1&depth=4",
+		"players.red-xai.db:Player[ID=17].Bag?resolve=1&depth=4",
+		"players.red-xai.db:Player[ID=18].Bag?resolve=1",
+		"players.red-xai.db:Player[ID=19].Wrap.Bag?resolve=1&depth=4",
+		"players.red-xai.db:Player[ID=19].Wrap?resolve=1&depth=4",
+		"players.red-xai.db:Player[ID=20].Steal?resolve=1",
+		"players.red-xai.db:Player[ID=17].Bag[ID=0]?resolve=1",
+		"players.red-xai.db:Player[ID=20].Steal[ID=1]?resolve=1",
+		"players.red-xai.db:Player[ID=25].Bag?resolve=1",
+		"players.red-xai.db:Player[ID=30].Bag?resolve=1&depth=4",
+		"players.red-xai.db:Player[ID=31].Bag?resolve=1",
+		"players.red-xai.db:Player[ID=32].Wrap.Bag?resolve=1&depth=4",
+		"players.red-xai.db:Player[ID=32].Wrap?resolve=1&depth=4",
+		"players.red-xai.db:Player[ID=33].Steal?resolve=1",
+		"players.red-xai.db:Player[ID=30].Bag[ID=-1]?resolve=1",
+		"players.red-xai.db:Player[ID=47].Steal?resolve=1",
+		"players.red-xai.db:Player[ID=50].Bag?resolve=1",
+	} {
+		st, b, _ := req(t, "GET", P+p, n.key, nil)
+		deny("resolve "+p, st, b)
+	}
+	st, b, _ = req(t, "GET", P+"players.red-xai.db:Player[ID=1].Cert.pubkey?resolve=1", n.key, nil, "Accept", "text/plain")
+	deny("resolve pubkey text", st, b)
+	st, b, _ = req(t, "GET", P+"players.red-xai.db:Player[ID=3].Steal?resolve=1", n.key, nil, "Accept", "text/plain")
+	deny("resolve steal text", st, b)
+	st, b, _ = req(t, "GET", P+"players.red-xai.db:Player[ID=8].Bag?resolve=1", n.key, nil, "Accept", "text/plain")
+	deny("resolve array pubkey text", st, b)
+	st, b, _ = req(t, "GET", P+"players.red-xai.db:Player[ID=9].Bag?resolve=1", n.key, nil, "Accept", "text/plain")
+	deny("resolve array secret text", st, b)
+	st, b, _ = req(t, "GET", P+"players.red-xai.db:Player[ID=18].Bag?resolve=1", n.key, nil, "Accept", "text/plain")
+	deny("resolve id array secret text", st, b)
+	st, b, _ = req(t, "GET", P+"players.red-xai.db:Player[ID=20].Steal?resolve=1", n.key, nil, "Accept", "text/plain")
+	deny("resolve id steal text", st, b)
+	st, b, _ = req(t, "GET", P+"players.red-xai.db:Player[ID=31].Bag?resolve=1", n.key, nil, "Accept", "text/plain")
+	deny("resolve neg array secret text", st, b)
+	st, b, _ = req(t, "GET", P+"players.red-xai.db:Player[ID=50].Bag?resolve=1", n.key, nil, "Accept", "text/plain")
+	deny("resolve sibling secret text", st, b)
+	st, b, _ = req(t, "GET", P+"players.red-xai.db:Player[ID=8].Bag[0]?resolve=1", n.key, nil)
+	if st == 200 {
+		t.Fatalf("array index path must not return the field: %d %s", st, b)
+	}
+	clean("array index", st, b)
+	// A field that is not on the cert is still returned, and the link literal is not the field.
+	st, b, _ = req(t, "POST", D+"/query", n.key, []byte(`*.Name`))
+	if st != 200 || !strings.Contains(string(b), "ada") {
+		t.Fatalf("query name: %d %s", st, b)
+	}
+	clean("query name", st, b)
+	st, b, _ = req(t, "GET", P+"players.red-xai.db:Player[ID=1].Name?resolve=1", n.key, nil)
+	if st != 200 || !strings.Contains(string(b), "ada") {
+		t.Fatalf("resolve name: %d %s", st, b)
+	}
+	clean("resolve name", st, b)
+	st, b, _ = req(t, "GET", P+"players.red-xai.db:Player[ID=3].Steal", n.key, nil)
+	clean("link literal", st, b)
+	// A second Record does not make the query safe. REST becomes ambiguous.
+	if st, b, _ := req(t, "PUT", P+"account.red-xai.db:Record[ID=1]", n.key, []byte(`[ {username[]} = "ada" ]`)); st != 200 {
+		t.Fatalf("sibling: %d %s", st, b)
+	}
+	st, b, _ = req(t, "POST", D+"/query", n.key, []byte(`Record[ID=1].pubkey`))
+	deny("query pubkey with sibling", st, b)
+	st, b, _ = req(t, "POST", D+"/query", n.key, []byte(`Record[ID=1].*`))
+	deny("query star with sibling", st, b)
+	st, b, _ = req(t, "GET", P+"Record[ID=1].pubkey", n.key, nil)
+	if st == 200 {
+		t.Fatalf("sibling REST must not return the field: %d %s", st, b)
+	}
+	clean("sibling REST", st, b)
+	// Closed channels stay closed.
+	st, b, _ = req(t, "GET", P+"rxa-lifetime-cert.red-xai:Record[ID=1].pubkey", n.key, nil)
+	deny("short pubkey", st, b)
+	st, b, _ = req(t, "POST", D+"/bx", n.key, []byte(`{Get[]} = players:Player[ID=1] -> Cert.pubkey @> Cert`))
+	deny("follow pubkey", st, b)
+	raw, err := os.ReadFile(n.h.Cfg.AuditLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), secret) || strings.Contains(string(raw), pub) {
+		t.Fatalf("audit log contains a cert field:\n%s", raw)
+	}
+}
+
 // ---- encryption (master key from a key file) ----
 
 func TestMasterKeyFileAndEncryptedPacks(t *testing.T) {

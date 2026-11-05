@@ -301,13 +301,30 @@ func (t *table) expireLazy(segs []box.Seg, e *box.Entry) {
 	t.expireBatch([]*wItem{{segs: segs, e: e}})
 }
 
-func (t *table) query(segs []box.Seg) []box.Value {
+// queryHit is one match. rel is the chain from the top-level box to the
+// matched entry (Record[ID=1].pubkey), so a caller can tell which file and
+// field a value came from. A wildcard query otherwise returns only the leaf.
+type queryHit struct {
+	rel string
+	val box.Value
+}
+
+func chainRel(ch []*box.Entry) string {
+	segs := make([]box.Seg, len(ch))
+	for i, e := range ch {
+		ek := e.EKey()
+		segs[i] = box.Seg{Name: ek.Name, ID: ek.ID, HasID: ek.HasID}
+	}
+	return box.SegsString(segs)
+}
+
+func (t *table) query(segs []box.Seg) []queryHit {
 	now := t.now()
 	follower := t.db.isFollower()
 	t.mu.RLock()
 	skipExpired := func(c *box.Entry) bool { return expired(c, now) } // lazy expiry for nested children too
 	chains := box.MatchChains(t.root, segs, skipExpired)
-	out := make([]box.Value, 0, len(chains))
+	out := make([]queryHit, 0, len(chains))
 	var touches []touchRec
 	for _, ch := range chains {
 		last := ch[len(ch)-1]
@@ -315,7 +332,7 @@ func (t *table) query(segs []box.Seg) []box.Value {
 		if emptiedStructural(last, v) {
 			continue
 		}
-		out = append(out, v)
+		out = append(out, queryHit{rel: chainRel(ch), val: v})
 		if !follower {
 			slide(ch, now, &touches)
 		}

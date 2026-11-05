@@ -40,6 +40,10 @@ func (h *Host) subscribeHandler(w http.ResponseWriter, r *http.Request, db strin
 		writeErr(w, http.StatusForbidden, "forbidden")
 		return
 	}
+	if !pr.IsOwner() && subscribeTargetsCert(path) {
+		h.denyLifetimeCert(w, r, pr, db)
+		return
+	}
 	b, err := h.Reg.Get(db)
 	if err != nil {
 		h.mapErr(w, err)
@@ -87,6 +91,9 @@ func (h *Host) subscribeHandler(w http.ResponseWriter, r *http.Request, db strin
 					continue
 				}
 				ev.Value = v
+			}
+			if !lifetimeCertVisible(pr, ev.Path, ev.Value) {
+				continue
 			}
 			_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := conn.WriteJSON(ev); err != nil {
@@ -151,6 +158,9 @@ func (h *Host) pulseSubscribe(w http.ResponseWriter, r *http.Request, db string)
 		case ev, ok := <-ch:
 			if !ok {
 				return
+			}
+			if !lifetimeCertVisible(pr, ev.Path, ev.Data) || (!pr.IsOwner() && TextIsLifetimeCert(ev.Error)) {
+				continue
 			}
 			_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := conn.WriteJSON(ev); err != nil {

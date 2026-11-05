@@ -350,6 +350,13 @@ func (c *Cluster) installSnapshot(ctx context.Context, leader string) error {
 // handleBackup streams an online snapshot (owner only). It includes the update
 // signing key and the tenant map; a cluster snapshot does not.
 func (h *Host) handleBackup(w http.ResponseWriter, r *http.Request, p *Principal) {
+	// Owner sessions may export the cert (they may read it). Anyone else must
+	// not receive an archive that contains it, including when Accounts is off
+	// and the usual owner-only backup gate is open.
+	if p != nil && !p.IsOwner() && h.holdsLifetimeCert() {
+		h.denyLifetimeCert(w, r, p, "")
+		return
+	}
 	path, off, err := h.buildHostBackup()
 	if err != nil {
 		writeErr(w, 500, "backup failed")
